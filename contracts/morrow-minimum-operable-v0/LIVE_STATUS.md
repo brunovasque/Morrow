@@ -12,10 +12,11 @@
 - `active_phase`: `P2`
 - `active_pr_id`: `P2-PR01`
 - `active_route_node`: `WORKER_PROTOCOL`
+- `active_subaction`: `PUBLISH_AND_REVIEW_P2_PR01_CANDIDATE`
 - `expected_branch_prefix`: `mvo/p2-pr01-`
 - `write_execution_allowed`: `yes, scoped only to P2-PR01 in a dedicated branch`
 - `next_authorized_action`: `START_P2_PR01`
-- `next_authorized_actor`: `Architect`
+- `next_authorized_actor`: `Reviewer`
 
 ## Próxima ação exata
 
