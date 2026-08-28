@@ -12,6 +12,7 @@
 - `active_phase`: `P0`
 - `active_pr_id`: `P0-PR03`
 - `active_route_node`: `CONTROL_RECONCILER`
+- `expected_branch_prefix`: `mvo/p0-pr03-`
 - `write_execution_allowed`: `yes, scoped only to P0-PR03`
 - `next_authorized_action`: `START_P0_PR03_RECONCILER`
 - `next_authorized_actor`: `Executor`
