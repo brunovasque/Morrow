@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { JsonlEventLog } from "../src/event-log.ts";
 import { MorrowKernel } from "../src/kernel.ts";
+import { ProcessRuntimeAdapter } from "../src/runtime-adapter.ts";
 import type { ContextManifest } from "../src/types.ts";
 import { LocalWorkspaceManager } from "../src/workspace-manager.ts";
 
@@ -191,4 +192,39 @@ test("local workspace manager isolates ephemeral workspaces under managed root",
   assert.match(workspace.root, /W1/);
   await manager.destroy(workspace);
   await assert.rejects(access(workspace.root));
+});
+
+test("process runtime adapter passes prompt through stdin without provider coupling", async () => {
+  const adapter = new ProcessRuntimeAdapter();
+  const result = await adapter.invoke({
+    invocationId: "I1",
+    runtimeId: "fake-quota-runtime",
+    accessMode: "quota-session",
+    command: process.execPath,
+    args: ["-e", "process.stdin.setEncoding('utf8'); let d=''; process.stdin.on('data',c=>d+=c); process.stdin.on('end',()=>process.stdout.write('ACK:'+d))"],
+    prompt: "hello-runtime",
+    cwd: process.cwd(),
+    timeoutMs: 2000,
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.timedOut, false);
+  assert.equal(result.stdout, "ACK:hello-runtime");
+  assert.equal(result.accessMode, "quota-session");
+});
+
+test("process runtime adapter enforces timeout mechanically", async () => {
+  const adapter = new ProcessRuntimeAdapter();
+  const result = await adapter.invoke({
+    invocationId: "I2",
+    runtimeId: "fake-runtime",
+    accessMode: "local",
+    command: process.execPath,
+    args: ["-e", "setTimeout(()=>{}, 5000)"],
+    prompt: "",
+    cwd: process.cwd(),
+    timeoutMs: 50,
+  });
+
+  assert.equal(result.timedOut, true);
 });
