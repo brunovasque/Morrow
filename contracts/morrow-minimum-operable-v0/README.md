@@ -38,6 +38,7 @@ Conversa anterior é contexto auxiliar. Ela não substitui estes artefatos.
 - `TRACEABILITY.md` — requisito → cláusula → fase/PR → aceite;
 - `ADDENDA.md` — mudanças de destino aprovadas;
 - `DEBTS.md` — exclusões e achados laterais deferidos.
+- `reviews/` — revisão e contraprovas de cada unidade contratual concluída.
 
 ## Regra de autoridade
 

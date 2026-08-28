@@ -13,7 +13,8 @@
 
 | PR-ID | base SHA | candidate SHA | GitHub PR | checks | review/audit | resultado | data |
 |---|---|---|---|---|---|---|---|
-| `P0-PR01` | `ff0359c` | commit que contém este pacote na `phase-2/runtime-v0` | branch draft; PR não aberta | links locais 0 quebrados; 9 fases; 42 PRs; 27 ACs cobertos; 43 requisitos; `npm test` 25/25; `git diff --check` verde | owner review pendente; passe independente fica em P0-PR02 | `READY_FOR_OWNER_REVIEW` | 2026-08-28 |
+| `P0-PR01` | `ff0359c` | `4bcedb9` | bootstrap na branch de integração | links locais 0 quebrados; 9 fases; 42 PRs; 27 ACs cobertos; 43 requisitos; `npm test` 25/25; `git diff --check` verde | dono revisou e autorizou continuidade | `PROVEN` | 2026-08-28 |
+| `P0-PR02` | `4bcedb9` | commit que contém review/contrato v1 | bootstrap na branch de integração | 29 ACs cobertos; 45 requisitos; links/IDs/dependências consistentes; `reviews/P0-PR02.md` | passes por responsabilidade + adversarial GREEN; owner approval registrada | `PROVEN` | 2026-08-28 |
 
 ## Registro obrigatório por PR futura
 

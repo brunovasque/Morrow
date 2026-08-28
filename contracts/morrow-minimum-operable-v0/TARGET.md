@@ -13,6 +13,7 @@ Cada PR futura registra seu próprio base SHA e candidate SHA em `EVIDENCE.md`. 
 ## Política de acesso
 
 - write mode: `pr-only`
+- bootstrap exception: `P0-PR01` e `P0-PR02` foram integradas diretamente na branch de integração enquanto o próprio plano/gate era criado; a partir de `P0-PR03`, toda mudança de código usa branch/PR dedicada e registra URL/SHAs em `EVIDENCE.md`;
 - allowed paths: arquivos versionados do repositório Morrow necessários ao PR ativo
 - forbidden paths:
   - qualquer diretório `D:\Enova*`;

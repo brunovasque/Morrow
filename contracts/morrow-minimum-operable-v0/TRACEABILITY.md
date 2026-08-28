@@ -47,6 +47,8 @@ Este registro prova que requisitos conversados/canônicos possuem destino, fase/
 | `R-041` | Cercas são mecânicas, mas agentes podem voltar, questionar, reunir, diagnosticar e reauditar sem trocar o destino | CONTRACT_STATE_MACHINE/MEETING_ROOM + owner | AC-02, AC-11, AC-19, AC-26 | P7-PR01/02/03/06 |
 | `R-042` | MVO é local-first, preserva topologia híbrida futura e não finge execução com PC desligado | DEPLOYMENT_TOPOLOGY + owner | AC-13; D-004/D-009 | P2-PR01/02/06, P6-PR05 |
 | `R-043` | Escolhas técnicas relevantes são precedidas por pesquisa/medição atual e ADR para reduzir obsolescência | owner + state-of-art gates | critério técnico de rota sem mudar AC | P3-PR01, P5-PR01 e futuros connectors |
+| `R-044` | Chat, UI, reunião e resposta externa não ganham autoridade por aparência; mutações exigem identidade/autorização/idempotência/anti-replay | Security Review P0-PR02 | AC-12, AC-20, AC-28 | P5-PR04, P6-PR01/03, P7-PR07 |
+| `R-045` | Operação diária não exige Git/PowerShell manual do operador não desenvolvedor | Acceptance P0-PR02 + owner | AC-01, AC-10, AC-15, AC-27, AC-29 | P5, P7-PR06, P8-PR01/02 |
 
 ## Auditoria de completude
 
@@ -60,7 +62,7 @@ Antes de aprovar o contrato v1, P0-PR02 deve:
 
 ## Resultado preliminar
 
-- requisitos conversados/canônicos mapeados: `43`
+- requisitos conversados/canônicos mapeados: `45`
 - requisitos sem AC/PR: `0` no draft atual
 - revisão independente: `PENDING P0-PR02`
 - owner acceptance do contrato: `PENDING`

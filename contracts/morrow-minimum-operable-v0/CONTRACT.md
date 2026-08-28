@@ -3,10 +3,10 @@
 ## Identidade
 
 - `contract_id`: `MORROW-MVO-001`
-- `contract_version`: `0.1-draft`
+- `contract_version`: `1.0`
 - `owner`: Bruno Vasque
 - `created_at`: `2026-08-28`
-- `status`: `DRAFT_OWNER_REVIEW`
+- `status`: `READY_FOR_EXECUTION`
 - `parent_contract_id`: `none`
 - `target_id`: `morrow-core`
 - `execution_branch`: `phase-2/runtime-v0`
@@ -92,6 +92,8 @@ O MVO é considerado operacional somente dentro deste envelope:
 | `AC-25` | Antes de dispatch, o kernel resolve e prova target, role, skills, capabilities, secret policy, routing/access/model/effort, quota e budget; ausência/incompatibilidade bloqueia mecanicamente. |
 | `AC-26` | Regressão/inheritance, achados/débitos, retrospectiva, Supervisor e candidatos de aprendizado funcionam sem promoção automática nem regressão de contrato-pai. |
 | `AC-27` | Pela interface/chat, um operador não desenvolvedor informa um objetivo, recebe perguntas necessárias e um contrato legível com escopo, critérios e exclusões; nenhum write ocorre antes da aprovação explícita desse contrato. |
+| `AC-28` | Toda ação mutável recebida pela interface, chat, reunião ou canal externo possui identidade, autorização, correlação, idempotência e proteção contra replay; comando sem essas provas é recusado. |
+| `AC-29` | Depois da instalação guiada, o uso diário — iniciar/retomar contrato, observar, responder, pausar e cancelar — acontece pela interface do Morrow sem exigir que o operador use Git ou PowerShell manualmente. |
 
 ## 6. Exclusões explícitas
 
@@ -197,12 +199,12 @@ Nenhuma decisão de destino do dono está aberta neste draft. Escolha de framewo
 
 - discovery complete: `yes`
 - diagnostic evidence complete: `yes`
-- multi-role question round complete: `no`
-- blocking questions open: `1` (`owner approval + independent adversarial pass`)
-- execution map reviewed: `no`
+- multi-role question round complete: `yes`
+- blocking questions open: `0`
+- execution map reviewed: `yes`
 - regression baseline identified: `yes`
 - state-of-art scan required: `yes`
-- state-of-art scan complete: `no`
-- ready for execution beyond planning: `no`
+- state-of-art scan complete: `deferred per route to P3-PR01/P5-PR01/P6-PR02`
+- ready for execution beyond planning: `yes, after P0-PR03 installs the mechanical reconciler`
 
-O próximo write de implementação após este pacote permanece bloqueado até `P0-PR02` registrar aprovação do dono, passe independente de completude e `READY_FOR_EXECUTION`.
+O dono aprovou a continuidade em 2026-08-28. O passe multi-role e adversarial de `P0-PR02` está registrado em [`reviews/P0-PR02.md`](reviews/P0-PR02.md). O primeiro write de implementação permanece bloqueado somente até `P0-PR03` instalar e provar o reconciliador mecânico.

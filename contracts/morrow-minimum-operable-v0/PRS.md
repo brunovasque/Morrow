@@ -21,9 +21,9 @@ Os IDs abaixo são unidades contratuais, não números antecipados do GitHub. Ca
 
 | PR-ID | status | dependências | objetivo único | saída/prova de conclusão |
 |---|---|---|---|---|
-| `P0-PR01` | `READY_FOR_OWNER_REVIEW` | baseline `ff0359c` | Criar pacote mestre, traceability, plano de PRs, estado vivo e protocolo entre abas | artefatos completos, links válidos, revisão de consistência e decisão do dono solicitada |
-| `P0-PR02` | `BLOCKED` | P0-PR01 + owner review | Executar rodada independente/adversarial, incorporar correções autorizadas e registrar contrato v1 aprovado | QUESTIONS sem bloqueio, owner approval, CONTRACT_PREFLIGHT `READY_FOR_EXECUTION` |
-| `P0-PR03` | `PENDING` | P0-PR02 | Implementar validador/reconciliador que informa próximo passo a partir do pacote e Git | teste detecta estado divergente/dependência ausente; comando retorna exatamente próxima ação autorizada |
+| `P0-PR01` | `PROVEN` | baseline `ff0359c` | Criar pacote mestre, traceability, plano de PRs, estado vivo e protocolo entre abas | commit `4bcedb9`; links/estrutura/25 testes verdes; dono revisou |
+| `P0-PR02` | `PROVEN` | P0-PR01 + owner review | Executar rodada independente/adversarial, incorporar correções autorizadas e registrar contrato v1 aprovado | QUESTIONS sem bloqueio, owner approval e review em `reviews/P0-PR02.md`; CONTRACT_PREFLIGHT `READY_FOR_EXECUTION` |
+| `P0-PR03` | `READY` | P0-PR02 | Implementar validador/reconciliador que informa próximo passo a partir do pacote e Git | teste detecta estado divergente/dependência ausente; comando retorna exatamente próxima ação autorizada |
 
 ## P1 — Fundação processual já provada
 
@@ -70,7 +70,7 @@ Os IDs abaixo são unidades contratuais, não números antecipados do GitHub. Ca
 | `P5-PR01` | `PENDING` | P4-PR01 | State-of-art/ADR da interface e shell executável mínimo | stack escolhida por evidência, contrato de API e skeleton local iniciado |
 | `P5-PR02` | `PENDING` | P5-PR01, P4-PR04 | Implementar dashboard de contrato e Live Activity Feed | UI mostra estado/eventos reais, filtros e causa de espera |
 | `P5-PR03` | `PENDING` | P5-PR02, P3-PR04 | Implementar panes/tabs de terminal com seleção simultânea de agentes | render ConPTY, input endereçado, resize e identidade visível |
-| `P5-PR04` | `PENDING` | P5-PR02 | Implementar chat separado Operador ↔ Cérebro para objetivo, perguntas, explicações e comandos governados | conversa não escreve em stdin; objetivo e respostas alimentam contrato; decisões/comandos autorizados viram eventos |
+| `P5-PR04` | `PENDING` | P5-PR02 | Implementar chat separado Operador ↔ Cérebro para objetivo, perguntas, explicações e comandos governados | conversa não escreve em stdin; objetivo e respostas alimentam contrato; mutações exigem identidade/autorização e viram eventos |
 | `P5-PR05` | `PENDING` | P5-PR04 | Implementar sala de reunião observável e participação do operador | pergunta, participantes, evidências, decisão e rota persistem/reidratam |
 | `P5-PR06` | `PENDING` | P5-PR03/04/05 | Implementar pause/cancel e controles manuais de access/runtime/model/effort | effective config visível; override auditado; downgrade silencioso impossível |
 
@@ -78,7 +78,7 @@ Os IDs abaixo são unidades contratuais, não números antecipados do GitHub. Ca
 
 | PR-ID | status | dependências | objetivo único | saída/prova de conclusão |
 |---|---|---|---|---|
-| `P6-PR01` | `PENDING` | P5-PR04, P4-PR03 | Implementar Notification Gateway, políticas, dedupe e delivery receipt | eventos elegíveis geram notificação idempotente sem autoridade implícita |
+| `P6-PR01` | `PENDING` | P5-PR04, P4-PR03 | Implementar Notification Gateway, políticas, payload mínimo, dedupe e delivery receipt | eventos elegíveis geram notificação idempotente sem segredo/código bruto nem autoridade implícita |
 | `P6-PR02` | `PENDING` | P6-PR01 | Entregar pelo menos um canal autenticado acessível fora do PC | dispositivo externo recebe alerta de decisão/erro/conclusão e confirma entrega |
 | `P6-PR03` | `PENDING` | P6-PR02 | Fazer resposta externa virar owner decision autenticada e retomar fluxo | roundtrip completo com correlação, expiração e proteção contra replay |
 | `P6-PR04` | `PENDING` | P6-PR01, P2-PR01 | Criar connector Nexus opcional para delegar contrato e/ou transportar alerta | Morrow opera com connector desligado; Nexus não acessa terminal/workspace diretamente |
@@ -101,8 +101,8 @@ Os IDs abaixo são unidades contratuais, não números antecipados do GitHub. Ca
 | PR-ID | status | dependências | objetivo único | saída/prova de conclusão |
 |---|---|---|---|---|
 | `P8-PR01` | `PENDING` | P7-PR07 | Entregar bootstrap/instalação, autostart opcional, atualização, backup e diagnóstico | operador instala/inicia/para/diagnostica sem editar fonte; rollback testado |
-| `P8-PR02` | `PENDING` | P8-PR01 | Executar Acceptance limpa em Windows fora do harness de desenvolvimento | AC-01..AC-23 e AC-25..AC-27 medidos com evidência visual/terminal/eventos/PR |
-| `P8-PR03` | `PENDING` | P8-PR02 | Realizar review/audit finais, retrospectiva, métricas, triagem e CONTRACT_CLOSE | AC-24..AC-27, snapshot final, release/tag MVO e owner acceptance |
+| `P8-PR02` | `PENDING` | P8-PR01 | Executar Acceptance limpa em Windows fora do harness de desenvolvimento | AC-01..AC-23 e AC-25..AC-29 medidos com evidência visual/terminal/eventos/PR |
+| `P8-PR03` | `PENDING` | P8-PR02 | Realizar review/audit finais, retrospectiva, métricas, triagem e CONTRACT_CLOSE | AC-24..AC-29, snapshot final, release/tag MVO e owner acceptance |
 
 ## Critério de “Morrow já opera”
 
