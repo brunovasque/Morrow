@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { ProcessRuntimeAdapter, type RuntimeResult } from "./runtime-adapter.ts";
+import { resolveWindowsNpmCommand } from "./windows-npm-shim.ts";
 
 export type CodexSandbox = "read-only";
 
@@ -48,8 +49,9 @@ export function buildCodexReadOnlyArgs(prompt: string): string[] {
 }
 
 async function capture(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const resolved = await resolveWindowsNpmCommand(command, env);
   return await new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(resolved.command, [...resolved.prefixArgs, ...args], {
       cwd,
       env,
       shell: false,
@@ -90,12 +92,13 @@ export class CodexQuotaSessionAdapter {
     await this.assertAuthenticated(input);
 
     const command = input.command ?? "codex";
-    const args = buildCodexReadOnlyArgs(input.prompt);
+    const resolved = await resolveWindowsNpmCommand(command, env);
+    const args = [...resolved.prefixArgs, ...buildCodexReadOnlyArgs(input.prompt)];
     const result = await this.processAdapter.invoke({
       invocationId: input.invocationId,
       runtimeId: "codex-cli",
       accessMode: "quota-session",
-      command,
+      command: resolved.command,
       args,
       // Prompt travels as an explicit exec argument because stdin transport is not promoted for Codex V0.
       prompt: "",
