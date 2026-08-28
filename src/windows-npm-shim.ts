@@ -7,14 +7,23 @@ export interface ResolvedCommand {
 }
 
 export function parseNodeScriptFromNpmCmdShim(content: string, shimPath: string): string | null {
-  // npm-generated Windows shims normally invoke node with a script under %dp0%.
-  // We intentionally support only this narrow form instead of executing arbitrary .cmd content.
+  // npm-generated Windows shims normally reference a script relative to the shim
+  // using either %~dp0 (cmd-expanded drive/path) or %dp0% variants.
+  // We intentionally extract only a relative .js target and never execute cmd content.
   const normalized = content.replace(/\r\n/g, "\n");
-  const match = normalized.match(/(?:"%~dp0%|%~dp0)([^"\r\n]*?\.js)"?/i);
-  if (!match?.[1]) return null;
+  const patterns = [
+    /(?:"?%~dp0)([^"\r\n]*?\.js)"?/i,
+    /(?:"?%dp0%)([^"\r\n]*?\.js)"?/i,
+  ];
 
-  const relative = match[1].replace(/^[\\/]+/, "");
-  return resolve(dirname(shimPath), relative);
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match?.[1]) continue;
+    const relative = match[1].replace(/^[\\/]+/, "");
+    return resolve(dirname(shimPath), relative);
+  }
+
+  return null;
 }
 
 async function exists(path: string): Promise<boolean> {
