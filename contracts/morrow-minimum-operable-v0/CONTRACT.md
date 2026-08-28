@@ -205,6 +205,6 @@ Nenhuma decisão de destino do dono está aberta neste draft. Escolha de framewo
 - regression baseline identified: `yes`
 - state-of-art scan required: `yes`
 - state-of-art scan complete: `deferred per route to P3-PR01/P5-PR01/P6-PR02`
-- ready for execution beyond planning: `yes, after P0-PR03 installs the mechanical reconciler`
+- ready for execution beyond planning: `yes; P0-PR03 reconciler proven in 2f34f1b`
 
-O dono aprovou a continuidade em 2026-08-28. O passe multi-role e adversarial de `P0-PR02` está registrado em [`reviews/P0-PR02.md`](reviews/P0-PR02.md). O primeiro write de implementação permanece bloqueado somente até `P0-PR03` instalar e provar o reconciliador mecânico.
+O dono aprovou a continuidade em 2026-08-28. O passe multi-role e adversarial de `P0-PR02` está registrado em [`reviews/P0-PR02.md`](reviews/P0-PR02.md). `P0-PR03` instalou e provou o reconciliador mecânico; a próxima escrita autorizada é somente `P2-PR01` em branch dedicada e sob este mesmo contrato.

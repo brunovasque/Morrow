@@ -15,7 +15,7 @@
 |---|---|---|---|---|---|---|---|
 | `P0-PR01` | `ff0359c` | `4bcedb9` | bootstrap na branch de integração | links locais 0 quebrados; 9 fases; 42 PRs; 27 ACs cobertos; 43 requisitos; `npm test` 25/25; `git diff --check` verde | dono revisou e autorizou continuidade | `PROVEN` | 2026-08-28 |
 | `P0-PR02` | `4bcedb9` | commit que contém review/contrato v1 | bootstrap na branch de integração | 29 ACs cobertos; 45 requisitos; links/IDs/dependências consistentes; `reviews/P0-PR02.md` | passes por responsabilidade + adversarial GREEN; owner approval registrada | `PROVEN` | 2026-08-28 |
-| `P0-PR03` | `2f55046` | pending | `mvo/p0-pr03-contract-reconciler` | testes unitários do reconciliador + `npm test` + `npm run contract:reconcile` em árvore limpa | review em andamento | `RUNNING` | 2026-08-28 |
+| `P0-PR03` | `2f55046` | `2f34f1b` | `mvo/p0-pr03-contract-reconciler` | 6 novas contraprovas; `npm test` 31/31; `npm run contract:reconcile` retorna `READY_FOR_EXECUTION`/P0-PR03 em árvore limpa; `git diff --check` verde | review interno GREEN; próximo passo calculado é P2-PR01 | `PROVEN` | 2026-08-28 |
 
 ## Registro obrigatório por PR futura
 

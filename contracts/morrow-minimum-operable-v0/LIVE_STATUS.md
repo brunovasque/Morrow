@@ -10,32 +10,31 @@
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
 - `active_phase`: `P0`
-- `active_pr_id`: `P0-PR03`
-- `active_route_node`: `CONTROL_RECONCILER`
-- `expected_branch_prefix`: `mvo/p0-pr03-`
-- `write_execution_allowed`: `yes, scoped only to P0-PR03`
-- `next_authorized_action`: `START_P0_PR03_RECONCILER`
-- `next_authorized_actor`: `Executor`
+- `active_pr_id`: `P2-PR01`
+- `active_route_node`: `WORKER_PROTOCOL`
+- `write_execution_allowed`: `yes, scoped only to P2-PR01 in a dedicated branch`
+- `next_authorized_action`: `START_P2_PR01`
+- `next_authorized_actor`: `Architect`
 
 ## Próxima ação exata
 
-Iniciar `P0-PR03` em branch dedicada e implementar o validador/reconciliador que lê o pacote contratual + Git, detecta divergência/dependência ausente e retorna exatamente a próxima ação autorizada.
+Iniciar `P2-PR01` em branch dedicada e definir o protocolo versionado entre control plane e Local Worker: identidade, capabilities, heartbeat, dispatch, ack, cancel, recusa e compatibilidade.
 
-Antes de iniciar, o operador troca no seletor deste chat para `GPT-5.6 Terra / high`, conforme política de economia de cota acordada. Nenhuma implementação de P2 está autorizada antes de `P0-PR03: PROVEN`.
+Antes de iniciar, o operador troca no seletor deste chat para `GPT-5.6 Sol / xhigh`, pois esta unidade fixa uma fronteira de arquitetura, processo, identidade e segurança. Nenhuma implementação de `P2-PR02` está autorizada antes de `P2-PR01: PROVEN`.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `B-003` | `CONTROL` | validador mecânico de retomada ainda não existe | executar P0-PR03 antes de P2 |
+| `none` | `none` | nenhum bloqueio de preflight ativo | iniciar somente P2-PR01 |
 
 ## Status por fase
 
 | fase | status | observação |
 |---|---|---|
-| P0 | `RUNNING` | P0-PR01/02 provadas; P0-PR03 pronta |
+| P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
-| P2 | `BLOCKED` | depende de P0 |
+| P2 | `READY` | P2-PR01 é a próxima unidade autorizada |
 | P3 | `BLOCKED` | depende de P2 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |

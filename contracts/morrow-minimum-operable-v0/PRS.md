@@ -23,7 +23,7 @@ Os IDs abaixo são unidades contratuais, não números antecipados do GitHub. Ca
 |---|---|---|---|---|
 | `P0-PR01` | `PROVEN` | baseline `ff0359c` | Criar pacote mestre, traceability, plano de PRs, estado vivo e protocolo entre abas | commit `4bcedb9`; links/estrutura/25 testes verdes; dono revisou |
 | `P0-PR02` | `PROVEN` | P0-PR01 + owner review | Executar rodada independente/adversarial, incorporar correções autorizadas e registrar contrato v1 aprovado | QUESTIONS sem bloqueio, owner approval e review em `reviews/P0-PR02.md`; CONTRACT_PREFLIGHT `READY_FOR_EXECUTION` |
-| `P0-PR03` | `RUNNING` | P0-PR02 | Implementar validador/reconciliador que informa próximo passo a partir do pacote e Git | teste detecta estado divergente/dependência ausente; comando retorna exatamente próxima ação autorizada |
+| `P0-PR03` | `PROVEN` | P0-PR02 | Implementar validador/reconciliador que informa próximo passo a partir do pacote e Git | `contract:reconcile` retorna P0-PR03 em árvore limpa e bloqueia divergências; 31 testes verdes |
 
 ## P1 — Fundação processual já provada
 
@@ -38,7 +38,7 @@ Os IDs abaixo são unidades contratuais, não números antecipados do GitHub. Ca
 
 | PR-ID | status | dependências | objetivo único | saída/prova de conclusão |
 |---|---|---|---|---|
-| `P2-PR01` | `PENDING` | P0-PR03, P1 | Definir protocolo Worker/control plane: identidade, capabilities, heartbeat, dispatch, ack, cancel e versões | schema/ADR + testes de compatibilidade e recusa de mensagem inválida |
+| `P2-PR01` | `READY` | P0-PR03, P1 | Definir protocolo Worker/control plane: identidade, capabilities, heartbeat, dispatch, ack, cancel e versões | schema/ADR + testes de compatibilidade e recusa de mensagem inválida |
 | `P2-PR02` | `PENDING` | P2-PR01 | Implementar serviço Local Worker configurável com managed roots e ciclo start/stop/status | processo reiniciável, diagnóstico local e nenhum target implícito |
 | `P2-PR03` | `PENDING` | P2-PR02 | Implementar registries/resolvers mínimos de Target, Role, Skill e Capability mais Secret Broker boundary | dispatch sem target/role/skill/capability/secret policy válido é recusado e nenhuma credencial entra no contexto indevido |
 | `P2-PR04` | `PENDING` | P2-PR03 | Implementar Routing/Access/Model registry, Quota Guard e Budget Guard mínimos | effective configuration auditável; concorrência/cota/budget bloqueiam sem downgrade/fallback silencioso |
