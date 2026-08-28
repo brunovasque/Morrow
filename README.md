@@ -1,65 +1,32 @@
 # Morrow
 
-Codinome de laboratório para um **kernel autônomo de execução governada de contratos de software**.
-
-O Morrow é um **control plane**: pode construir um repositório novo ou executar um contrato contra qualquer repositório-alvo autorizado sem precisar morar dentro dele.
+Codinome de laboratório para um kernel autônomo de execução de contratos de software.
 
 ## Estado
 
-**Fase 1 — governança, preflight, memória e regressão antes do Runtime V0 executável.**
+**Fase 1 — governança contratual portável.** O núcleo define papéis, memória, gates, routing, targets, conectores e fronteiras do runtime antes da implementação executável do V0.
 
-Ainda não é SaaS/plataforma final. O objetivo é provar que contratos pequenos podem ser executados ponta a ponta com cada vez menos intervenção humana, preservando segurança, escopo e comportamento já aceito.
+## Princípios
 
-## Princípios constitucionais
+1. O contrato define o destino; o mapa define a rota.
+2. O kernel é mecânico nas cercas e flexível na rota: impede atalhos perigosos sem impedir raciocínio, debate, diagnóstico ou retrabalho válido.
+3. Papel não é modelo, sessão, workspace nem target.
+4. Skills fornecem especialização; não governam o kernel.
+5. Evidência supera declaração. Gate verde não substitui critério de contrato.
+6. Anti-regressão é invariante transversal: mudança nova não pode quebrar comportamento aceito que deve sobreviver.
+7. Achado fora do objetivo vira débito; não vira melhoria oportunista silenciosa.
+8. Memória institucional só nasce após validação e promoção, e volta aos contratos futuros por injeção governada.
+9. Quota/session, API e local são modos de acesso; API não é requisito nem fallback silencioso.
+10. O operador mantém override manual de access mode, runtime/modelo e effort.
+11. Morrow pode governar repositórios-alvo externos e connectors sem morar dentro deles.
+12. Novos papéis, skills e connectors podem ser adicionados por contratos de extensão sem reescrever o kernel.
+13. Antes de reinventar capability/infra não trivial, consultar estado da arte e Tech Radar.
+14. Nenhum segredo, dado de cliente ou conhecimento proprietário de produto-alvo entra no core público.
 
-1. **Contrato define o destino; mapa define a rota; memória viva define o estado atual.**
-2. Destino não muda por conveniência técnica. Mudança exige adendo aprovado ou novo contrato.
-3. Papel != modelo != sessão != workspace != target.
-4. Skills especializam papéis; não governam o kernel.
-5. `quota-session`, `api` e `local` são modos de acesso nativos; API nunca é fallback silencioso.
-6. Controle manual de runtime/modelo/effort é primeira classe. Automático só ganha autoridade após dados suficientes.
-7. Rodada multiagente de dúvidas e mapa completo são pré-condições de execução.
-8. Dúvida durante execução pode abrir uma sala de reunião governada com Orchestrator obrigatório.
-9. Achado lateral não vira melhoria oportunista: passa por veto de scope drift e, se fora do contrato, vira débito.
-10. Regressão de comportamento aceito é veto. Check obrigatório precisa ser **executado**, não apenas existir.
-11. Débito posterior herda a anti-regressão do contrato-pai antes de poder fechar.
-12. Reviewer e Auditor são responsabilidades independentes.
-13. Memória institucional não depende de a sessão “lembrar”: contexto aplicável é injetado pelo kernel e provado por manifesto.
-14. Aprendizado nasce de evidência/retrospectiva e só vira regra institucional após promoção governada.
-15. Antes de reinventar infraestrutura/capability não trivial, pesquisar estado da arte e preferir padrão/biblioteca/adapter quando adequado.
-16. Nenhum segredo, dado de cliente ou configuração proprietária de target precisa entrar no core público.
+## Regra operacional central
 
-## Fluxo canônico
+**Cumprir processo não significa seguir uma esteira rígida.** Se surgir evidência nova, o contrato pode voltar a debate, diagnóstico, mapa, execução, prova, review ou audit quantas vezes forem necessárias. O que permanece protegido é destino, escopo autorizado, regressão, permissões, evidência e autoridade.
 
-```text
-objetivo humano
-→ discovery/diagnóstico
-→ rodada de dúvidas
-→ respostas/decisões
-→ mapa de execução
-→ CONTRACT_PREFLIGHT
-→ execução por etapas
-→ prova + anti-regressão
-→ Reviewer
-→ Auditor conforme risco
-→ Acceptance
-→ triagem de débitos
-→ retrospectiva independente + reunião coletiva
-→ Supervisor/aprendizado
-→ CONTRACT_CLOSE
-```
+## Próxima prova
 
-As transições são governadas pela máquina de estados do kernel; um LLM não pode simplesmente pular etapa.
-
-## Primeira prova
-
-O primeiro marco executável será um contrato pequeno de software do começo ao fim e medirá, no mínimo:
-
-- intervenções humanas;
-- preflight misses;
-- regressões;
-- reuniões necessárias;
-- voltas por erro;
-- consumo de cota/custo API separado;
-- qualidade final;
-- aprendizado reaproveitado na rodada seguinte.
+O próximo marco é o Runtime V0: executar um contrato pequeno de ponta a ponta com event log, memória viva, workspace isolado, PRE_DISPATCH determinístico e pelo menos um runtime quota-session real, medindo intervenções humanas e loops necessários.
