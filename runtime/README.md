@@ -44,3 +44,5 @@ Runtime V0 deve provar:
 10. fronteira explícita entre terminais do operador e terminais gerenciados.
 
 A experiência de operação que governa esses itens está em [`OPERATOR_EXPERIENCE.md`](OPERATOR_EXPERIENCE.md). Backend por pipes prova automação, streaming e ciclo de vida; compatibilidade de terminal interativo na interface exige PTY/ConPTY e não pode ser simulada por resumos.
+
+O protocolo versionado entre Control Plane e Local Worker, suas fronteiras de confiança e o limite entre referência de trabalho e execução estão em [`ADR_WORKER_CONTROL_PROTOCOL.md`](ADR_WORKER_CONTROL_PROTOCOL.md).
