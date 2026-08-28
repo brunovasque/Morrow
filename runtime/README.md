@@ -1,26 +1,41 @@
 # Runtime
 
-O runtime do Morrow será provider-neutral, quota-first e orientado a contratos. Esta fase ainda define contratos/interfaces e gates antes do código executável.
+A Fase 0/1 definiu a governança e as fronteiras do runtime. A próxima fase implementará o primeiro trilho executável sem acoplar papel a modelo, target ou topologia.
 
-## Princípios já fixados
+## Princípio de execução
 
-- papel != modelo != sessão != workspace != target;
-- `quota-session`, `api` e `local` são modos nativos;
-- controle manual de runtime/modelo/effort é primeira classe;
-- automação de routing só ganha autoridade após evidência suficiente;
-- Morrow é control plane e pode operar qualquer repositório-alvo autorizado;
-- workspaces/worktrees pertencem à execução, não ao papel permanente;
-- contrato/mapa/memória viva são estado externo à sessão do LLM;
-- gates determinísticos impedem execução quando falta contexto, permissão, regressão ou decisão;
-- execuções filhas de débito herdam a anti-regressão do contrato-pai.
+O runtime deve ser **determinístico nas cercas e flexível na rota**.
 
-## Especificações
+Ele garante mecanicamente:
+- contrato/destino ativo;
+- permissões e capabilities;
+- contexto obrigatório;
+- scope drift veto;
+- anti-regressão;
+- evidência e revalidação quando algo muda;
+- autoridade do dono quando necessária;
+- registro de eventos e memória viva.
 
-- `ADAPTER_CONTRACT.md` — interface de invocação de modelos/runtimes;
-- `ACCESS_MODES.md` — quota/API/local e Quota Guard;
-- `ROUTING_CONTROL.md` — override manual, assisted e automatic;
-- `TARGET_REPOSITORY_MODEL.md` — control plane x target;
-- `KERNEL_SERVICES.md` — serviços determinísticos;
-- `PROTOCOL_STRATEGY.md` — fronteiras MCP/A2A/event envelope.
+Ele NÃO deve impor uma esteira cognitiva rígida. Agentes podem:
+- abrir reunião em qualquer momento relevante;
+- voltar a diagnóstico;
+- repetir experimento;
+- refazer implementação;
+- solicitar nova revisão;
+- auditar novamente;
+- reabrir prova ou mapa;
 
-O Runtime V0 só deve ser implementado depois de os contratos de estado, eventos, checkpoint, workspace e gates essenciais estarem coerentes entre si.
+desde que preservem o destino contratado, respeitem permissões e não quebrem comportamento aceito.
+
+O grafo governado está descrito em `CONTRACT_STATE_MACHINE.md`.
+
+## Próximo marco
+
+Runtime V0 deve provar:
+1. event log persistente;
+2. estado/memória viva reidratável;
+3. PRE_DISPATCH determinístico;
+4. AgentInstance efêmero;
+5. workspace isolado;
+6. retorno/loop livre entre papéis com causa registrada;
+7. um adapter quota-session real sem exigir API.
