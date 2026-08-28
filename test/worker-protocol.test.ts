@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   WORKER_PROTOCOL_ID,
+  WORKER_PROTOCOL_MAX_MESSAGE_BYTES,
   WORKER_PROTOCOL_MESSAGE_TYPES,
   WORKER_PROTOCOL_VERSION,
   negotiateWorkerProtocolVersion,
@@ -176,6 +177,7 @@ test("worker protocol schema and executable constants stay aligned", async () =>
   assert.equal(schema.properties.protocol.const, WORKER_PROTOCOL_ID);
   assert.equal(schema.properties.protocolVersion.const, WORKER_PROTOCOL_VERSION);
   assert.deepEqual(schema.properties.messageType.enum, [...WORKER_PROTOCOL_MESSAGE_TYPES]);
+  assert.equal(WORKER_PROTOCOL_MAX_MESSAGE_BYTES, 262_144);
 });
 
 test("protocol negotiation chooses only the highest exact common version", () => {
@@ -199,6 +201,46 @@ test("accepts an authenticated worker hello with explicit capabilities", () => {
 
   assert.equal(result.ok, true);
   if (result.ok) assert.deepEqual(result.requiredScopes, ["message:worker.hello"]);
+});
+
+test("accepted messages are detached and frozen after validation", () => {
+  const message = workerMessage();
+  const result = validateWorkerProtocolMessage(message, validationContext(message));
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  (message.body as { hostId: string }).hostId = "mutated-host";
+  assert.equal((result.message.body as { hostId: string }).hostId, "windows-host-1");
+  assert.equal(Object.isFrozen(result.message), true);
+  assert.equal(Object.isFrozen(result.message.body), true);
+});
+
+test("rejects every missing required envelope field", () => {
+  const required = [
+    "protocol",
+    "protocolVersion",
+    "messageId",
+    "messageType",
+    "sender",
+    "recipient",
+    "issuedAt",
+    "expiresAt",
+    "sequence",
+    "correlationId",
+    "security",
+    "body",
+  ];
+
+  for (const field of required) {
+    const message = workerMessage() as unknown as Record<string, unknown>;
+    delete message[field];
+    const result = validateWorkerProtocolMessage(message, validationContext(workerMessage()));
+    assert.deepEqual(result, {
+      ok: false,
+      code: "INVALID_ENVELOPE",
+      detail: `missing_field:${field}`,
+    });
+  }
 });
 
 test("accepts a dispatch only when authorization covers contract, step, target and capabilities", () => {
@@ -304,6 +346,9 @@ test("hello advertises its envelope version and cannot claim a future start", ()
 });
 
 test("heartbeat requires a forward lease and bounded unique dispatch ids", () => {
+  const validHeartbeat = workerMessage("worker.heartbeat");
+  assert.equal(validateWorkerProtocolMessage(validHeartbeat, validationContext(validHeartbeat)).ok, true);
+
   const heartbeat = workerMessage("worker.heartbeat");
   const body = heartbeat.body as { observedAt: string; leaseExpiresAt: string };
   body.leaseExpiresAt = body.observedAt;

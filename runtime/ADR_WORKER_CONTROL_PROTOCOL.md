@@ -16,6 +16,8 @@ P2-PR01 fixa somente a linguagem e as recusas dessa fronteira. Serviço persiste
 
 O V0 usa envelopes JSON estritos e versionados. Por padrão, o Worker inicia uma conexão de saída autenticada ao Control Plane; não é necessário abrir porta de entrada na máquina do operador. O transporte poderá ser local ou remoto, mas só entrega uma mensagem ao decoder depois de verificar a prova e produzir uma identidade autenticada.
 
+O transporte limita cada mensagem UTF-8 a `262144` bytes antes do parse e recusa nomes de membro JSON duplicados. Whitespace excessivo, JSON parcial/concatenado e estruturas acima do limite não chegam ao decoder. Após validação, o decoder devolve uma cópia profundamente congelada para impedir alteração entre o gate e o consumo.
+
 Cada envelope contém:
 
 - protocolo e versão exatos;
@@ -93,6 +95,7 @@ Versão de protocolo e versão do serviço/agent são dimensões separadas. Capa
 ## Segurança e privacidade
 
 - mensagens expiram em no máximo cinco minutos por padrão;
+- mensagens maiores que 256 KiB ou com nomes JSON duplicados são recusadas antes do decoder;
 - tolerância de relógio futuro é no máximo 30 segundos por padrão;
 - campos extras e corpos que não correspondem ao tipo são recusados;
 - direção Control Plane/Worker é fixa por tipo;

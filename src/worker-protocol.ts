@@ -1,5 +1,6 @@
 export const WORKER_PROTOCOL_ID = "morrow.worker-control" as const;
 export const WORKER_PROTOCOL_VERSION = "1.0" as const;
+export const WORKER_PROTOCOL_MAX_MESSAGE_BYTES = 262_144 as const;
 export const WORKER_PROTOCOL_MESSAGE_TYPES = [
   "worker.hello",
   "worker.heartbeat",
@@ -321,7 +322,7 @@ export function validateWorkerProtocolMessage(
 
   return {
     ok: true,
-    message: input as unknown as WorkerProtocolMessage,
+    message: deepFreeze(structuredClone(input)) as unknown as WorkerProtocolMessage,
     requiredScopes,
   };
 }
@@ -619,4 +620,10 @@ function compareProtocolVersions(left: string, right: string): number {
 
 function rejection(code: WorkerProtocolRejectionCode, detail: string): WorkerProtocolValidationResult {
   return { ok: false, code, detail };
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
 }
