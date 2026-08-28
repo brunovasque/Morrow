@@ -1,152 +1,189 @@
-# Máquina de estados do contrato
+# Grafo governado de execução do contrato
 
-O fluxo do contrato é governado pelo kernel. Agentes produzem julgamento e artefatos; **não escolhem pular estados**.
+O kernel governa **invariantes, permissões e evidências**, não uma sequência rígida de fases. Agentes devem ter liberdade para voltar, questionar, medir novamente, refazer, revisar e auditar quantas vezes forem necessárias para cumprir o objetivo sem regressão.
 
-## Estados canônicos
+## Princípio
 
-```text
-DRAFT
-  ↓
-DISCOVERY
-  ↓
-DIAGNOSTIC_BASELINE          (quando aplicável)
-  ↓
-QUESTION_ROUND_1
-  ↓
-QUESTION_RESOLUTION
-  ↓
-QUESTION_ROUND_2
-  ↓
-EXECUTION_MAP_READY
-  ↓
-CONTRACT_PREFLIGHT
-  ↓
-READY_FOR_EXECUTION
-  ↓
-EXECUTING_STEP
-  ↓
-STEP_PROOF
-  ↓
-REVIEW
-  ↓
-AUDIT                        (quando exigido)
-  ↓
-STEP_ACCEPTED
-  ↘ próximo step → EXECUTING_STEP
-  ↓ último step
-FINAL_REGRESSION
-  ↓
-ACCEPTANCE
-  ↓
-DEBT_TRIAGE
-  ↓
-RETROSPECTIVE_INDEPENDENT
-  ↓
-RETROSPECTIVE_MEETING
-  ↓
-LEARNING_SUPERVISION
-  ↓
-CONTRACT_CLOSE
-  ↓
-CLOSED
-```
+**Mecânico nas cercas; flexível no raciocínio e na rota.**
 
-## Estados de interrupção
+O contrato define o destino. O mapa define uma rota inicial e viva. O grafo de execução permite loops e retornos quando houver causa registrada.
 
-Qualquer etapa pode ir para:
+O kernel nunca deve bloquear uma ação apenas porque "essa fase já passou" quando a ação é necessária para esclarecer, provar ou preservar o contrato.
 
-- `BLOCKED_QUESTION`
-- `BLOCKED_DIAGNOSTIC`
-- `BLOCKED_OWNER_DECISION`
-- `BLOCKED_SCOPE_CONFLICT`
-- `BLOCKED_REGRESSION`
-- `BLOCKED_CAPABILITY`
-- `BLOCKED_QUOTA`
-- `BLOCKED_ENVIRONMENT`
+## Marcos obrigatórios
 
-O motivo e a condição de retomada são persistidos.
+Há marcos que precisam existir antes de determinados poderes/resultados, mas eles não formam uma esteira irreversível:
 
-## Sala de reunião
+- contrato identificável e destino explícito;
+- dúvidas bloqueantes resolvidas antes do primeiro write;
+- mapa suficiente para iniciar com segurança;
+- PRE_DISPATCH verde antes de cada AgentInstance;
+- prova e anti-regressão antes de aceitar mudança;
+- revisão/auditoria/acceptance quando exigidas pelo risco/contrato;
+- triagem de débitos e aprendizado antes do fechamento.
 
-Uma reunião é um subfluxo governado:
+Depois do primeiro write, qualquer desses instrumentos pode ser reaberto quando surgir evidência nova.
+
+## Grafo conceitual
 
 ```text
-EXECUTING_STEP
-  ↓ dúvida
-MEETING_OPEN
-  ↓
-CLARIFIED | DIAGNOSTIC_REQUIRED | OWNER_DECISION_REQUIRED | DEBT_RECORDED | CONTRACT_CONFLICT
+                 ┌───────────────┐
+                 │    DEBATE     │◄──────────────┐
+                 └──────┬────────┘               │
+                        │                        │
+          ┌─────────────▼─────────────┐          │
+          │ DIAGNÓSTICO / MEDIÇÃO     │◄─────┐   │
+          └─────────────┬─────────────┘      │   │
+                        │                    │   │
+                 ┌──────▼──────┐             │   │
+                 │ MAPA / ROTA │◄────────┐   │   │
+                 └──────┬──────┘         │   │   │
+                        │                │   │   │
+                 ┌──────▼──────┐         │   │   │
+                 │  EXECUÇÃO   │─────────┘───┘───┘
+                 └──────┬──────┘
+                        │
+             ┌──────────▼──────────┐
+             │ PROVA / REGRESSÃO   │
+             └──────┬───────┬──────┘
+                    │       │ falha/dúvida
+                    │       └──────────────► diagnóstico/debate/mapa/execução
+                    │
+              ┌─────▼─────┐
+              │  REVIEW   │──── achado ────► execução/diagnóstico/debate
+              └─────┬─────┘
+                    │
+              ┌─────▼─────┐
+              │   AUDIT   │──── achado ────► prova/execução/diagnóstico/debate
+              └─────┬─────┘
+                    │
+            ┌───────▼────────┐
+            │   ACCEPTANCE   │──── falha ───► rota adequada
+            └───────┬────────┘
+                    │
+             objetivo comprovado
+                    │
+             fechamento governado
 ```
 
-`CLARIFIED` só retorna à execução depois de a decisão aparecer no mapa/memória viva. Reunião não altera destino por consenso.
+Nenhuma seta de retorno é erro por si só. O erro é retornar sem causa/evidência ou alterar destino silenciosamente.
+
+## Conversas e reuniões em qualquer momento
+
+`MEETING_OPEN` é um subfluxo disponível em **qualquer estado ativo** do contrato quando houver dúvida, contradição ou conflito relevante.
+
+Qualquer papel pode solicitar reunião. O Orchestrator participa obrigatoriamente e mantém o destino visível.
+
+Saídas possíveis continuam sendo:
+
+- `CLARIFIED`;
+- `DIAGNOSTIC_REQUIRED`;
+- `OWNER_DECISION_REQUIRED`;
+- `DEBT_RECORDED`;
+- `CONTRACT_CONFLICT`.
+
+A reunião pode mandar o fluxo de volta para diagnóstico, mapa, execução, prova, revisão ou auditoria conforme a decisão registrada.
+
+## Reabertura é permitida
+
+Exemplos legítimos:
+
+- Executor recebe diagnóstico ambíguo → reunião → novo diagnóstico → Executor retoma;
+- Reviewer encontra comportamento não medido → Diagnostician mede → mapa ajusta rota → Executor corrige → Reviewer revisa novamente;
+- Auditor quebra uma prova → Test Designer/Executor refazem instrumento/implementação → Auditor roda novamente;
+- Acceptance detecta que tecnicamente está correto, mas não entrega o objetivo → volta à rota adequada sem trocar o destino;
+- regressão aparece no final → volta para diagnóstico/execução e toda evidência afetada é invalidada/reexecutada.
+
+Não há limite arquitetural de "uma revisão" ou "uma auditoria". Pode haver policy de custo/tentativas para detectar loop improdutivo, mas não para impedir investigação válida.
+
+## Invalidação de evidência
+
+Quando uma mudança posterior pode afetar evidência já verde, o kernel marca essa evidência como `STALE`/`REVALIDATION_REQUIRED` em vez de fingir que continua válida.
+
+Exemplos:
+
+- código mudou após Review → Review anterior pode precisar ser repetido;
+- superfície coberta pela regressão mudou → checks afetados precisam rodar novamente;
+- adendo alterou critério → provas relacionadas são revalidadas;
+- correção após Audit → Audit precisa reconsiderar a nova cabeça.
+
+O grafo é livre para voltar; **o verde antigo não é eterno**.
 
 ## Escrita protegida
 
-O primeiro write só é permitido em `READY_FOR_EXECUTION`/`EXECUTING_STEP` e após PRE_DISPATCH verde.
+Antes do primeiro write do contrato, CONTRACT_PREFLIGHT precisa estabelecer segurança mínima.
 
-Nenhum adapter/modelo recebe capacidade de escrita em estados anteriores.
+Depois disso, novos writes podem acontecer em diferentes voltas do grafo desde que:
 
-## Fechamento de etapa
-
-`EXECUTING_STEP` não vai direto a `STEP_ACCEPTED`.
-
-Precisa passar por:
-
-1. prova do objetivo;
-2. REGRESSION_VETO;
-3. Reviewer quando exigido;
-4. Auditor quando exigido;
-5. atualização da memória viva.
-
-O kernel verifica presença/status dos artefatos. Relato do Executor não muda o estado sozinho.
+1. objetivo ativo esteja ligado ao contrato/mapa;
+2. PRE_DISPATCH esteja verde;
+3. role/capabilities estejam autorizadas;
+4. não exista decisão bloqueante aberta;
+5. SCOPE_DRIFT_VETO não classifique a ação como mudança de destino não autorizada.
 
 ## Desvio de escopo
 
 Achado novo passa por SCOPE_DRIFT_VETO:
 
-- `IN_SCOPE_ROUTE` / `REQUIRED_BLOCKER` → mapa pode ser atualizado;
-- `OUT_OF_SCOPE_DEBT` → registra débito e retorna ao objetivo;
-- `DESTINATION_CHANGE` → bloqueia por adendo/novo contrato;
-- `UNMEASURED` → diagnóstico/medição.
+- `IN_SCOPE_ROUTE` / `REQUIRED_BLOCKER` → rota pode ser enriquecida e execução seguir;
+- `OUT_OF_SCOPE_DEBT` → registra débito e volta ao objetivo;
+- `DESTINATION_CHANGE` → exige adendo/novo contrato;
+- `UNMEASURED` → pode abrir diagnóstico, debate ou experimento.
 
-## Mudança de contrato
+A flexibilidade serve para encontrar a melhor rota; não para trocar o pedido.
 
-Adendo aprovado produz transição controlada para revalidação:
+## Anti-regressão como invariante transversal
 
-```text
-BLOCKED_SCOPE_CONFLICT
-  ↓ owner approves addendum
-ADDENDUM_APPLIED
-  ↓
-QUESTION_REVALIDATION
-  ↓
-MAP_REVALIDATION
-  ↓
-CONTRACT_PREFLIGHT
-```
+Anti-regressão não é uma "fase final". Ela acompanha toda mudança relevante.
 
-Não se volta silenciosamente à execução.
+Uma alteração só pode ser aceita quando:
+
+- cumpre o objetivo novo;
+- preserva comportamento aceito que deve sobreviver;
+- executa as cercas/checks aplicáveis;
+- registra superfícies ainda não medidas.
+
+Se uma volta posterior alterar uma superfície previamente aceita, a regressão afetada volta a ser exigível.
 
 ## Execução filha de débito
 
-Débito deferido aprovado nasce como `CHILD_DRAFT`, ligado a `parent_contract_id` e `origin_debt_id`.
+Débito deferido aprovado nasce ligado a `parent_contract_id` e `origin_debt_id`.
 
-Ele percorre o mesmo trilho, podendo simplificar etapas somente quando o gate declarar `not-applicable` com regra explícita.
+Ele pode usar um grafo menor ou diferente, mas herda:
 
-Antes do write, recebe `regression_inheritance_manifest`.
+- destino/critério já entregue que não pode regredir;
+- regression inheritance manifest;
+- decisões relevantes do contrato-pai;
+- evidências que precisam permanecer verdadeiras.
 
-Antes de `CHILD_CLOSED`, passa por DEBT_CLOSE_REGRESSION.
+Antes de fechar, passa por DEBT_CLOSE_REGRESSION.
 
-## Quem controla transições
+## Quem governa o quê
 
-- agentes **propõem** resultado semântico;
-- Orchestrator valida a interpretação/rota;
-- gates verificam pré-condições;
-- **State Store/Policy Engine executam a transição**;
-- Event Log registra `from`, `to`, causa, ator, evidência e hash do estado.
+- agentes raciocinam, debatem, medem, propõem e executam dentro das capacidades;
+- Orchestrator mantém coerência entre objetivo, rota e achados;
+- gates protegem invariantes e autoridade;
+- State Store registra estado vivo e bloqueios;
+- Event Log registra transições/retornos e suas causas;
+- Policy Engine impede somente o que viola regra objetiva — não microgerencia a estratégia cognitiva.
 
-Nenhum prompt possui autoridade para alterar estado diretamente.
+## Sinal de rigidez excessiva
+
+Uma regra do kernel deve ser questionada se ela impedir um agente de:
+
+- pedir esclarecimento;
+- chamar reunião;
+- voltar a diagnóstico;
+- repetir experimento;
+- refazer implementação;
+- pedir nova revisão;
+- auditar novamente;
+- buscar evidência adicional;
+
+quando isso preserva o mesmo destino e respeita escopo, permissões e anti-regressão.
 
 ## Regra central
 
-**Cumprir a etapa não depende de o LLM lembrar que ela existe. A etapa existe no kernel, e sem seu gate verde o próximo estado é inalcançável.**
+**O kernel impede atalhos perigosos; não impede inteligência.**
+
+Morrow deve ser determinístico sobre o que é inaceitável e adaptativo sobre como chegar ao resultado.
