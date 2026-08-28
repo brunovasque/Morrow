@@ -13,7 +13,7 @@ A razão é operacional: runtimes autenticados por assinatura/cota, worktrees lo
 ### Control plane
 
 Pode rodar local ou em nuvem:
-- contratos e state machine;
+- contratos e grafo governado;
 - event log;
 - policy/gate engine;
 - scheduler;
@@ -21,6 +21,8 @@ Pode rodar local ou em nuvem:
 - routing;
 - UI/CLI;
 - registry de targets/connectors.
+
+O control plane governa invariantes e recursos; não obriga uma ordem cognitiva rígida. O Orchestrator pode reabrir diagnóstico, debate, execução, review ou audit conforme evidência e objetivo.
 
 ### Worker
 
@@ -63,4 +65,4 @@ Se um worker desaparecer, o contrato fica bloqueado/reagendável e pode ser reid
 
 ## Evolução
 
-O Runtime V0 deve provar primeiro o caminho local. A fronteira worker/control-plane deve, porém, nascer explícita para permitir mover componentes para nuvem sem reescrever os papéis, contratos ou memória.
+O Runtime V0 deve provar primeiro o caminho local. A fronteira worker/control-plane deve, porém, nascer explícita para permitir mover componentes para nuvem sem reescrever papéis, contratos, memória ou o grafo adaptativo de execução.
