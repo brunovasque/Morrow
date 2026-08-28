@@ -8,11 +8,35 @@ export interface WorkspaceDescriptor {
   roleId: string;
 }
 
+function assertSafeSegment(value: string, label: "contract_id" | "workspace_id"): void {
+  if (
+    value.length === 0 ||
+    value === "." ||
+    value === ".." ||
+    value.includes("/") ||
+    value.includes("\\") ||
+    value.includes("\0")
+  ) {
+    throw new Error(`invalid_${label}`);
+  }
+}
+
+function sameResolvedPath(left: string, right: string): boolean {
+  const resolvedLeft = resolve(left);
+  const resolvedRight = resolve(right);
+
+  if (process.platform === "win32") {
+    return resolvedLeft.toLowerCase() === resolvedRight.toLowerCase();
+  }
+
+  return resolvedLeft === resolvedRight;
+}
+
 export class LocalWorkspaceManager {
   private readonly root: string;
 
   constructor(root: string) {
-    this.root = root;
+    this.root = resolve(root);
   }
 
   async create(params: {
@@ -20,22 +44,29 @@ export class LocalWorkspaceManager {
     contractId: string;
     roleId: string;
   }): Promise<WorkspaceDescriptor> {
-    const contractRoot = resolve(this.root, params.contractId);
+    assertSafeSegment(params.contractId, "contract_id");
+    assertSafeSegment(params.workspaceId, "workspace_id");
+
+    const contractRoot = join(this.root, params.contractId);
     await mkdir(contractRoot, { recursive: true });
-    const root = resolve(contractRoot, params.workspaceId);
+    const root = join(contractRoot, params.workspaceId);
     await mkdir(root, { recursive: false });
     return { ...params, root };
   }
 
   async destroy(workspace: WorkspaceDescriptor): Promise<void> {
-    const expectedPrefix = resolve(this.root) + "/";
-    if (!workspace.root.startsWith(expectedPrefix)) {
+    const expectedRoot = this.pathFor(workspace.contractId, workspace.workspaceId);
+
+    if (!sameResolvedPath(workspace.root, expectedRoot)) {
       throw new Error("workspace_outside_managed_root");
     }
-    await rm(workspace.root, { recursive: true, force: true });
+
+    await rm(expectedRoot, { recursive: true, force: true });
   }
 
   pathFor(contractId: string, workspaceId: string): string {
-    return join(resolve(this.root), contractId, workspaceId);
+    assertSafeSegment(contractId, "contract_id");
+    assertSafeSegment(workspaceId, "workspace_id");
+    return join(this.root, contractId, workspaceId);
   }
 }
