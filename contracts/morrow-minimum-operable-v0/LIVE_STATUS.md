@@ -9,9 +9,10 @@
 - `target_id`: `morrow-core`
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
-- `active_phase`: `P0`
+- `active_phase`: `P2`
 - `active_pr_id`: `P2-PR01`
 - `active_route_node`: `WORKER_PROTOCOL`
+- `expected_branch_prefix`: `mvo/p2-pr01-`
 - `write_execution_allowed`: `yes, scoped only to P2-PR01 in a dedicated branch`
 - `next_authorized_action`: `START_P2_PR01`
 - `next_authorized_actor`: `Architect`
@@ -34,7 +35,7 @@ Antes de iniciar, o operador troca no seletor deste chat para `GPT-5.6 Sol / xhi
 |---|---|---|
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
-| P2 | `READY` | P2-PR01 é a próxima unidade autorizada |
+| P2 | `RUNNING` | P2-PR01 em branch dedicada sobre `37f28da` |
 | P3 | `BLOCKED` | depende de P2 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |

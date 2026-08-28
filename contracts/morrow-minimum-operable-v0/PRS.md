@@ -38,7 +38,7 @@ Os IDs abaixo são unidades contratuais, não números antecipados do GitHub. Ca
 
 | PR-ID | status | dependências | objetivo único | saída/prova de conclusão |
 |---|---|---|---|---|
-| `P2-PR01` | `READY` | P0-PR03, P1 | Definir protocolo Worker/control plane: identidade, capabilities, heartbeat, dispatch, ack, cancel e versões | schema/ADR + testes de compatibilidade e recusa de mensagem inválida |
+| `P2-PR01` | `RUNNING` | P0-PR03, P1 | Definir protocolo Worker/control plane: identidade, capabilities, heartbeat, dispatch, ack, cancel e versões | schema/ADR + testes de compatibilidade e recusa de mensagem inválida |
 | `P2-PR02` | `PENDING` | P2-PR01 | Implementar serviço Local Worker configurável com managed roots e ciclo start/stop/status | processo reiniciável, diagnóstico local e nenhum target implícito |
 | `P2-PR03` | `PENDING` | P2-PR02 | Implementar registries/resolvers mínimos de Target, Role, Skill e Capability mais Secret Broker boundary | dispatch sem target/role/skill/capability/secret policy válido é recusado e nenhuma credencial entra no contexto indevido |
 | `P2-PR04` | `PENDING` | P2-PR03 | Implementar Routing/Access/Model registry, Quota Guard e Budget Guard mínimos | effective configuration auditável; concorrência/cota/budget bloqueiam sem downgrade/fallback silencioso |
