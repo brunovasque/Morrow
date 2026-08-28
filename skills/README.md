@@ -10,7 +10,7 @@ Exemplos futuros:
 - `engineering/frontend`
 - `engineering/backend`
 - `engineering/security`
-- `domains/mcmv`
+- `domains/regulated-program`
 
 Contrato mínimo de uma skill:
 1. domínio e objetivo;
