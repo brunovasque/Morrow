@@ -21,6 +21,7 @@ function contractPackage(overrides: Partial<ContractPackage> = {}): ContractPack
   return {
     contractId: "MORROW-MVO-001",
     contractState: "READY_FOR_EXECUTION",
+    contractAcceptanceIds: ["AC-01", "AC-02"],
     activePrId: "P0-PR03",
     nextAuthorizedAction: "START_P0_PR03_RECONCILER",
     expectedBranchPrefix: "mvo/p0-pr03-",
@@ -33,6 +34,12 @@ function contractPackage(overrides: Partial<ContractPackage> = {}): ContractPack
       { id: "P2-PR01", status: "PENDING", dependencies: ["P0-PR03", "P1"] },
     ],
     evidencePrIds: ["P0-PR01", "P0-PR02", "P1-PR01"],
+    mapPhaseIds: ["P0", "P1", "P2"],
+    traceabilityAcceptanceIds: ["AC-01", "AC-02"],
+    traceabilityState: "COMPLETE",
+    independentReviewState: "COMPLETE",
+    ownerAcceptanceState: "APPROVED",
+    blockingQuestionCount: 0,
     ...overrides,
   };
 }
@@ -92,6 +99,27 @@ test("reconciler blocks duplicate PR identifiers in the package", () => {
   assert.ok(result.reasons.includes("duplicate_pr_id"));
 });
 
+test("reconciler blocks stale contract control documents", () => {
+  const result = reconcileContractPackage(
+    contractPackage({
+      mapPhaseIds: ["P0", "P1"],
+      traceabilityAcceptanceIds: ["AC-01", "AC-99"],
+      independentReviewState: "PENDING",
+      ownerAcceptanceState: "PENDING",
+      blockingQuestionCount: 1,
+    }),
+    cleanGit,
+  );
+
+  assert.equal(result.allowed, false);
+  assert.ok(result.reasons.includes("pr_phase_missing_from_map:P2"));
+  assert.ok(result.reasons.includes("acceptance_missing_from_traceability:AC-02"));
+  assert.ok(result.reasons.includes("traceability_acceptance_unknown:AC-99"));
+  assert.ok(result.reasons.includes("independent_review_not_complete:PENDING"));
+  assert.ok(result.reasons.includes("owner_acceptance_not_approved:PENDING"));
+  assert.ok(result.reasons.includes("blocking_questions_open:1"));
+});
+
 test("reconciler advances to P2 only after all P1 baseline units and P0 are proven", () => {
   const result = reconcileContractPackage(
     contractPackage({
@@ -133,6 +161,13 @@ test("package reader refuses missing status fields and reads a valid package", a
       "| `P0-PR03` | `READY` | P0-PR01 | objective | proof |",
     ].join("\n"), "utf8"),
     writeFile(join(packageRoot, "EVIDENCE.md"), "| `P0-PR01` | proof |\n", "utf8"),
+    writeFile(join(packageRoot, "MAP.md"), "| `P0` | phase |\n", "utf8"),
+    writeFile(join(packageRoot, "TRACEABILITY.md"), [
+      "- `traceability_state`: `COMPLETE`",
+      "- `independent_review_state`: `COMPLETE`",
+      "- `owner_acceptance_state`: `APPROVED`",
+    ].join("\n"), "utf8"),
+    writeFile(join(packageRoot, "QUESTIONS.md"), "- `blocking_question_count`: `0`\n", "utf8"),
   ]);
 
   await assert.rejects(() => readContractPackage(root), /contract_package_missing:contract_state/);

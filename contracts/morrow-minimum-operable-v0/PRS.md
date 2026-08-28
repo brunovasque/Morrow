@@ -23,7 +23,7 @@ Os IDs abaixo são unidades contratuais, não números antecipados do GitHub. Ca
 |---|---|---|---|---|
 | `P0-PR01` | `PROVEN` | baseline `ff0359c` | Criar pacote mestre, traceability, plano de PRs, estado vivo e protocolo entre abas | commit `4bcedb9`; links/estrutura/25 testes verdes; dono revisou |
 | `P0-PR02` | `PROVEN` | P0-PR01 + owner review | Executar rodada independente/adversarial, incorporar correções autorizadas e registrar contrato v1 aprovado | QUESTIONS sem bloqueio, owner approval e review em `reviews/P0-PR02.md`; CONTRACT_PREFLIGHT `READY_FOR_EXECUTION` |
-| `P0-PR03` | `PROVEN` | P0-PR02 | Implementar validador/reconciliador que informa próximo passo a partir do pacote e Git | `contract:reconcile` retorna P0-PR03 em árvore limpa e bloqueia divergências; 31 testes verdes |
+| `P0-PR03` | `PROVEN` | P0-PR02 | Implementar validador/reconciliador que informa próximo passo a partir do pacote e Git | durante a execução autorizou P0-PR03; após o fechamento retorna P2-PR01 e bloqueia divergências; suíte verde |
 
 ## P1 — Fundação processual já provada
 

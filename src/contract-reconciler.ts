@@ -23,12 +23,19 @@ export interface ContractPr {
 export interface ContractPackage {
   contractId: string;
   contractState: string;
+  contractAcceptanceIds: string[];
   activePrId: string;
   nextAuthorizedAction: string;
   expectedBranchPrefix: string | null;
   baselineSha: string;
   prs: ContractPr[];
   evidencePrIds: string[];
+  mapPhaseIds: string[];
+  traceabilityAcceptanceIds: string[];
+  traceabilityState: string;
+  independentReviewState: string;
+  ownerAcceptanceState: string;
+  blockingQuestionCount: number;
 }
 
 export interface GitSnapshot {
@@ -51,22 +58,34 @@ const provenStatuses = new Set<ContractPrStatus>(["PROVEN", "HISTORICAL_BASELINE
 
 export async function readContractPackage(repositoryRoot: string): Promise<ContractPackage> {
   const packageRoot = resolve(repositoryRoot, "contracts", "morrow-minimum-operable-v0");
-  const [contract, liveStatus, prs, evidence] = await Promise.all([
+  const [contract, liveStatus, prs, evidence, map, traceability, questions] = await Promise.all([
     readFile(resolve(packageRoot, "CONTRACT.md"), "utf8"),
     readFile(resolve(packageRoot, "LIVE_STATUS.md"), "utf8"),
     readFile(resolve(packageRoot, "PRS.md"), "utf8"),
     readFile(resolve(packageRoot, "EVIDENCE.md"), "utf8"),
+    readFile(resolve(packageRoot, "MAP.md"), "utf8"),
+    readFile(resolve(packageRoot, "TRACEABILITY.md"), "utf8"),
+    readFile(resolve(packageRoot, "QUESTIONS.md"), "utf8"),
   ]);
 
   return {
     contractId: requiredMarkdownValue(contract, "contract_id"),
     contractState: requiredMarkdownValue(liveStatus, "contract_state"),
+    contractAcceptanceIds: markdownTableIds(contract, "AC"),
     activePrId: requiredMarkdownValue(liveStatus, "active_pr_id"),
     nextAuthorizedAction: requiredMarkdownValue(liveStatus, "next_authorized_action"),
     expectedBranchPrefix: optionalMarkdownValue(liveStatus, "expected_branch_prefix"),
     baselineSha: requiredMarkdownValue(liveStatus, "proven_baseline_sha"),
     prs: parsePrs(prs),
     evidencePrIds: unique([...evidence.matchAll(/\|\s*`(P\d-PR\d{2})`\s*\|/g)].map((match) => match[1])),
+    mapPhaseIds: markdownTableIds(map, "P"),
+    traceabilityAcceptanceIds: unique(
+      [...traceability.matchAll(/\bAC-\d{2}\b/g)].map((match) => match[0]),
+    ),
+    traceabilityState: requiredMarkdownValue(traceability, "traceability_state"),
+    independentReviewState: requiredMarkdownValue(traceability, "independent_review_state"),
+    ownerAcceptanceState: requiredMarkdownValue(traceability, "owner_acceptance_state"),
+    blockingQuestionCount: requiredNonNegativeInteger(questions, "blocking_question_count"),
   };
 }
 
@@ -113,6 +132,35 @@ export function reconcileContractPackage(
   }
   if (!prById.has(contractPackage.activePrId)) {
     reasons.push(`live_active_pr_unknown:${contractPackage.activePrId}`);
+  }
+
+  const plannedPhaseIds = unique(contractPackage.prs.map((pr) => pr.id.split("-")[0]));
+  for (const phaseId of plannedPhaseIds) {
+    if (!contractPackage.mapPhaseIds.includes(phaseId)) reasons.push(`pr_phase_missing_from_map:${phaseId}`);
+  }
+
+  for (const acceptanceId of contractPackage.contractAcceptanceIds) {
+    if (!contractPackage.traceabilityAcceptanceIds.includes(acceptanceId)) {
+      reasons.push(`acceptance_missing_from_traceability:${acceptanceId}`);
+    }
+  }
+  for (const acceptanceId of contractPackage.traceabilityAcceptanceIds) {
+    if (!contractPackage.contractAcceptanceIds.includes(acceptanceId)) {
+      reasons.push(`traceability_acceptance_unknown:${acceptanceId}`);
+    }
+  }
+
+  if (contractPackage.traceabilityState !== "COMPLETE") {
+    reasons.push(`traceability_not_complete:${contractPackage.traceabilityState}`);
+  }
+  if (contractPackage.independentReviewState !== "COMPLETE") {
+    reasons.push(`independent_review_not_complete:${contractPackage.independentReviewState}`);
+  }
+  if (contractPackage.ownerAcceptanceState !== "APPROVED") {
+    reasons.push(`owner_acceptance_not_approved:${contractPackage.ownerAcceptanceState}`);
+  }
+  if (contractPackage.blockingQuestionCount !== 0) {
+    reasons.push(`blocking_questions_open:${contractPackage.blockingQuestionCount}`);
   }
 
   for (const pr of contractPackage.prs.filter((item) => provenStatuses.has(item.status))) {
@@ -227,6 +275,19 @@ function optionalMarkdownValue(markdown: string, key: string): string | null {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = markdown.match(new RegExp("^- `" + escaped + "`: `([^`]+)`", "m"));
   return match?.[1] ?? null;
+}
+
+function requiredNonNegativeInteger(markdown: string, key: string): number {
+  const raw = requiredMarkdownValue(markdown, key);
+  if (!/^\d+$/.test(raw)) throw new Error(`contract_package_invalid_integer:${key}`);
+  return Number(raw);
+}
+
+function markdownTableIds(markdown: string, prefix: "AC" | "P"): string[] {
+  const pattern = prefix === "AC"
+    ? /^\|\s*`(AC-\d{2})`\s*\|/gm
+    : /^\|\s*`(P\d)`\s*\|/gm;
+  return unique([...markdown.matchAll(pattern)].map((match) => match[1]));
 }
 
 function isContractPrStatus(value: string): value is ContractPrStatus {
