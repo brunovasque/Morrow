@@ -39,3 +39,8 @@ Runtime V0 deve provar:
 5. workspace isolado;
 6. retorno/loop livre entre papéis com causa registrada;
 7. um adapter quota-session real sem exigir API.
+8. sessão processual própria por agente, com saída incremental observável;
+9. múltiplas sessões simultâneas em workspaces distintos;
+10. fronteira explícita entre terminais do operador e terminais gerenciados.
+
+A experiência de operação que governa esses itens está em [`OPERATOR_EXPERIENCE.md`](OPERATOR_EXPERIENCE.md). Backend por pipes prova automação, streaming e ciclo de vida; compatibilidade de terminal interativo na interface exige PTY/ConPTY e não pode ser simulada por resumos.

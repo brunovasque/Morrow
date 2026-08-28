@@ -5,6 +5,8 @@ export type InvocationStatus = "planned" | "running" | "completed" | "failed" | 
 
 export interface InvocationCheckpoint {
   invocationId: string;
+  agentInstanceId: string;
+  terminalSessionId: string | null;
   contractId: string;
   roleId: string;
   workspaceId: string;

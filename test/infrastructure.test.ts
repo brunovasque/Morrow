@@ -29,6 +29,8 @@ test("checkpoint store persists invocation progress across process-level restart
 
   await store.save({
     invocationId: "I1",
+    agentInstanceId: "A1",
+    terminalSessionId: "T1",
     contractId: "C1",
     roleId: "executor",
     workspaceId: "W1",
@@ -39,10 +41,15 @@ test("checkpoint store persists invocation progress across process-level restart
   });
 
   const restarted = new JsonCheckpointStore(root);
-  assert.equal((await restarted.load("I1"))?.status, "running");
+  const running = await restarted.load("I1");
+  assert.equal(running?.status, "running");
+  assert.equal(running?.agentInstanceId, "A1");
+  assert.equal(running?.terminalSessionId, "T1");
 
   await restarted.save({
     invocationId: "I1",
+    agentInstanceId: "A1",
+    terminalSessionId: "T1",
     contractId: "C1",
     roleId: "executor",
     workspaceId: "W1",
@@ -75,10 +82,12 @@ test("git worktree manager creates a real isolated branch workspace and removes 
     workspaceId: "executor-W1",
     baseRef: "HEAD",
     branchName: "contract/C1-executor",
+    roleId: "executor",
   });
 
   await access(join(workspace.root, "README.md"));
   assert.equal(await run("git", ["branch", "--show-current"], workspace.root), "contract/C1-executor");
+  assert.equal(workspace.roleId, "executor");
 
   await manager.destroy(workspace);
   await assert.rejects(access(workspace.root));

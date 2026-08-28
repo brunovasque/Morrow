@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 export interface GitWorkspace {
   workspaceId: string;
   contractId: string;
+  roleId: string;
   root: string;
   repoPath: string;
   baseRef: string;
@@ -22,6 +23,7 @@ export class GitWorktreeManager {
     repoPath: string;
     workspaceId: string;
     contractId: string;
+    roleId: string;
     baseRef: string;
     branchName?: string;
   }): Promise<GitWorkspace> {
@@ -39,6 +41,7 @@ export class GitWorktreeManager {
     return {
       workspaceId: params.workspaceId,
       contractId: params.contractId,
+      roleId: params.roleId,
       root,
       repoPath: resolve(params.repoPath),
       baseRef: params.baseRef,

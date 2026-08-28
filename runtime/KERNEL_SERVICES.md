@@ -22,7 +22,7 @@ Nem toda responsabilidade merece um LLM. O Morrow usa agentes para julgamento e 
 16. **Target Registry** — resolve descritores de repositório/projeto-alvo, políticas e perfis sem expor credenciais ao agente.
 17. **Repository Adapter** — interface estreita para fetch/read/branch/commit/PR/status; nunca concede mais poder do que o descritor do alvo permite.
 18. **Workspace Manager** — cria checkout/worktree/sandbox por contrato/etapa, fixa base SHA e garante isolamento entre alvos.
-19. **Terminal Host** — abre/gerencia sessão observável do AgentInstance no local-worker, preservando identidade, cwd, runtime e stream da CLI real.
+19. **Terminal Session Manager / Host** — cria e gerencia sessão processual observável por `AgentInstance` no local-worker, prende seu cwd ao workspace autorizado, transmite o stream da CLI real e governa entrada/timeout/interrupção sem anexar terminais do operador.
 20. **Session Multiplexer** — permite acompanhar múltiplas AgentInstances simultaneamente em panes/tabs/sessões ou equivalente, sem exigir uma sessão permanente por papel.
 21. **Live Activity Feed** — projeta eventos reais do kernel em linguagem operacional legível: dispatch, gate, lock, reunião, tool/process, checkpoint, teste, review/audit, bloqueio e conclusão.
 22. **Stream Redactor** — remove segredos/tokens/variáveis sensíveis antes de espelhar ou persistir streams humanos.

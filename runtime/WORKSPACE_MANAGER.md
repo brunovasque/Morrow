@@ -58,6 +58,8 @@ Workspaces diferentes podem existir em targets diferentes ou no mesmo target qua
 
 O Lock Manager impede colisões incompatíveis, por exemplo duas execuções escrevendo na mesma área/branch sem estratégia de integração.
 
+O Terminal Session Manager aceita somente um descritor emitido sob sua raiz gerenciada, exige correspondência de contrato/papel/workspace e reserva o workspace enquanto a sessão está ativa. Diretório atual ou terminal aberto pelo operador não é um workspace implícito.
+
 ## Base e drift
 
 Cada step sabe de qual SHA nasceu.

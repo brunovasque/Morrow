@@ -4,7 +4,9 @@ export type AccessMode = "quota-session" | "api" | "local";
 export type Effort = "low" | "medium" | "high" | "xhigh" | "provider-default";
 
 export interface AgentInstance {
+  agentInstanceId: string;
   invocationId: string;
+  terminalSessionId: string | null;
   roleId: string;
   contractId: string;
   stepId: string;
