@@ -32,3 +32,7 @@ Codinome de laboratório para um kernel autônomo de execução de contratos de 
 ## Próxima prova
 
 O próximo marco é completar o Runtime V0: executar um contrato pequeno de ponta a ponta com event log, memória viva, workspace isolado, PRE_DISPATCH determinístico, pelo menos um runtime quota-session real e terminais de agentes observáveis ao vivo. A experiência canônica do operador está em [`runtime/OPERATOR_EXPERIENCE.md`](runtime/OPERATOR_EXPERIENCE.md).
+
+## Contrato mestre ativo
+
+A conclusão do primeiro Morrow capaz de operar é governada por [`contracts/morrow-minimum-operable-v0/README.md`](contracts/morrow-minimum-operable-v0/README.md). Toda nova aba/agente deve ler esse pacote e executar somente o próximo passo autorizado em `LIVE_STATUS.md`.
