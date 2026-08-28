@@ -2,12 +2,15 @@
 
 ## Status do preflight
 
+- `question_round_state`: `COMPLETE`
+- `blocking_question_count`: `0`
+- `current_blocker`: `NONE`
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhum bloqueio de destino/preflight; implementação aguarda reconciliador `P0-PR03`
+- bloqueio atual: nenhum; `P0-PR03` está provado e a próxima unidade autorizada é `P2-PR01`
 
-As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas ainda devem ser atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
+As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 
 ## Registro consolidado
 
@@ -40,7 +43,7 @@ As respostas abaixo consolidam decisões já dadas pelo dono e evidência do rep
 
 ## Pass 1 — declarações independentes requeridas
 
-`P0-PR02` deve anexar uma linha por papel abaixo, sem reutilizar a resposta de outro papel:
+`P0-PR02` anexou uma linha por papel abaixo, sem reutilizar a resposta de outro papel:
 
 | papel | superfícies obrigatórias | resultado |
 |---|---|---|
@@ -53,7 +56,7 @@ As respostas abaixo consolidam decisões já dadas pelo dono e evidência do rep
 
 ## Pass 2 — adversarial
 
-Depois de incorporar o Pass 1, os mesmos papéis respondem:
+Depois de incorporar o Pass 1, os mesmos papéis responderam:
 
 1. Qual requisito conversado não possui AC e PR?
 2. Qual PR pode “ficar verde” sem entregar o estado do usuário?

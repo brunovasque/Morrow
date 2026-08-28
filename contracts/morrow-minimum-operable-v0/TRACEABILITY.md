@@ -2,6 +2,10 @@
 
 Este registro prova que requisitos conversados/canônicos possuem destino, fase/PR e critério de aceite. Linha sem cobertura bloqueia CONTRACT_PREFLIGHT.
 
+- `traceability_state`: `COMPLETE`
+- `independent_review_state`: `COMPLETE`
+- `owner_acceptance_state`: `APPROVED`
+
 | req-id | requisito | origem canônica | aceitação | PRs principais |
 |---|---|---|---|---|
 | `R-001` | Morrow funciona por contrato, mapa, estado vivo e gates; não por prompt solto | contracts/README + owner | AC-02, AC-03, AC-24 | P0, P7, P8 |
@@ -50,9 +54,9 @@ Este registro prova que requisitos conversados/canônicos possuem destino, fase/
 | `R-044` | Chat, UI, reunião e resposta externa não ganham autoridade por aparência; mutações exigem identidade/autorização/idempotência/anti-replay | Security Review P0-PR02 | AC-12, AC-20, AC-28 | P5-PR04, P6-PR01/03, P7-PR07 |
 | `R-045` | Operação diária não exige Git/PowerShell manual do operador não desenvolvedor | Acceptance P0-PR02 + owner | AC-01, AC-10, AC-15, AC-27, AC-29 | P5, P7-PR06, P8-PR01/02 |
 
-## Auditoria de completude
+## Auditoria de completude aplicada em P0-PR02
 
-Antes de aprovar o contrato v1, P0-PR02 deve:
+P0-PR02 aplicou o seguinte checklist antes de aprovar o contrato v1:
 
 1. comparar novamente toda documentação em `runtime/`, `governance/`, `contracts/` e `memory/` aplicável;
 2. verificar que cada AC possui ao menos uma linha aqui e uma PR em `PRS.md`;
@@ -60,9 +64,9 @@ Antes de aprovar o contrato v1, P0-PR02 deve:
 4. registrar qualquer requisito faltante como pergunta bloqueante, não como suposição;
 5. obter confirmação do dono sobre objetivo/exclusões, não sobre detalhes técnicos de rota.
 
-## Resultado preliminar
+## Resultado final
 
 - requisitos conversados/canônicos mapeados: `45`
 - requisitos sem AC/PR: `0` no draft atual
-- revisão independente: `PENDING P0-PR02`
-- owner acceptance do contrato: `PENDING`
+- revisão independente: `COMPLETE P0-PR02`; evidência em [`reviews/P0-PR02.md`](reviews/P0-PR02.md)
+- owner acceptance do contrato: `APPROVED 2026-08-28`
