@@ -12,23 +12,23 @@
 - `active_phase`: `P2`
 - `active_pr_id`: `P2-PR06`
 - `active_route_node`: `WORKER_RECOVERY_AND_OFFLINE_STATE`
-- `active_subaction`: `MERGE_PR_9_THEN_START_P2_PR06`
+- `active_subaction`: `P2_PR06_DESIGN_AND_IMPLEMENT_RECOVERY`
 - `expected_branch_prefix`: `mvo/p2-pr06-`
-- `write_execution_allowed`: `no product write before PR #9 merge; after merge, scoped only to P2-PR06 in a dedicated branch`
+- `write_execution_allowed`: `yes, scoped only to P2-PR06 in a dedicated branch`
 - `next_authorized_action`: `START_P2_PR06`
-- `next_authorized_actor`: `Architect after integration`
+- `next_authorized_actor`: `Architect/Executor`
 
 ## Próxima ação exata
 
-Integrar a PR #9 já provada. Depois, iniciar `P2-PR06` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e implementar somente reconnect, retry idempotente, fila, checkpoint e estado online/offline.
+Implementar somente P2-PR06 na branch `mvo/p2-pr06-recovery`: reconnect, retry idempotente, fila durável, checkpoint e estado online/offline do Local Worker. A prova obrigatória mata/reinicia o processo sem duplicar efeito e faz cada pendência retomar com segurança ou bloquear com causa explícita.
 
-P2-PR05 foi revisada no head remoto `96dfdb0`, com `109/109`, 14 arquivos previstos, `mergeable: true`, merge state `clean` e parecer `GREEN`. Mantenha `GPT-5.6 Sol / xhigh` para P2-PR06, porque recovery e idempotência após restart são fronteiras críticas. Nenhuma escrita de P2-PR06 está autorizada antes da integração da PR #9.
+P2-PR05 foi integrada pela PR #9 em `9b96a8b`; a base integrada passou `109/109` e ficou limpa. Mantenha `GPT-5.6 Sol / xhigh` para P2-PR06, porque recovery e idempotência após restart são fronteiras críticas. Nesta PR permanecem proibidos ConPTY/P3, transcript/redaction/P4, credencial real, transporte de rede concreto e qualquer target externo, inclusive Enova.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P2-INTEGRATION-05` | `integration` | P2-PR05 está provada na PR #9, ainda aberta | integrar PR #9 antes de criar a branch P2-PR06 |
+| `none` | `none` | nenhum bloqueio de preflight ativo | executar somente P2-PR06 |
 
 ## Status por fase
 
@@ -36,7 +36,7 @@ P2-PR05 foi revisada no head remoto `96dfdb0`, com `109/109`, 14 arquivos previs
 |---|---|---|
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
-| P2 | `READY` | P2-PR05 provada; P2-PR06 aguarda integração da PR #9 |
+| P2 | `RUNNING` | P2-PR06 em branch dedicada sobre `9b96a8b` |
 | P3 | `BLOCKED` | depende de P2 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
