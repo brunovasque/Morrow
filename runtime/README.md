@@ -50,3 +50,5 @@ O protocolo versionado entre Control Plane e Local Worker, suas fronteiras de co
 O serviço local que protege a raiz do Worker e expõe seu ciclo de vida sem ainda executar trabalho está em [`LOCAL_WORKER_SERVICE.md`](LOCAL_WORKER_SERVICE.md).
 
 Os registries versionados de Target/Role/Skill/Capability e a fronteira opaca do Secret Broker estão em [`GOVERNANCE_REGISTRIES.md`](GOVERNANCE_REGISTRIES.md).
+
+A resolução auditável de routing/access/model e as reservas determinísticas de cota e budget estão em [`ROUTING_GUARDS.md`](ROUTING_GUARDS.md).
