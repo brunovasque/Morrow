@@ -10,24 +10,25 @@
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
 - `active_phase`: `P2`
-- `active_pr_id`: `P2-PR04`
-- `active_route_node`: `ROUTING_AND_RESOURCE_GUARDS`
-- `active_subaction`: `MERGE_PR_7_THEN_START_P2_PR04`
-- `write_execution_allowed`: `no product write before PR #7 merge; after merge, scoped only to P2-PR04 in a dedicated branch`
-- `next_authorized_action`: `START_P2_PR04`
-- `next_authorized_actor`: `Architect`
+- `active_pr_id`: `P2-PR05`
+- `active_route_node`: `AUTHENTICATED_DISPATCH_AND_EXECUTION`
+- `active_subaction`: `MERGE_PR_8_THEN_START_P2_PR05`
+- `expected_branch_prefix`: `mvo/p2-pr05-`
+- `write_execution_allowed`: `no product write before PR #8 merge; after merge, scoped only to P2-PR05 in a dedicated branch`
+- `next_authorized_action`: `START_P2_PR05`
+- `next_authorized_actor`: `Architect after integration`
 
 ## Próxima ação exata
 
-Integrar a PR #7 já provada. Depois, iniciar `P2-PR04` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e implementar somente Routing/Access/Model registry, Quota Guard e Budget Guard mínimos.
+Integrar a PR #8 já provada. Depois, iniciar `P2-PR05` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e ligar somente dispatch autenticado a locks/workspaces/guards, com PowerShell determinístico ou AgentInstance governada.
 
-P2-PR03 foi revisada com `GPT-5.6 Sol / xhigh`, incluindo correção adversarial do relógio do Secret Broker. P2-PR04 fixa routing, acesso, modelo, cota e budget; mantenha `GPT-5.6 Sol / xhigh`. Nenhuma escrita de P2-PR04 está autorizada antes da integração da PR #7.
+P2-PR04 foi revisada no head remoto `e8cd2e6`, com `96/96`, merge state `CLEAN` e parecer `GREEN`. Mantenha `GPT-5.6 Sol / xhigh` para P2-PR05, pois será a primeira ligação de autorização a execução. Nenhuma escrita de P2-PR05 está autorizada antes da integração da PR #8.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P2-INTEGRATION-03` | `integration` | P2-PR03 está provada na PR #7, ainda aberta | integrar PR #7 antes de criar a branch P2-PR04 |
+| `P2-INTEGRATION-04` | `integration` | P2-PR04 está provada na PR #8, ainda aberta | integrar PR #8 antes de criar a branch P2-PR05 |
 
 ## Status por fase
 
@@ -35,7 +36,7 @@ P2-PR03 foi revisada com `GPT-5.6 Sol / xhigh`, incluindo correção adversarial
 |---|---|---|
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
-| P2 | `READY` | P2-PR03 provada; P2-PR04 aguarda integração da PR #7 |
+| P2 | `READY` | P2-PR04 provada; P2-PR05 aguarda integração da PR #8 |
 | P3 | `BLOCKED` | depende de P2 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
