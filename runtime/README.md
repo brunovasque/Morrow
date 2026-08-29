@@ -46,3 +46,5 @@ Runtime V0 deve provar:
 A experiência de operação que governa esses itens está em [`OPERATOR_EXPERIENCE.md`](OPERATOR_EXPERIENCE.md). Backend por pipes prova automação, streaming e ciclo de vida; compatibilidade de terminal interativo na interface exige PTY/ConPTY e não pode ser simulada por resumos.
 
 O protocolo versionado entre Control Plane e Local Worker, suas fronteiras de confiança e o limite entre referência de trabalho e execução estão em [`ADR_WORKER_CONTROL_PROTOCOL.md`](ADR_WORKER_CONTROL_PROTOCOL.md).
+
+O serviço local que protege a raiz do Worker e expõe seu ciclo de vida sem ainda executar trabalho está em [`LOCAL_WORKER_SERVICE.md`](LOCAL_WORKER_SERVICE.md).

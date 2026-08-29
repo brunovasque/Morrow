@@ -7,6 +7,7 @@
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "demo:v0": "node --experimental-strip-types src/demo.ts",
     "contract:reconcile": "node --experimental-strip-types src/contract-reconciler.ts",
+    "worker:host": "node --experimental-strip-types src/local-worker-host.ts",
     "probe:codex-quota": "node --experimental-strip-types src/probes/codex-quota.ts"
   },
   "engines": {
