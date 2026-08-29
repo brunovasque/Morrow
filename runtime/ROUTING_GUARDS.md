@@ -60,6 +60,8 @@ Cada policy fixa moeda, período e tetos de:
 
 Reserva considera simultaneamente valores já comprometidos e reservados, impedindo oversubscription. `commit` converte a reserva no valor real, limitado ao máximo reservado; `release` devolve apenas capacidade ainda reservada. Ownership e idempotência impedem liberação, commit duplicado ou mudança de valor por outro chamador.
 
+As dimensões do ledger usam tuplas canônicas, e não concatenação textual de IDs. Assim `contractId` e `stepId` que contenham separadores continuam isolados e não colidem com outra combinação válida.
+
 ## Fronteiras de confiança
 
 - descritores e pedidos aceitam apenas objetos de dados planos, chaves exatas, referências versionadas e identificadores limitados;

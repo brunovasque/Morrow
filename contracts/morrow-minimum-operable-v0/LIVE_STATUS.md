@@ -12,7 +12,7 @@
 - `active_phase`: `P2`
 - `active_pr_id`: `P2-PR04`
 - `active_route_node`: `ROUTING_AND_RESOURCE_GUARDS`
-- `active_subaction`: `PUBLISH_AND_REVIEW_P2_PR04_CANDIDATE`
+- `active_subaction`: `PUBLISH_AND_REVIEW_P2_PR04_HARDENING`
 - `expected_branch_prefix`: `mvo/p2-pr04-`
 - `write_execution_allowed`: `yes, scoped only to P2-PR04 in a dedicated branch`
 - `next_authorized_action`: `START_P2_PR04`
@@ -20,9 +20,9 @@
 
 ## Próxima ação exata
 
-Publicar `mvo/p2-pr04-routing-guards` no head local `8c68d87`, abrir a PR contra `phase-2/runtime-v0` e conferir branch, base, head, diff e estado remoto antes da revisão final.
+Atualizar a mesma PR #8 com os hardenings locais `1180dc6` e `240c646`, então conferir branch, base, novo head, diff e estado remoto antes da revisão final.
 
-P2-PR03 foi integrada em `7d3e91b`. O candidate local de P2-PR04 está `GREEN_CANDIDATE` com 94/94 testes, mas permanece `RUNNING` até o head remoto exato ser revisado. Mantenha `GPT-5.6 Sol / xhigh`. Nenhum dispatch, processo, shell, credencial, transporte, target externo ou cobrança real está autorizado nesta PR.
+P2-PR03 foi integrada em `7d3e91b`. A revisão da PR #8 encontrou dois achados bloqueantes, corrigidos localmente com 96/96 testes; P2-PR04 permanece `RUNNING` até o novo head remoto exato ser revisado. Mantenha `GPT-5.6 Sol / xhigh`. Nenhum dispatch, processo, shell, credencial, transporte, target externo ou cobrança real está autorizado nesta PR.
 
 ## Bloqueios atuais
 
