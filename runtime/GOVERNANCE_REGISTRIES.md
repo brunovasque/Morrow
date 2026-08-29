@@ -12,7 +12,7 @@ O V0 mantém cinco catálogos imutáveis em memória:
 - **Capability Registry**: versão, tipo, risco e estado habilitado;
 - **Secret Policy Registry**: regras exatas de referência, finalidade, consumidor e capability de segredo.
 
-Os construtores validam schema estrito, clonam e congelam os registros. IDs duplicados, versões inválidas, campos extras, accessors e políticas de caminho absolutas ou com travessia são recusados. Nenhum registry possui target, papel, skill ou capability padrão.
+Os construtores validam schema estrito, limitam o catálogo, clonam e congelam os registros. IDs duplicados, versões inválidas, campos extras, accessors, objetos hostis e políticas de caminho absolutas ou com travessia são recusados. Nenhum registry possui target, papel, skill ou capability padrão.
 
 `repositoryLocatorRef` e `secretRef` são referências opacas. Caminho/URL privado de repositório e material de credencial não pertencem a estes registros públicos.
 
@@ -45,7 +45,7 @@ O emissor privado do broker pode devolver somente:
 handleId + consumer + delivery:opaque-handle + expiresAt
 ```
 
-O handle precisa pertencer ao mesmo consumidor, expirar em no máximo cinco minutos e não pode conter campo extra. Se o emissor tentar devolver `token`, `value`, `credential` ou qualquer material, o boundary recusa o objeto inteiro. Erros do emissor são convertidos em código sanitizado e não atravessam a fronteira.
+O handle precisa pertencer ao mesmo consumidor, expirar em no máximo cinco minutos e não pode conter campo extra. Se o emissor tentar devolver `token`, `value`, `credential`, um objeto hostil ou qualquer material, o boundary recusa o objeto inteiro. Erros do emissor são convertidos em código sanitizado e não atravessam a fronteira.
 
 Emissões concorrentes ou retries sobre a mesma aprovação compartilham uma única operação e devolvem o mesmo resultado. Um `handleId` já associado a outra aprovação é recusado. Essa idempotência vale para a instância local; persistência e replay depois de restart continuam reservados à P2-PR06.
 

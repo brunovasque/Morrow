@@ -412,6 +412,13 @@ test("strict request refuses command, credential material, duplicate refs and pr
   const inherited = Object.create({ targetId: "fixture-repository" });
   Object.assign(inherited, request());
   expectRejected(resolver.resolve(inherited), "INVALID_REQUEST");
+
+  const hostile = new Proxy(request(), {
+    ownKeys() { throw new Error("untrusted-request-details"); },
+  });
+  const hostileResult = resolver.resolve(hostile);
+  expectRejected(hostileResult, "INVALID_REQUEST");
+  if (!hostileResult.ok) assert.equal(hostileResult.detail.includes("untrusted-request-details"), false);
 });
 
 test("registries reject duplicates, unsafe target paths, accessors and inconsistent roles", () => {
@@ -429,6 +436,27 @@ test("registries reject duplicates, unsafe target paths, accessors and inconsist
     get enabled() { return true; },
   };
   assert.throws(() => new CapabilityRegistry([accessor]), /capability_descriptor_invalid/);
+  const hostile = new Proxy(target(), {
+    ownKeys() { throw new Error("registry-hostile-proxy"); },
+  });
+  assert.throws(() => new TargetRegistry([hostile]), /target_descriptor_invalid/);
+});
+
+test("Secret Broker converts hostile issuer objects into a sanitized rejection", async () => {
+  const resolver = new GovernanceResolver(registries());
+  const resolved = resolver.resolve(request());
+  assert.equal(resolved.ok, true);
+  if (!resolved.ok) return;
+  const hostile = new Proxy({}, {
+    ownKeys() { throw new Error("issuer-secret-details"); },
+  });
+  const broker = new SecretBrokerBoundary(resolver, async () => hostile);
+  const result = await broker.issue(resolved.authority.secretAccess[0]);
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.code, "SECRET_HANDLE_INVALID");
+    assert.equal(result.detail.includes("issuer-secret-details"), false);
+  }
 });
 
 test("registry snapshots are detached and frozen against later configuration mutation", () => {

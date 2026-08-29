@@ -255,7 +255,12 @@ export class GovernanceResolver {
   }
 
   resolve(input: unknown): WorkAuthorityResult {
-    const request = parseWorkAuthorityRequest(input);
+    let request: WorkAuthorityRequest | null = null;
+    try {
+      request = parseWorkAuthorityRequest(input);
+    } catch {
+      return reject("INVALID_REQUEST", "work_authority_request_invalid");
+    }
     if (!request) return reject("INVALID_REQUEST", "work_authority_request_invalid");
 
     const target = this.registries.targets.resolve(request.targetId);
@@ -386,7 +391,12 @@ export class SecretBrokerBoundary {
       return { ok: false, code: "SECRET_BROKER_UNAVAILABLE", detail: "secret_handle_issuer_failed" };
     }
 
-    const handle = parseSecretHandle(issued, approved, now);
+    let handle: SecretHandle | null = null;
+    try {
+      handle = parseSecretHandle(issued, approved, now);
+    } catch {
+      return { ok: false, code: "SECRET_HANDLE_INVALID", detail: "secret_handle_contract_invalid" };
+    }
     if (!handle) return { ok: false, code: "SECRET_HANDLE_INVALID", detail: "secret_handle_contract_invalid" };
     const owner = this.issuedHandleOwners.get(handle.handleId);
     if (owner && owner !== approved) {
@@ -568,11 +578,22 @@ function buildRegistry<T>(
   keyOf: (value: T) => string,
   name: string,
 ): ReadonlyMap<string, T> {
-  if (!Array.isArray(values)) throw new Error(`${name}_registry_invalid`);
+  if (!Array.isArray(values) || values.length > 4_096) throw new Error(`${name}_registry_invalid`);
   const entries = new Map<string, T>();
   for (const raw of values) {
-    if (!validator(raw)) throw new Error(`${name}_descriptor_invalid`);
-    const value = deepFreeze(structuredClone(raw));
+    let valid = false;
+    try {
+      valid = validator(raw);
+    } catch {
+      valid = false;
+    }
+    if (!valid) throw new Error(`${name}_descriptor_invalid`);
+    let value: T;
+    try {
+      value = deepFreeze(structuredClone(raw));
+    } catch {
+      throw new Error(`${name}_descriptor_invalid`);
+    }
     const key = keyOf(value);
     if (entries.has(key)) throw new Error(`${name}_registry_duplicate:${key}`);
     entries.set(key, value);
