@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhuma pergunta; P2-PR06 está `PROVEN` e P3-PR01 aguarda a integração da PR #10
+- bloqueio atual: nenhum; P3-PR01 está `RUNNING` na base integrada `06e2a4c`
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 

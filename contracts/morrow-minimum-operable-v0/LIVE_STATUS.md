@@ -12,23 +12,23 @@
 - `active_phase`: `P3`
 - `active_pr_id`: `P3-PR01`
 - `active_route_node`: `CONPTY_SPIKE_AND_ADR`
-- `active_subaction`: `MERGE_PR_10_THEN_START_P3_PR01`
+- `active_subaction`: `P3_PR01_STATE_OF_ART_AND_BACKEND_BOUNDARY`
 - `expected_branch_prefix`: `mvo/p3-pr01-`
-- `write_execution_allowed`: `no product write before PR #10 merge; after merge, scoped only to P3-PR01 in a dedicated branch`
+- `write_execution_allowed`: `yes, scoped only to P3-PR01 in a dedicated branch`
 - `next_authorized_action`: `START_P3_PR01`
-- `next_authorized_actor`: `Architect after integration`
+- `next_authorized_actor`: `Architect/Experimenter/Executor`
 
 ## Próxima ação exata
 
-Integrar a PR #10 já provada. Depois, iniciar `P3-PR01` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e fazer somente o spike/ADR de PTY/ConPTY mais a interface de backend com capability gate. A PR não implementa ConPTY ainda: ela mede opções, registra a decisão de estado da arte, preserva o backend process-pipes e impede que a interface o apresente como terminal completo.
+Executar somente `P3-PR01` na branch `mvo/p3-pr01-conpty-spike`, nascida da base integrada `06e2a4c`: medir o estado da arte de PTY/ConPTY, registrar a decisão em ADR e introduzir a interface substituível de backend com capability gate. Preservar `process-pipes` como automação/fixture e impedir mecanicamente que seja apresentado como terminal completo. Esta PR não instala nem implementa o backend ConPTY real; isso pertence à P3-PR02.
 
-P2-PR06 foi revisada no head remoto `8a6bd6e`, com testes focados `21/21`, suíte completa `130/130`, 14 arquivos previstos, merge state `CLEAN`, nenhum check remoto configurado e parecer `GREEN`. Mantenha `GPT-5.6 Sol / xhigh` para P3-PR01, porque a escolha de ConPTY e da fronteira de terminal é uma decisão arquitetural e de segurança. Nenhuma escrita de P3-PR01 está autorizada antes da integração da PR #10; Enova e qualquer target externo continuam proibidos.
+A PR #10 foi integrada em `06e2a4c`; o local terminou sincronizado com o remoto e a suíte pós-merge passou `130/130`. O reconciliador retornou `READY_FOR_EXECUTION` para P3-PR01 na branch correta. Mantenha `GPT-5.6 Sol / xhigh`, porque a escolha de ConPTY e da fronteira de terminal é uma decisão arquitetural e de segurança. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P2-INTEGRATION-06` | `integration` | P2-PR06 está provada na PR #10, ainda aberta | integrar PR #10 antes de criar a branch P3-PR01 |
+| `none` | `none` | nenhum bloqueio ativo | executar somente P3-PR01 |
 
 ## Status por fase
 
@@ -36,8 +36,8 @@ P2-PR06 foi revisada no head remoto `8a6bd6e`, com testes focados `21/21`, suít
 |---|---|---|
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
-| P2 | `READY` | P2-PR06 provada; fechamento da fase aguarda integração da PR #10 |
-| P3 | `BLOCKED` | P3-PR01 aguarda integração da PR #10 |
+| P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
+| P3 | `RUNNING` | P3-PR01 em branch dedicada sobre `06e2a4c` |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
