@@ -20,15 +20,15 @@
 
 ## Próxima ação exata
 
-Publicar `mvo/p2-pr05-authenticated-dispatch` no commit candidato/documental atual, abrir a PR contra `phase-2/runtime-v0` e conferir head remoto, arquivos, merge state e testes antes de qualquer autorização de merge.
+Atualizar `mvo/p2-pr05-authenticated-dispatch` na PR #9 com o hardening que sucede `c3636cb`, então conferir SHA remoto, arquivos, merge state e checks antes de qualquer autorização de merge.
 
-O código candidato `cabc1db` passou 106/106 testes e revisão local `GREEN_CANDIDATE`. Mantenha `GPT-5.6 Sol / xhigh` durante a revisão remota. Nesta PR continuam proibidos ConPTY/terminal completo, reconnect/retry persistente, fila, credencial real, rede, cobrança e qualquer target externo, inclusive Enova.
+O hardening `caf4eed` passou 108/108 testes após resolver três achados da revisão do head remoto inicial. Mantenha `GPT-5.6 Sol / xhigh` durante a nova conferência remota. Nesta PR continuam proibidos ConPTY/terminal completo, reconnect/retry persistente, fila, credencial real, rede, cobrança e qualquer target externo, inclusive Enova.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `none` | `none` | nenhum bloqueio técnico local; falta prova do head remoto | publicar e revisar somente P2-PR05 |
+| `none` | `none` | achados locais resolvidos; falta publicar e conferir o novo head remoto | atualizar e revisar somente a PR #9 |
 
 ## Status por fase
 
@@ -36,7 +36,7 @@ O código candidato `cabc1db` passou 106/106 testes e revisão local `GREEN_CAND
 |---|---|---|
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
-| P2 | `RUNNING` | P2-PR05 local `GREEN_CANDIDATE`; publicação/revisão remota pendente |
+| P2 | `RUNNING` | P2-PR05 hardening local `GREEN_CANDIDATE`; atualização/revisão da PR #9 pendente |
 | P3 | `BLOCKED` | depende de P2 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
@@ -52,7 +52,7 @@ O código candidato `cabc1db` passou 106/106 testes e revisão local `GREEN_CAND
 - Codex quota-session e shims Windows;
 - sessões processuais ao vivo, múltiplas e isoladas;
 - separação canônica dos terminais do operador;
-- 106/106 testes passando no candidate P2-PR05.
+- 108/108 testes passando após hardening P2-PR05.
 
 Isso não autoriza declarar o produto operacional. `PRS.md` define o restante.
 
