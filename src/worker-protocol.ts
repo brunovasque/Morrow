@@ -327,6 +327,10 @@ export function validateWorkerProtocolMessage(
   };
 }
 
+export function isControlDispatchBody(value: unknown): value is ControlDispatchBody {
+  return controlDispatchBodyError(value) === null;
+}
+
 function validateBody(type: WorkerProtocolMessageType, value: unknown): string | null {
   if (!isRecord(value)) return "body_must_be_object";
 
@@ -393,46 +397,7 @@ function validateBody(type: WorkerProtocolMessageType, value: unknown): string |
   }
 
   if (type === "control.dispatch") {
-    const keys = exactKeys(value, [
-      "dispatchId",
-      "idempotencyKey",
-      "contractId",
-      "stepId",
-      "targetId",
-      "kind",
-      "workSpec",
-      "workspace",
-      "requiredCapabilities",
-      "timeoutMs",
-    ]);
-    if (keys) return keys;
-    if (
-      !isIdentifier(value.dispatchId)
-      || !isIdentifier(value.idempotencyKey)
-      || !isIdentifier(value.contractId)
-      || !isIdentifier(value.stepId)
-      || !isIdentifier(value.targetId)
-    ) return "dispatch_identity_invalid";
-    if (value.kind !== "process" && value.kind !== "agent") return "dispatch_kind_invalid";
-    if (!isRecord(value.workSpec) || exactKeys(value.workSpec, ["artifactId", "sha256"])) {
-      return "dispatch_work_spec_invalid";
-    }
-    if (!isIdentifier(value.workSpec.artifactId) || typeof value.workSpec.sha256 !== "string" || !sha256Pattern.test(value.workSpec.sha256)) {
-      return "dispatch_work_spec_invalid";
-    }
-    if (!isRecord(value.workspace) || exactKeys(value.workspace, ["workspaceId", "isolation"])) {
-      return "dispatch_workspace_invalid";
-    }
-    if (!isIdentifier(value.workspace.workspaceId) || value.workspace.isolation !== "dedicated") {
-      return "dispatch_workspace_invalid";
-    }
-    if (!isUniqueStringArray(value.requiredCapabilities, identifierPattern, 1, 128)) {
-      return "dispatch_capabilities_invalid";
-    }
-    if (!Number.isSafeInteger(value.timeoutMs) || (value.timeoutMs as number) < 1 || (value.timeoutMs as number) > 86_400_000) {
-      return "dispatch_timeout_invalid";
-    }
-    return null;
+    return controlDispatchBodyError(value);
   }
 
   if (type === "worker.ack") {
@@ -471,6 +436,50 @@ function validateBody(type: WorkerProtocolMessageType, value: unknown): string |
     value.supportedProtocolVersions !== undefined
     && !isUniqueStringArray(value.supportedProtocolVersions, protocolVersionPattern, 1, 16)
   ) return "reject_supported_versions_invalid";
+  return null;
+}
+
+function controlDispatchBodyError(value: unknown): string | null {
+  if (!isRecord(value)) return "body_must_be_object";
+  const keys = exactKeys(value, [
+    "dispatchId",
+    "idempotencyKey",
+    "contractId",
+    "stepId",
+    "targetId",
+    "kind",
+    "workSpec",
+    "workspace",
+    "requiredCapabilities",
+    "timeoutMs",
+  ]);
+  if (keys) return keys;
+  if (
+    !isIdentifier(value.dispatchId)
+    || !isIdentifier(value.idempotencyKey)
+    || !isIdentifier(value.contractId)
+    || !isIdentifier(value.stepId)
+    || !isIdentifier(value.targetId)
+  ) return "dispatch_identity_invalid";
+  if (value.kind !== "process" && value.kind !== "agent") return "dispatch_kind_invalid";
+  if (!isRecord(value.workSpec) || exactKeys(value.workSpec, ["artifactId", "sha256"])) {
+    return "dispatch_work_spec_invalid";
+  }
+  if (!isIdentifier(value.workSpec.artifactId) || typeof value.workSpec.sha256 !== "string" || !sha256Pattern.test(value.workSpec.sha256)) {
+    return "dispatch_work_spec_invalid";
+  }
+  if (!isRecord(value.workspace) || exactKeys(value.workspace, ["workspaceId", "isolation"])) {
+    return "dispatch_workspace_invalid";
+  }
+  if (!isIdentifier(value.workspace.workspaceId) || value.workspace.isolation !== "dedicated") {
+    return "dispatch_workspace_invalid";
+  }
+  if (!isUniqueStringArray(value.requiredCapabilities, identifierPattern, 1, 128)) {
+    return "dispatch_capabilities_invalid";
+  }
+  if (!Number.isSafeInteger(value.timeoutMs) || (value.timeoutMs as number) < 1 || (value.timeoutMs as number) > 86_400_000) {
+    return "dispatch_timeout_invalid";
+  }
   return null;
 }
 
