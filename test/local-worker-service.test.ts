@@ -92,6 +92,22 @@ test("accepts dispatch only while a trusted runtime attachment is live", async (
   assert.equal((await worker.stop()).dispatchAccepted, false);
 });
 
+test("a stale detach handle cannot revoke a new post-restart attachment", async () => {
+  const { managedRoot } = await harness();
+  const worker = new LocalWorkerService(configuration(managedRoot));
+  await worker.start();
+  const staleDetach = worker.attachAuthenticatedDispatch();
+
+  await worker.stop();
+  await worker.start();
+  const currentDetach = worker.attachAuthenticatedDispatch();
+  staleDetach();
+  assert.equal(worker.status().dispatchAccepted, true);
+
+  currentDetach();
+  assert.equal(worker.status().dispatchAccepted, false);
+});
+
 test("refuses roots outside .morrow, declared operator roots, and hidden target configuration", async () => {
   const { root, managedRoot, operatorRoot } = await harness();
 

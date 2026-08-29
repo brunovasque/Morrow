@@ -55,7 +55,7 @@ export class LocalWorkerService {
   private failure: string | null = null;
   private layout: LocalWorkerLayout | null = null;
   private startOperation: Promise<LocalWorkerServiceStatus> | null = null;
-  private dispatchAttached = false;
+  private dispatchAttachment: symbol | null = null;
 
   constructor(configuration: LocalWorkerServiceConfiguration) {
     assertConfiguration(configuration);
@@ -86,19 +86,17 @@ export class LocalWorkerService {
     this.state = "stopped";
     this.stoppedAt = new Date().toISOString();
     this.instanceId = null;
-    this.dispatchAttached = false;
+    this.dispatchAttachment = null;
     return this.status();
   }
 
   attachAuthenticatedDispatch(): () => void {
     if (this.state !== "ready") throw new Error("worker_not_ready_for_dispatch_attachment");
-    if (this.dispatchAttached) throw new Error("worker_dispatch_already_attached");
-    this.dispatchAttached = true;
-    let detached = false;
+    if (this.dispatchAttachment !== null) throw new Error("worker_dispatch_already_attached");
+    const attachment = Symbol("authenticated_dispatch_attachment");
+    this.dispatchAttachment = attachment;
     return () => {
-      if (detached) return;
-      detached = true;
-      this.dispatchAttached = false;
+      if (this.dispatchAttachment === attachment) this.dispatchAttachment = null;
     };
   }
 
@@ -112,7 +110,7 @@ export class LocalWorkerService {
       failure: this.failure,
       layout: this.layout ? { ...this.layout } : null,
       targetAccess: "none" as const,
-      dispatchAccepted: this.state === "ready" && this.dispatchAttached,
+      dispatchAccepted: this.state === "ready" && this.dispatchAttachment !== null,
       supportedProtocolVersions: [...this.configuration.supportedProtocolVersions],
     });
   }
@@ -143,7 +141,7 @@ export class LocalWorkerService {
     checks.push({
       id: "dispatch",
       passed: true,
-      detail: this.dispatchAttached
+      detail: this.dispatchAttachment !== null
         ? "authenticated_dispatch_enabled_by_trusted_composition"
         : "dispatch_disabled",
     });
