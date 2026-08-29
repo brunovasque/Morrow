@@ -20,7 +20,7 @@
 
 ## Próxima ação exata
 
-Publicar e revisar somente o candidate P2-PR06 na branch `mvo/p2-pr06-recovery`. O código/teste `d2c54de` implementa reconnect, retry idempotente, fila durável, checkpoint e estado online/offline; testes focados passaram 11/11 e a suíte completa 120/120. A PR ainda não existe remotamente, portanto o resultado permanece `RUNNING/GREEN_CANDIDATE`, não `PROVEN`.
+Atualizar e revisar somente a PR #10 da P2-PR06 na branch `mvo/p2-pr06-recovery`. O primeiro head remoto `3669c8a` revelou ausência de posse única da raiz, continuidade indevida no mesmo target com resultado incerto e leitura do snapshot antes do limite. O hardening `9b02ba5` corrige essas três superfícies e `bfecf40` prova o limite pré-leitura; testes focados passaram 13/13 e a suíte completa 122/122. O resultado permanece `RUNNING/GREEN_CANDIDATE`, não `PROVEN`, até publicação e revalidação do novo head remoto.
 
 P2-PR05 foi integrada pela PR #9 em `9b96a8b`; a base integrada passou `109/109` e ficou limpa. Mantenha `GPT-5.6 Sol / xhigh` para P2-PR06, porque recovery e idempotência após restart são fronteiras críticas. Nesta PR permanecem proibidos ConPTY/P3, transcript/redaction/P4, credencial real, transporte de rede concreto e qualquer target externo, inclusive Enova.
 

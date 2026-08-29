@@ -43,7 +43,9 @@ control.dispatch bruto
   -> checkpoint completed/failed/blocked ou retorno seguro a queued
 ```
 
-O snapshot `worker-recovery-v1.json` fica sob uma raiz absoluta que contém `.morrow`. Escrita usa arquivo exclusivo temporário, sincronização e rename; leitura recusa arquivo simbólico, JSON malformado, shape desconhecido, capacidade excedida, fingerprint divergente ou checksum incorreto. A raiz também recusa ancestrais simbólicos antes de criar arquivos.
+O snapshot `worker-recovery-v1.json` fica sob uma raiz absoluta que contém `.morrow`. Escrita usa arquivo exclusivo temporário, sincronização e rename; leitura verifica o tamanho antes de carregar e recusa arquivo simbólico, JSON malformado, shape desconhecido, capacidade excedida, fingerprint divergente ou checksum incorreto. A raiz também recusa ancestrais simbólicos antes de criar arquivos.
+
+Uma lease `worker-recovery-v1.lock` dá posse da raiz a um único coordenador. Outra instância viva é recusada antes de ler/mutar o estado. Se o processo dono morreu, a próxima instância remove apenas a lease cujo PID já não existe e assume a raiz; lease malformada falha fechada. `close()` libera a posse em shutdown ordenado.
 
 ## Idempotência e retry
 
@@ -56,7 +58,7 @@ Retorno automático a `queued` só ocorre para recusas declaradas como anteriore
 - `QUOTA_REJECTED`;
 - `BUDGET_REJECTED`.
 
-Exceção na fronteira, resultado estruturalmente inválido, perda de sessão/lease durante `running` ou outro resultado incerto viram `blocked`. O sistema não transforma incerteza em retry.
+Exceção na fronteira, resultado estruturalmente inválido, perda de sessão/lease durante `running` ou outro resultado incerto viram `blocked`. O sistema não transforma incerteza em retry. Enquanto existir resultado desconhecido, novos dispatches do mesmo target permanecem `queued:target_blocked_by_unknown_outcome`; outro efeito não pode atravessar uma superfície cujo estado ficou incerto.
 
 ## Regra de kill/restart
 
@@ -91,7 +93,7 @@ As fixtures usam somente diretórios temporários `.morrow` e target nominal fic
 - reconexão drena pendência em ordem e com idempotency key preservada;
 - retry permitido somente após recusa conhecida anterior ao efeito;
 - resultado incerto bloqueia e derruba conectividade;
-- corrupção/checksum e capacidade são fail-closed;
+- corrupção/checksum, tamanho, capacidade e concorrência de dois coordenadores são fail-closed;
 - provas de segurança e saída sensível não chegam ao snapshot;
 - processo separado reinicia, retoma `queued` uma vez e não repete `completed`;
 - processo é morto depois de gravar o efeito; o restart bloqueia o `running` sem replay.
