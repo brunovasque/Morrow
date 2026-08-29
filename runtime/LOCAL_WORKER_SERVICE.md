@@ -51,7 +51,7 @@ O host ainda não é um serviço Windows instalado/autostart e seu stdin não tr
 
 O host básico continua sem transportar trabalho pelo stdin. A composição confiável conecta o protocolo autenticado ao `WorkerRecoveryCoordinator`; o coordenador só entrega o corpo governado à fronteira de tentativa depois do checkpoint `running`. Um restart nunca herda status `online`: a nova instância exige nova sessão e heartbeat.
 
-O estado fica em filho gerenciado de `stateRoot`, nunca no projeto/terminal do operador. O snapshot não contém envelope, credencial, script, prompt nem saída de processo.
+O estado fica em filho gerenciado de `stateRoot`, nunca no projeto/terminal do operador. O snapshot não contém envelope, credencial, script, prompt nem saída de processo. A proteção de replay sobrevive ao restart usando apenas hashes de message ID/nonce e sequência por escopo; nenhum material de autenticação é recuperável desse checkpoint.
 
 ## Fora destas etapas
 

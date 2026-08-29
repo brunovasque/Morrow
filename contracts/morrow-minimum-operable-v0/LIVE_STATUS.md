@@ -12,7 +12,7 @@
 - `active_phase`: `P2`
 - `active_pr_id`: `P2-PR06`
 - `active_route_node`: `WORKER_RECOVERY_AND_OFFLINE_STATE`
-- `active_subaction`: `P2_PR06_PUBLISH_AND_REVIEW_REMOTE_HEAD`
+- `active_subaction`: `P2_PR06_PUBLISH_REPLAY_LIVENESS_HARDENING`
 - `expected_branch_prefix`: `mvo/p2-pr06-`
 - `write_execution_allowed`: `yes, scoped only to P2-PR06 in a dedicated branch`
 - `next_authorized_action`: `START_P2_PR06`
@@ -20,7 +20,7 @@
 
 ## Próxima ação exata
 
-Atualizar e revisar somente a PR #10 da P2-PR06 na branch `mvo/p2-pr06-recovery`. O primeiro head remoto `3669c8a` revelou ausência de posse única da raiz, continuidade indevida no mesmo target com resultado incerto e leitura do snapshot antes do limite. O hardening `9b02ba5` corrige essas superfícies, `bfecf40` prova o limite pré-leitura e `163f98e` serializa accept/close antes de liberar a lease; testes focados passaram 14/14 e a suíte completa 123/123. O resultado permanece `RUNNING/GREEN_CANDIDATE`, não `PROVEN`, até publicação e revalidação do novo head remoto.
+Atualizar e revisar somente a PR #10 da P2-PR06 na branch `mvo/p2-pr06-recovery`. Depois do head remoto `4766631`, a revisão adversarial encontrou replay/sequence não durável, drenagem indevida com heartbeat `busy/draining`, renovação tardia capaz de esconder gap de lease e resultado sem binding do `idempotencyKey`. O hardening `2a0d59b` corrige essas superfícies, usa o relógio confiável do coordenador na validação e exige igualdade dos IDs `running`; testes focados passaram 21/21 e a suíte completa 130/130. O resultado permanece `RUNNING/GREEN_CANDIDATE`, não `PROVEN`, até publicação e revalidação do novo head remoto.
 
 P2-PR05 foi integrada pela PR #9 em `9b96a8b`; a base integrada passou `109/109` e ficou limpa. Mantenha `GPT-5.6 Sol / xhigh` para P2-PR06, porque recovery e idempotência após restart são fronteiras críticas. Nesta PR permanecem proibidos ConPTY/P3, transcript/redaction/P4, credencial real, transporte de rede concreto e qualquer target externo, inclusive Enova.
 

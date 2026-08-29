@@ -7,7 +7,7 @@
 
 ## Objetivo
 
-P2-PR06 torna explícito o que acontece quando o PC ou o processo local fica indisponível. Trabalho autenticado pode aguardar numa fila durável, mas só entra em execução depois de `worker.hello` e de um `worker.heartbeat` autenticado com lease ainda válido. PC desligado, Worker parado ou heartbeat vencido significam `offline`; nenhum executor é chamado nesse estado.
+P2-PR06 torna explícito o que acontece quando o PC ou o processo local fica indisponível. Trabalho autenticado pode aguardar numa fila durável, mas só entra em execução depois de `worker.hello` e de um `worker.heartbeat` autenticado, com status `ready` e lease ainda válido. PC desligado, Worker parado ou heartbeat vencido significam `offline`; nenhum executor é chamado nesse estado. `busy` e `draining` renovam liveness, mas não retiram trabalho novo da fila.
 
 O coordenador não é um transporte de rede e não aceita comando, script, prompt, credencial ou prova de segurança para persistência. Ele fica entre o protocolo autenticado da P2-PR01 e a tentativa governada da P2-PR05. O transporte futuro entrega mensagens brutas e um contexto autenticado confiável; a composição cria, para cada tentativa, uma nova mensagem autenticada com o mesmo `idempotencyKey`.
 
@@ -45,6 +45,8 @@ control.dispatch bruto
 
 O snapshot `worker-recovery-v1.json` fica sob uma raiz absoluta que contém `.morrow`. Escrita usa arquivo exclusivo temporário, sincronização e rename; leitura verifica o tamanho antes de carregar e recusa arquivo simbólico, JSON malformado, shape desconhecido, capacidade excedida, fingerprint divergente ou checksum incorreto. A raiz também recusa ancestrais simbólicos antes de criar arquivos.
 
+A janela de replay faz parte do mesmo checkpoint atômico. Ela persiste somente hashes SHA-256 de `messageId` e nonce, expiração e último `sequence` por escopo autenticado; o valor do nonce, proof, credential e envelope não são gravados. Entradas ainda válidas e sequências não sofrem evicção silenciosa: capacidade esgotada falha antes do efeito. Assim restart não apaga `REPLAY_DETECTED`/`OUT_OF_ORDER`, e retry legítimo precisa conservar `idempotencyKey` enquanto usa novo message ID, nonce, prova e sequência crescente.
+
 Uma lease `worker-recovery-v1.lock` dá posse da raiz a um único coordenador. Outra instância viva é recusada antes de ler/mutar o estado. Se o processo dono morreu, a próxima instância remove apenas a lease cujo PID já não existe e assume a raiz; lease malformada falha fechada. `close()` impede novos aceites, espera operações já admitidas e mutações pendentes, e somente então libera a posse. Assim uma validação assíncrona não pode escrever depois que outro coordenador assumiu a raiz.
 
 ## Idempotência e retry
@@ -58,7 +60,7 @@ Retorno automático a `queued` só ocorre para recusas declaradas como anteriore
 - `QUOTA_REJECTED`;
 - `BUDGET_REJECTED`.
 
-Exceção na fronteira, resultado estruturalmente inválido, perda de sessão/lease durante `running` ou outro resultado incerto viram `blocked`. O sistema não transforma incerteza em retry. Enquanto existir resultado desconhecido, novos dispatches do mesmo target permanecem `queued:target_blocked_by_unknown_outcome`; outro efeito não pode atravessar uma superfície cujo estado ficou incerto.
+Exceção na fronteira, resultado estruturalmente inválido, divergência do `idempotencyKey` devolvido, perda de sessão/lease durante `running` ou outro resultado incerto viram `blocked`. A lease é conferida novamente no settlement; uma renovação que chega depois de um intervalo vencido não apaga a perda, exige reconexão e bloqueia o efeito em curso. Heartbeat precisa informar exatamente os dispatches `running` conhecidos. O sistema não transforma incerteza em retry. Enquanto existir resultado desconhecido, novos dispatches do mesmo target permanecem `queued:target_blocked_by_unknown_outcome`; outro efeito não pode atravessar uma superfície cujo estado ficou incerto.
 
 ## Regra de kill/restart
 
@@ -75,9 +77,9 @@ Já um registro `queued` prova que a fronteira de efeito não foi cruzada. Após
 
 ## Persistência mínima e segredos
 
-Não são persistidos:
+Não são persistidos em claro:
 
-- envelope, authorization, credential ID, nonce ou proof;
+- envelope, authorization, credential ID, nonce ou proof; somente hashes de replay sem material de autenticação são guardados;
 - script, prompt, comando, ambiente ou Secret Broker handle;
 - stdout/stderr ou resultado completo da execução.
 
@@ -90,6 +92,9 @@ As fixtures usam somente diretórios temporários `.morrow` e target nominal fic
 - fila offline não chama o executor;
 - hello sem heartbeat não declara o Worker online;
 - heartbeat vencido ou sessão não anunciada é recusado;
+- `busy`/`draining` não iniciam fila, IDs `running` precisam coincidir e lease vencida é conferida também no settlement;
+- replay/ordenação continuam bloqueados depois do restart sem persistir nonce/proof em claro;
+- resultado com chave idempotente divergente é tratado como resultado incerto;
 - reconexão drena pendência em ordem e com idempotency key preservada;
 - retry permitido somente após recusa conhecida anterior ao efeito;
 - resultado incerto bloqueia e derruba conectividade;
