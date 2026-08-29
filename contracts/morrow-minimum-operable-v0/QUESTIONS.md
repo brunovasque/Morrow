@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhum de produto; P2-PR04 corrigiu achados do review da PR #8 e aguarda publicação/revisão do novo head remoto
+- bloqueio atual: integração da PR #8; depois dela, a próxima unidade autorizada é `P2-PR05`
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 
