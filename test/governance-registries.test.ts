@@ -327,6 +327,27 @@ test("Secret Broker makes concurrent retries idempotent for one resolved approva
   assert.deepEqual(retry, first);
 });
 
+test("Secret Broker refuses one handle id being rebound to another approval", async () => {
+  const resolver = new GovernanceResolver(registries());
+  const firstResolution = resolver.resolve(request());
+  const secondResolution = resolver.resolve(request({ stepId: "step-2" }));
+  assert.equal(firstResolution.ok, true);
+  assert.equal(secondResolution.ok, true);
+  if (!firstResolution.ok || !secondResolution.ok) return;
+  const broker = new SecretBrokerBoundary(resolver, async (approved) => ({
+    handleId: "handle-must-be-unique",
+    consumer: approved.consumer,
+    delivery: "opaque-handle",
+    expiresAt: "2026-08-28T12:01:00.000Z",
+  }));
+
+  const first = await broker.issue(firstResolution.authority.secretAccess[0], "2026-08-28T12:00:00.000Z");
+  const rebound = await broker.issue(secondResolution.authority.secretAccess[0], "2026-08-28T12:00:00.000Z");
+  assert.equal(first.ok, true);
+  assert.equal(rebound.ok, false);
+  if (!rebound.ok) assert.equal(rebound.detail, "secret_handle_id_reused");
+});
+
 test("Secret Broker rejects structurally forged access without calling the issuer", async () => {
   const resolver = new GovernanceResolver(registries());
   let calls = 0;
