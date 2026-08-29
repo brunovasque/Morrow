@@ -11,6 +11,7 @@ import {
   type ControlDispatchBody,
   type WorkerHeartbeatBody,
   type WorkerHelloBody,
+  type WorkerProtocolMessage,
   type WorkerProtocolRejectionCode,
 } from "./worker-protocol.ts";
 
@@ -132,7 +133,25 @@ interface RecoveryState {
   revision: number;
   updatedAt: string;
   connection: RecoveryConnectionState;
+  replay: RecoveryReplayState;
   dispatches: RecoveryDispatchRecord[];
+}
+
+interface RecoveryReplayEntry {
+  messageIdHash: string;
+  nonceHash: string;
+  expiresAt: string;
+}
+
+interface RecoveryReplaySequence {
+  scopeHash: string;
+  lastAcceptedSequence: number;
+  updatedAt: string;
+}
+
+interface RecoveryReplayState {
+  entries: RecoveryReplayEntry[];
+  sequences: RecoveryReplaySequence[];
 }
 
 interface PersistedRecoveryState extends RecoveryState {
@@ -156,6 +175,8 @@ const recoveryFileName = "worker-recovery-v1.json";
 const defaultMaxDispatchRecords = 512;
 const absoluteMaxDispatchRecords = 4_096;
 const maxRecoverySnapshotBytes = 33_554_432;
+const maxReplayEntries = 4_096;
+const maxReplaySequences = 512;
 const retryableWithoutEffect = new Set([
   "WORKER_NOT_READY",
   "LOCK_UNAVAILABLE",
@@ -231,9 +252,10 @@ export class WorkerRecoveryCoordinator {
   private async acceptOpen(input: unknown): Promise<RecoveryAcceptanceResult> {
     let validation: ReturnType<typeof validateWorkerProtocolMessage>;
     try {
+      const context = await this.configuration.validationContext(input);
       validation = validateWorkerProtocolMessage(
         input,
-        await this.configuration.validationContext(input),
+        { ...context, now: trustedNow(this.configuration.clock) },
       );
     } catch {
       return acceptanceRejected("PROTOCOL_REJECTED", "dispatch_validation_boundary_failed");
@@ -258,27 +280,39 @@ export class WorkerRecoveryCoordinator {
     let accepted: RecoveryAcceptanceResult;
     try {
       accepted = await this.mutate((draft, now) => {
+        const replayRejection = consumeReplayEnvelope(draft, validation.message, now);
+        if (replayRejection) {
+          return {
+            value: {
+              ok: false,
+              code: "PROTOCOL_REJECTED",
+              detail: replayRejection.detail,
+              protocolCode: replayRejection.code,
+            },
+            changed: false,
+          };
+        }
         const existingByKey = draft.dispatches.find((record) => record.idempotencyKey === body.idempotencyKey);
         if (existingByKey) {
           if (existingByKey.dispatchId !== body.dispatchId || existingByKey.fingerprint !== fingerprint) {
             return {
               value: acceptanceRejected("IDEMPOTENCY_CONFLICT", "idempotency_key_rebound"),
-              changed: false,
+              changed: true,
             };
           }
-          return { value: { ok: true, duplicate: true, dispatch: viewRecord(existingByKey) }, changed: false };
+          return { value: { ok: true, duplicate: true, dispatch: viewRecord(existingByKey) }, changed: true };
         }
         const existingByDispatch = draft.dispatches.find((record) => record.dispatchId === body.dispatchId);
         if (existingByDispatch) {
           return {
             value: acceptanceRejected("IDEMPOTENCY_CONFLICT", "dispatch_id_rebound"),
-            changed: false,
+            changed: true,
           };
         }
         if (draft.dispatches.length >= this.maxDispatchRecords) {
           return {
             value: acceptanceRejected("DISPATCH_CAPACITY_EXHAUSTED", "durable_dispatch_capacity_exhausted"),
-            changed: false,
+            changed: true,
           };
         }
         const record: RecoveryDispatchRecord = {
@@ -315,9 +349,10 @@ export class WorkerRecoveryCoordinator {
   private async observeOpen(input: unknown): Promise<RecoveryObservationResult> {
     let validation: ReturnType<typeof validateWorkerProtocolMessage>;
     try {
+      const context = await this.configuration.validationContext(input);
       validation = validateWorkerProtocolMessage(
         input,
-        await this.configuration.validationContext(input),
+        { ...context, now: trustedNow(this.configuration.clock) },
       );
     } catch {
       return observationRejected("PROTOCOL_REJECTED", "liveness_validation_boundary_failed");
@@ -338,16 +373,25 @@ export class WorkerRecoveryCoordinator {
     }
 
     try {
+      let rejected: RecoveryObservationResult | null = null;
       if (validation.message.messageType === "worker.hello") {
         const hello = validation.message.body as WorkerHelloBody;
         await this.mutate((draft, now) => {
+          const replayRejection = consumeReplayEnvelope(draft, validation.message, now);
+          if (replayRejection) {
+            rejected = observationRejected("PROTOCOL_REJECTED", replayRejection.detail, replayRejection.code);
+            return { value: undefined, changed: false };
+          }
+          const leaseExpired = connectionLeaseExpired(draft.connection, Date.parse(now));
           if (draft.connection.workerSessionId !== null && draft.connection.workerSessionId !== hello.workerSessionId) {
             blockRunning(draft, "worker_session_replaced_during_execution", now);
           }
           if (
-            draft.connection.state === "online"
+            !leaseExpired
+            && draft.connection.state === "online"
             && draft.connection.workerSessionId === hello.workerSessionId
-          ) return { value: undefined, changed: false };
+          ) return { value: undefined, changed: true };
+          if (leaseExpired) blockRunning(draft, "heartbeat_lease_expired_during_execution", now);
           draft.connection = {
             state: "connecting",
             workerSessionId: hello.workerSessionId,
@@ -357,24 +401,47 @@ export class WorkerRecoveryCoordinator {
           };
           return { value: undefined, changed: true };
         });
+        if (rejected) return rejected;
       } else {
         const heartbeat = validation.message.body as WorkerHeartbeatBody;
         const nowMs = trustedNowMs(this.configuration.clock);
         if (Date.parse(heartbeat.leaseExpiresAt) <= nowMs) {
           return observationRejected("HEARTBEAT_LEASE_EXPIRED", "heartbeat_lease_not_in_future");
         }
-        let rejected: RecoveryObservationResult | null = null;
         await this.mutate((draft, now) => {
           if (draft.connection.workerSessionId !== heartbeat.workerSessionId) {
             rejected = observationRejected("WORKER_SESSION_MISMATCH", "heartbeat_session_not_announced");
             return { value: undefined, changed: false };
           }
+          if (connectionLeaseExpired(draft.connection, Date.parse(now))) {
+            blockRunning(draft, "heartbeat_lease_expired_during_execution", now);
+            draft.connection = {
+              state: "offline",
+              workerSessionId: null,
+              leaseExpiresAt: null,
+              reason: "heartbeat_lease_expired",
+              lastSeenAt: draft.connection.lastSeenAt,
+            };
+            rejected = observationRejected(
+              "HEARTBEAT_LEASE_EXPIRED",
+              "heartbeat_previous_lease_expired_reconnect_required",
+            );
+            return { value: undefined, changed: true };
+          }
+          const reportedRunning = new Set(heartbeat.runningDispatchIds);
           const conflicting = heartbeat.runningDispatchIds.find((dispatchId) => {
             const record = draft.dispatches.find((item) => item.dispatchId === dispatchId);
             return !record || record.status !== "running";
-          });
+          }) ?? draft.dispatches.find(
+            (record) => record.status === "running" && !reportedRunning.has(record.dispatchId),
+          )?.dispatchId;
           if (conflicting) {
-            rejected = observationRejected("HEARTBEAT_STATE_CONFLICT", "heartbeat_reports_unknown_running_dispatch");
+            rejected = observationRejected("HEARTBEAT_STATE_CONFLICT", "heartbeat_running_dispatch_state_mismatch");
+            return { value: undefined, changed: false };
+          }
+          const replayRejection = consumeReplayEnvelope(draft, validation.message, now);
+          if (replayRejection) {
+            rejected = observationRejected("PROTOCOL_REJECTED", replayRejection.detail, replayRejection.code);
             return { value: undefined, changed: false };
           }
           draft.connection = {
@@ -387,7 +454,7 @@ export class WorkerRecoveryCoordinator {
           return { value: undefined, changed: true };
         });
         if (rejected) return rejected;
-        await this.drainOpen();
+        if (heartbeat.status === "ready") await this.drainOpen();
       }
     } catch {
       return observationRejected("PERSISTENCE_FAILED", "liveness_checkpoint_failed");
@@ -551,7 +618,7 @@ export class WorkerRecoveryCoordinator {
         await this.blockUnknownAttempt(claimed, "attempt_outcome_unknown");
         return;
       }
-      if (!validAttemptResult(result, claimed.dispatchId)) {
+      if (!validAttemptResult(result, claimed.dispatchId, claimed.body.idempotencyKey)) {
         await this.blockUnknownAttempt(claimed, "attempt_result_invalid");
         return;
       }
@@ -621,6 +688,21 @@ export class WorkerRecoveryCoordinator {
       const record = draft.dispatches.find((item) => item.dispatchId === claimed.dispatchId);
       if (!record || record.status !== "running" || record.attemptId !== claimed.attemptId) {
         return { value: false, changed: false };
+      }
+      if (connectionLeaseExpired(draft.connection, Date.parse(now))) {
+        record.status = "blocked";
+        record.attemptId = null;
+        record.reason = "heartbeat_lease_expired_during_execution";
+        record.terminal = null;
+        record.updatedAt = now;
+        draft.connection = {
+          state: "offline",
+          workerSessionId: null,
+          leaseExpiresAt: null,
+          reason: "heartbeat_lease_expired",
+          lastSeenAt: draft.connection.lastSeenAt,
+        };
+        return { value: false, changed: true };
       }
       record.attemptId = null;
       record.updatedAt = now;
@@ -889,6 +971,10 @@ function initialState(workerId: string, now: string): RecoveryState {
       reason: "not_connected",
       lastSeenAt: null,
     },
+    replay: {
+      entries: [],
+      sequences: [],
+    },
     dispatches: [],
   };
 }
@@ -941,13 +1027,65 @@ function blockRunning(state: RecoveryState, reason: string, now: string): void {
   }
 }
 
+function consumeReplayEnvelope(
+  state: RecoveryState,
+  message: WorkerProtocolMessage,
+  now: string,
+): { code: "REPLAY_DETECTED" | "OUT_OF_ORDER"; detail: string } | null {
+  const nowMs = Date.parse(now);
+  state.replay.entries = state.replay.entries.filter((entry) => Date.parse(entry.expiresAt) > nowMs);
+  const messageIdHash = canonicalSha256(message.messageId);
+  const nonceHash = canonicalSha256(message.security.nonce);
+  if (state.replay.entries.some((entry) => (
+    entry.messageIdHash === messageIdHash || entry.nonceHash === nonceHash
+  ))) {
+    return { code: "REPLAY_DETECTED", detail: "durable_message_id_or_nonce_already_seen" };
+  }
+
+  const scopeHash = replaySequenceScope(message);
+  const sequence = state.replay.sequences.find((entry) => entry.scopeHash === scopeHash);
+  if (sequence && message.sequence <= sequence.lastAcceptedSequence) {
+    return { code: "OUT_OF_ORDER", detail: "durable_sequence_not_greater_than_last_accepted" };
+  }
+  if (state.replay.entries.length >= maxReplayEntries) {
+    throw new Error("worker_recovery_replay_window_capacity_exhausted");
+  }
+  if (!sequence && state.replay.sequences.length >= maxReplaySequences) {
+    throw new Error("worker_recovery_replay_sequence_capacity_exhausted");
+  }
+
+  state.replay.entries.push({ messageIdHash, nonceHash, expiresAt: message.expiresAt });
+  if (sequence) {
+    sequence.lastAcceptedSequence = message.sequence;
+    sequence.updatedAt = now;
+  } else {
+    state.replay.sequences.push({
+      scopeHash,
+      lastAcceptedSequence: message.sequence,
+      updatedAt: now,
+    });
+  }
+  return null;
+}
+
+function replaySequenceScope(message: WorkerProtocolMessage): string {
+  const workerSessionId = message.messageType === "worker.hello" || message.messageType === "worker.heartbeat"
+    ? (message.body as WorkerHelloBody | WorkerHeartbeatBody).workerSessionId
+    : null;
+  return canonicalSha256({ sender: message.sender, workerSessionId });
+}
+
 function connectionLeaseExpired(connection: RecoveryConnectionState, nowMs: number): boolean {
   return connection.state === "online"
     && connection.leaseExpiresAt !== null
     && Date.parse(connection.leaseExpiresAt) <= nowMs;
 }
 
-function validAttemptResult(value: unknown, dispatchId: string): value is AuthenticatedDispatchResult {
+function validAttemptResult(
+  value: unknown,
+  dispatchId: string,
+  idempotencyKey: string,
+): value is AuthenticatedDispatchResult {
   if (!isDataRecord(value) || typeof value.ok !== "boolean" || typeof value.duplicate !== "boolean") return false;
   if (value.ok === false) {
     if (!onlyKeys(value, ["ok", "duplicate", "code", "detail", "protocolCode"])) return false;
@@ -957,7 +1095,7 @@ function validAttemptResult(value: unknown, dispatchId: string): value is Authen
   if (exactKeys(value, ["ok", "duplicate", "execution"]) !== null || !isDataRecord(value.execution)) return false;
   const execution = value.execution;
   return execution.dispatchId === dispatchId
-    && isSafeReason(execution.idempotencyKey)
+    && execution.idempotencyKey === idempotencyKey
     && (execution.status === "completed" || execution.status === "failed" || execution.status === "timed_out")
     && (execution.exitCode === null || nonNegativeSafeInteger(execution.exitCode))
     && typeof execution.timedOut === "boolean";
@@ -965,11 +1103,12 @@ function validAttemptResult(value: unknown, dispatchId: string): value is Authen
 
 function validPersistedState(value: unknown, workerId: string, maximum: number): value is PersistedRecoveryState {
   if (!isDataRecord(value) || exactKeys(value, [
-    "format", "workerId", "revision", "updatedAt", "connection", "dispatches", "checksum",
+    "format", "workerId", "revision", "updatedAt", "connection", "replay", "dispatches", "checksum",
   ]) !== null) return false;
   if (value.format !== recoveryFormat || value.workerId !== workerId || !isIdentifier(value.workerId)) return false;
   if (!nonNegativeSafeInteger(value.revision) || !isTimestamp(value.updatedAt) || !isSha256(value.checksum)) return false;
   if (!validConnection(value.connection)) return false;
+  if (!validReplayState(value.replay)) return false;
   if (!Array.isArray(value.dispatches) || value.dispatches.length > maximum) return false;
   if (!value.dispatches.every(validDispatchRecord)) return false;
   const dispatchIds = value.dispatches.map((record) => record.dispatchId);
@@ -977,6 +1116,32 @@ function validPersistedState(value: unknown, workerId: string, maximum: number):
   if (new Set(dispatchIds).size !== dispatchIds.length || new Set(idempotencyKeys).size !== idempotencyKeys.length) return false;
   const { checksum, ...state } = value;
   return canonicalSha256(state) === checksum;
+}
+
+function validReplayState(value: unknown): value is RecoveryReplayState {
+  if (!isDataRecord(value) || exactKeys(value, ["entries", "sequences"]) !== null) return false;
+  if (!Array.isArray(value.entries) || value.entries.length > maxReplayEntries) return false;
+  if (!Array.isArray(value.sequences) || value.sequences.length > maxReplaySequences) return false;
+  if (!value.entries.every((entry) => (
+    isDataRecord(entry)
+    && exactKeys(entry, ["messageIdHash", "nonceHash", "expiresAt"]) === null
+    && isSha256(entry.messageIdHash)
+    && isSha256(entry.nonceHash)
+    && isTimestamp(entry.expiresAt)
+  ))) return false;
+  if (!value.sequences.every((entry) => (
+    isDataRecord(entry)
+    && exactKeys(entry, ["scopeHash", "lastAcceptedSequence", "updatedAt"]) === null
+    && isSha256(entry.scopeHash)
+    && nonNegativeSafeInteger(entry.lastAcceptedSequence)
+    && isTimestamp(entry.updatedAt)
+  ))) return false;
+  const messageHashes = value.entries.map((entry) => entry.messageIdHash);
+  const nonceHashes = value.entries.map((entry) => entry.nonceHash);
+  const scopeHashes = value.sequences.map((entry) => entry.scopeHash);
+  return new Set(messageHashes).size === messageHashes.length
+    && new Set(nonceHashes).size === nonceHashes.length
+    && new Set(scopeHashes).size === scopeHashes.length;
 }
 
 function validConnection(value: unknown): value is RecoveryConnectionState {
@@ -1095,8 +1260,14 @@ function acceptanceRejected(code: RecoveryAcceptanceCode, detail: string): Recov
   return deepFreeze({ ok: false, code, detail });
 }
 
-function observationRejected(code: RecoveryObservationCode, detail: string): RecoveryObservationResult {
-  return deepFreeze({ ok: false, code, detail });
+function observationRejected(
+  code: RecoveryObservationCode,
+  detail: string,
+  protocolCode?: WorkerProtocolRejectionCode,
+): RecoveryObservationResult {
+  return deepFreeze(protocolCode === undefined
+    ? { ok: false, code, detail }
+    : { ok: false, code, detail, protocolCode });
 }
 
 function canonicalSha256(value: unknown): string {

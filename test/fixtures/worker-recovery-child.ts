@@ -12,7 +12,12 @@ const mode = process.argv[2];
 const stateRoot = process.argv[3];
 const effectPath = process.argv[4];
 const now = "2026-08-29T12:00:00.000Z";
-const worker: WorkerProtocolPeer = { kind: "worker", id: "worker-local-1", instanceId: "worker-instance-1" };
+const workerSessionId = `worker-session-${process.pid}`;
+const worker: WorkerProtocolPeer = {
+  kind: "worker",
+  id: "worker-local-1",
+  instanceId: `worker-instance-${process.pid}`,
+};
 const control: WorkerProtocolPeer = { kind: "control-plane", id: "control-main", instanceId: "control-instance-1" };
 
 if (!mode || !stateRoot || !effectPath) throw new Error("worker_recovery_fixture_arguments_missing");
@@ -68,7 +73,7 @@ function workerMessage(messageType: "worker.hello" | "worker.heartbeat"): Worker
   return {
     protocol: WORKER_PROTOCOL_ID,
     protocolVersion: WORKER_PROTOCOL_VERSION,
-    messageId: `recovery-${messageType.replace(".", "-")}-1`,
+    messageId: `recovery-${messageType.replace(".", "-")}-${process.pid}`,
     messageType,
     sender: worker,
     recipient: control,
@@ -79,12 +84,12 @@ function workerMessage(messageType: "worker.hello" | "worker.heartbeat"): Worker
     security: {
       scheme: "transport-bound-v1",
       credentialId: "worker-credential-1",
-      nonce: `recovery-${messageType.replace(".", "-")}-nonce-1234567890`,
+      nonce: `recovery-${messageType.replace(".", "-")}-nonce-${process.pid}-1234567890`,
       proof: "fixture-worker-proof-never-persist",
     },
     body: messageType === "worker.hello"
       ? {
-          workerSessionId: "worker-session-1",
+          workerSessionId,
           hostId: "windows-host-1",
           platform: "windows",
           agentVersion: "0.1.0",
@@ -96,7 +101,7 @@ function workerMessage(messageType: "worker.hello" | "worker.heartbeat"): Worker
           startedAt: "2026-08-29T11:55:00.000Z",
         }
       : {
-          workerSessionId: "worker-session-1",
+          workerSessionId,
           status: "ready",
           observedAt: "2026-08-29T11:59:55.000Z",
           leaseExpiresAt: "2026-08-29T12:01:00.000Z",
