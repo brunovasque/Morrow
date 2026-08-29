@@ -785,20 +785,22 @@ function validBudgetPolicy(value: unknown): value is BudgetPolicySpec {
     && typeof value.enabled === "boolean";
 }
 
+class RegistryValidationError extends Error {}
+
 function buildRegistry<T>(values: readonly T[], validator: (value: unknown) => value is T, keyOf: (value: T) => string, label: string): ReadonlyMap<string, T> {
   try {
-    if (!Array.isArray(values) || values.length > 512) throw new Error(`${label}_registry_invalid`);
+    if (!Array.isArray(values) || values.length > 512) throw new RegistryValidationError(`${label}_registry_invalid`);
     const entries = new Map<string, T>();
     for (const raw of values) {
-      if (!validator(raw)) throw new Error(`${label}_descriptor_invalid`);
+      if (!validator(raw)) throw new RegistryValidationError(`${label}_descriptor_invalid`);
       const snapshot = deepFreeze(structuredClone(raw));
       const key = keyOf(snapshot);
-      if (entries.has(key)) throw new Error(`${label}_registry_duplicate`);
+      if (entries.has(key)) throw new RegistryValidationError(`${label}_registry_duplicate`);
       entries.set(key, snapshot);
     }
     return entries;
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith(`${label}_`)) throw error;
+    if (error instanceof RegistryValidationError) throw new Error(error.message);
     throw new Error(`${label}_descriptor_invalid`);
   }
 }

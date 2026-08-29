@@ -245,6 +245,18 @@ test("routing registries detach and freeze configuration snapshots", () => {
   assert.equal(Object.isFrozen(resolved.models[0].supportedEfforts), true);
 });
 
+test("routing registries sanitize hostile exceptions even when their prefix mimics an internal code", () => {
+  const hostile = new Proxy(runtime(), {
+    getPrototypeOf() { throw new Error("runtime_credential-value-must-not-leak"); },
+  });
+  assert.throws(
+    () => new RuntimeRegistry([hostile]),
+    (error: unknown) => error instanceof Error
+      && error.message === "runtime_descriptor_invalid"
+      && !error.message.includes("credential-value"),
+  );
+});
+
 function measuredPool(overrides: Partial<QuotaPoolSpec> = {}): QuotaPoolSpec {
   return {
     poolId: "quota-pool-a",
