@@ -15,7 +15,7 @@
 - `active_subaction`: `P2_PR04_ROUTING_QUOTA_BUDGET_GUARDS`
 - `expected_branch_prefix`: `mvo/p2-pr04-`
 - `write_execution_allowed`: `yes, scoped only to P2-PR04 in a dedicated branch`
-- `next_authorized_action`: `IMPLEMENT_P2_PR04`
+- `next_authorized_action`: `START_P2_PR04`
 - `next_authorized_actor`: `Architect/Executor`
 
 ## Próxima ação exata
