@@ -1,9 +1,29 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { realpath, stat } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import type { RuntimeAccessMode, RuntimeInvocation, RuntimeResult } from "./runtime-adapter.ts";
+import {
+  ProcessPipesTerminalBackend,
+  resolveTerminalPresentation,
+  validateTerminalBackendDescriptor,
+  type TerminalBackend,
+  type TerminalBackendDescriptor,
+  type TerminalBackendSession,
+  type TerminalCapabilities,
+  type TerminalInterrupt,
+  type TerminalPresentation,
+  type TerminalProtocol,
+} from "./terminal-backend.ts";
 
-export type TerminalBackendKind = "process-pipes" | "pty";
+export type {
+  TerminalBackend,
+  TerminalBackendDescriptor,
+  TerminalBackendKind,
+  TerminalCapabilities,
+  TerminalInterrupt,
+  TerminalPresentation,
+  TerminalPresentationMode,
+  TerminalProtocol,
+} from "./terminal-backend.ts";
 export type TerminalSessionStatus =
   | "starting"
   | "running"
@@ -11,12 +31,6 @@ export type TerminalSessionStatus =
   | "failed"
   | "timed_out"
   | "stopped";
-
-export interface TerminalCapabilities {
-  tty: boolean;
-  interactive: boolean;
-  resize: boolean;
-}
 
 export interface AgentWorkspaceBinding {
   workspaceId: string;
@@ -56,17 +70,20 @@ export type TerminalSessionEvent =
   | (TerminalEventBase & {
       type: "TERMINAL_SESSION_STARTED";
       payload: {
-        pid: number;
+        pid: number | null;
         cwd: string;
         command: string;
         args: string[];
-        backend: TerminalBackendKind;
+        backend: TerminalBackendDescriptor["kind"];
+        backendImplementationId: string;
+        terminalProtocol: TerminalProtocol;
         capabilities: TerminalCapabilities;
+        presentation: TerminalPresentation;
       };
     })
   | (TerminalEventBase & {
       type: "TERMINAL_OUTPUT";
-      payload: { stream: "stdout" | "stderr"; data: string };
+      payload: { stream: "stdout" | "stderr" | "terminal"; data: string };
     })
   | (TerminalEventBase & {
       type: "TERMINAL_INPUT_WRITTEN";
@@ -75,6 +92,14 @@ export type TerminalSessionEvent =
   | (TerminalEventBase & {
       type: "TERMINAL_INPUT_ENDED";
       payload: Record<string, never>;
+    })
+  | (TerminalEventBase & {
+      type: "TERMINAL_RESIZED";
+      payload: { columns: number; rows: number };
+    })
+  | (TerminalEventBase & {
+      type: "TERMINAL_INTERRUPT_REQUESTED";
+      payload: { kind: TerminalInterrupt };
     })
   | (TerminalEventBase & {
       type: "TERMINAL_SESSION_EXITED";
@@ -100,8 +125,11 @@ export interface TerminalSessionSnapshot {
   accessMode: RuntimeAccessMode;
   workspaceId: string;
   workspaceRoot: string;
-  backend: TerminalBackendKind;
+  backend: TerminalBackendDescriptor["kind"];
+  backendImplementationId: string;
+  terminalProtocol: TerminalProtocol;
   capabilities: TerminalCapabilities;
+  presentation: TerminalPresentation;
   status: TerminalSessionStatus;
   pid: number | null;
   startedAt: string;
@@ -147,7 +175,8 @@ export type TerminalEventListener = (event: TerminalSessionEvent) => void;
 interface SessionRecord {
   request: TerminalSessionRequest;
   workspaceRoot: string;
-  child: ChildProcessWithoutNullStreams;
+  backendSession: TerminalBackendSession;
+  backendDescriptor: TerminalBackendDescriptor;
   status: TerminalSessionStatus;
   startedAt: string;
   endedAt: string | null;
@@ -166,24 +195,25 @@ interface SessionRecord {
   completion: Promise<TerminalSessionResult>;
 }
 
-const PROCESS_CAPABILITIES: TerminalCapabilities = Object.freeze({
-  tty: false,
-  interactive: true,
-  resize: false,
-});
-
 export class TerminalSessionManager {
   private readonly managedWorkspaceRoot: string;
   private readonly maxEventsPerSession: number;
+  private readonly backend: TerminalBackend;
+  private readonly backendDescriptor: TerminalBackendDescriptor;
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly activeAgentInstances = new Map<string, string>();
   private readonly activeWorkspaceRoots = new Map<string, string>();
   private readonly listeners = new Set<TerminalEventListener>();
   private sequence = 0;
 
-  constructor(managedWorkspaceRoot: string, options: { maxEventsPerSession?: number } = {}) {
+  constructor(
+    managedWorkspaceRoot: string,
+    options: { maxEventsPerSession?: number; backend?: TerminalBackend } = {},
+  ) {
     this.managedWorkspaceRoot = resolve(managedWorkspaceRoot);
     this.maxEventsPerSession = options.maxEventsPerSession ?? 5_000;
+    this.backend = options.backend ?? new ProcessPipesTerminalBackend();
+    this.backendDescriptor = validateTerminalBackendDescriptor(this.backend.descriptor);
     if (!Number.isInteger(this.maxEventsPerSession) || this.maxEventsPerSession <= 0) {
       throw new Error("max_events_per_session_must_be_positive");
     }
@@ -213,17 +243,45 @@ export class TerminalSessionManager {
       resolveCompletion = resolvePromise;
     });
 
-    const child = spawn(request.command, request.args, {
+    const backendSession = this.backend.spawn({
+      command: request.command,
+      args: [...request.args],
       cwd: workspaceRoot,
       env: request.env ? { ...process.env, ...request.env } : process.env,
-      shell: false,
-      stdio: ["pipe", "pipe", "pipe"],
     });
+    let actualDescriptor: TerminalBackendDescriptor;
+    try {
+      actualDescriptor = validateTerminalBackendDescriptor(backendSession.descriptor);
+    } catch {
+      try {
+        backendSession.stop(true);
+      } catch {
+        // The invalid descriptor remains the authoritative refusal.
+      }
+      throw new Error("terminal_backend_session_descriptor_invalid");
+    }
+    if (
+      actualDescriptor.kind !== this.backendDescriptor.kind
+      || actualDescriptor.implementationId !== this.backendDescriptor.implementationId
+      || actualDescriptor.protocol !== this.backendDescriptor.protocol
+      || !sameTerminalCapabilities(
+        actualDescriptor.capabilities,
+        this.backendDescriptor.capabilities,
+      )
+    ) {
+      try {
+        backendSession.stop(true);
+      } catch {
+        // The descriptor mismatch remains the authoritative refusal.
+      }
+      throw new Error("terminal_backend_descriptor_changed_after_spawn");
+    }
 
     const record: SessionRecord = {
       request,
       workspaceRoot,
-      child,
+      backendSession,
+      backendDescriptor: actualDescriptor,
       status: "starting",
       startedAt: new Date().toISOString(),
       endedAt: null,
@@ -267,64 +325,90 @@ export class TerminalSessionManager {
 
   async write(terminalSessionId: string, data: string): Promise<void> {
     const record = this.requireWritableSession(terminalSessionId);
-    const accepted = record.child.stdin.write(data, "utf8");
+    const accepted = record.backendSession.write(data);
     this.emit(record, "TERMINAL_INPUT_WRITTEN", { bytes: Buffer.byteLength(data, "utf8") });
-    if (!accepted) {
-      await new Promise<void>((resolvePromise, reject) => {
-        record.child.stdin.once("drain", resolvePromise);
-        record.child.stdin.once("error", reject);
-      });
-    }
+    if (!accepted) await record.backendSession.waitForDrain();
   }
 
   endInput(terminalSessionId: string): void {
     const record = this.requireWritableSession(terminalSessionId);
-    record.child.stdin.end();
+    record.backendSession.endInput();
     this.emit(record, "TERMINAL_INPUT_ENDED", {});
+  }
+
+  resize(terminalSessionId: string, columns: number, rows: number): void {
+    const record = this.requireSession(terminalSessionId);
+    if (!this.isActive(record)) throw new Error("terminal_session_not_active");
+    if (
+      !Number.isInteger(columns)
+      || !Number.isInteger(rows)
+      || columns <= 0
+      || rows <= 0
+      || columns > 32_767
+      || rows > 32_767
+    ) {
+      throw new Error("terminal_dimensions_invalid");
+    }
+    if (!record.backendDescriptor.capabilities.resize) {
+      throw new Error("terminal_resize_not_supported");
+    }
+    record.backendSession.resize(columns, rows);
+    this.emit(record, "TERMINAL_RESIZED", { columns, rows });
+  }
+
+  interrupt(terminalSessionId: string, kind: TerminalInterrupt): void {
+    const record = this.requireSession(terminalSessionId);
+    if (!this.isActive(record)) throw new Error("terminal_session_not_active");
+    if (kind !== "ctrl-c" && kind !== "ctrl-break") {
+      throw new Error("terminal_interrupt_kind_invalid");
+    }
+    if (!record.backendDescriptor.capabilities.signals) {
+      throw new Error("terminal_interrupt_not_supported");
+    }
+    record.backendSession.interrupt(kind);
+    this.emit(record, "TERMINAL_INTERRUPT_REQUESTED", { kind });
   }
 
   stop(terminalSessionId: string): boolean {
     const record = this.requireSession(terminalSessionId);
     if (!this.isActive(record)) return false;
     record.stopped = true;
-    return record.child.kill("SIGTERM");
+    return record.backendSession.stop(false);
   }
 
   private attach(record: SessionRecord): void {
-    const { child, request } = record;
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
+    const { backendSession, request } = record;
 
-    child.once("spawn", () => {
+    backendSession.onStarted(() => {
       record.status = "running";
       record.startedAt = new Date().toISOString();
       this.emit(record, "TERMINAL_SESSION_STARTED", {
-        pid: child.pid!,
+        pid: backendSession.pid,
         cwd: record.workspaceRoot,
         command: request.command,
         args: [...request.args],
-        backend: "process-pipes",
-        capabilities: PROCESS_CAPABILITIES,
+        backend: record.backendDescriptor.kind,
+        backendImplementationId: record.backendDescriptor.implementationId,
+        terminalProtocol: record.backendDescriptor.protocol,
+        capabilities: record.backendDescriptor.capabilities,
+        presentation: resolveTerminalPresentation(record.backendDescriptor),
       });
 
       if (request.timeoutMs !== undefined) {
         record.timer = setTimeout(() => {
           record.timedOut = true;
-          child.kill("SIGKILL");
+          backendSession.stop(true);
         }, request.timeoutMs);
       }
     });
 
-    child.stdout.on("data", (chunk: string) => {
-      record.stdout += chunk;
-      this.emit(record, "TERMINAL_OUTPUT", { stream: "stdout", data: chunk });
-    });
-    child.stderr.on("data", (chunk: string) => {
-      record.stderr += chunk;
-      this.emit(record, "TERMINAL_OUTPUT", { stream: "stderr", data: chunk });
+    backendSession.onOutput((stream, chunk) => {
+      if (stream === "stderr") record.stderr += chunk;
+      else record.stdout += chunk;
+      this.emit(record, "TERMINAL_OUTPUT", { stream, data: chunk });
     });
 
-    child.once("error", (error) => {
+    backendSession.onError((error) => {
       if (record.settled) return;
       record.error = error.message;
       record.status = "failed";
@@ -336,7 +420,7 @@ export class TerminalSessionManager {
       this.settle(record);
     });
 
-    child.once("close", (exitCode, signal) => {
+    backendSession.onExit(({ exitCode, signal }) => {
       if (record.settled) return;
       record.exitCode = exitCode;
       record.signal = signal;
@@ -415,7 +499,7 @@ export class TerminalSessionManager {
 
   private requireWritableSession(terminalSessionId: string): SessionRecord {
     const record = this.requireSession(terminalSessionId);
-    if (!this.isActive(record) || record.child.stdin.destroyed || record.child.stdin.writableEnded) {
+    if (!this.isActive(record) || record.backendSession.inputClosed) {
       throw new Error("terminal_input_closed");
     }
     return record;
@@ -480,10 +564,13 @@ export class TerminalSessionManager {
       accessMode: record.request.accessMode,
       workspaceId: record.request.workspace.workspaceId,
       workspaceRoot: record.workspaceRoot,
-      backend: "process-pipes",
-      capabilities: PROCESS_CAPABILITIES,
+      backend: record.backendDescriptor.kind,
+      backendImplementationId: record.backendDescriptor.implementationId,
+      terminalProtocol: record.backendDescriptor.protocol,
+      capabilities: record.backendDescriptor.capabilities,
+      presentation: resolveTerminalPresentation(record.backendDescriptor),
       status: record.status,
-      pid: record.child.pid ?? null,
+      pid: record.backendSession.pid,
       startedAt: record.startedAt,
       endedAt: record.endedAt,
       exitCode: record.exitCode,
@@ -498,6 +585,18 @@ export class TerminalSessionManager {
     const end = record.endedAt ? Date.parse(record.endedAt) : Date.now();
     return Math.max(0, end - Date.parse(record.startedAt));
   }
+}
+
+function sameTerminalCapabilities(
+  left: TerminalCapabilities,
+  right: TerminalCapabilities,
+): boolean {
+  return left.tty === right.tty
+    && left.interactive === right.interactive
+    && left.resize === right.resize
+    && left.signals === right.signals
+    && left.utf8 === right.utf8
+    && left.exitStatus === right.exitStatus;
 }
 
 export class ManagedTerminalRuntimeAdapter {

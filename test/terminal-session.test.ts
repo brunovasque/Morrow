@@ -6,6 +6,8 @@ import test from "node:test";
 import {
   TerminalSessionManager,
   ManagedTerminalRuntimeAdapter,
+  type TerminalBackend,
+  type TerminalBackendSession,
   type TerminalSessionEvent,
   type TerminalSessionRequest,
 } from "../src/terminal-session.ts";
@@ -69,7 +71,27 @@ test("streams agent output before its real OS process exits", async () => {
   assert.equal(result.stdout, "EARLY:LATE");
   assert.equal(result.workspaceRoot, workspace.root);
   assert.equal(result.backend, "process-pipes");
-  assert.deepEqual(result.capabilities, { tty: false, interactive: true, resize: false });
+  assert.deepEqual(result.capabilities, {
+    tty: false,
+    interactive: true,
+    resize: false,
+    signals: false,
+    utf8: true,
+    exitStatus: true,
+  });
+  assert.equal(result.backendImplementationId, "node-child-process-pipes-v1");
+  assert.equal(result.terminalProtocol, "separate-pipes");
+  assert.deepEqual(result.presentation, {
+    mode: "process-output",
+    fullTerminal: false,
+    missing: [
+      "backend:windows-conpty",
+      "protocol:conpty-vt",
+      "capability:tty",
+      "capability:resize",
+      "capability:signals",
+    ],
+  });
   assert.ok(events.some((event) => event.type === "TERMINAL_SESSION_STARTED"));
   assert.ok(events.some((event) => event.type === "TERMINAL_SESSION_EXITED"));
 });
@@ -166,6 +188,95 @@ test("keeps interactive input addressed to one agent terminal", async () => {
     .find((event) => event.type === "TERMINAL_INPUT_WRITTEN");
   assert.deepEqual(inputEvent?.payload, { bytes: 13 });
   assert.equal(JSON.stringify(inputEvent).includes("evidence-only"), false);
+});
+
+test("refuses resize, interrupt and full-terminal presentation on process pipes", async () => {
+  const { workspaces, terminals } = await harness();
+  const workspace = await workspaces.create({
+    workspaceId: "W1",
+    contractId: "C1",
+    roleId: "executor",
+  });
+  const handle = await terminals.start(request(workspace, {
+    args: ["-e", "setTimeout(()=>{}, 5_000)"],
+  }));
+
+  assert.throws(() => terminals.resize(handle.terminalSessionId, 100, 40), /terminal_resize_not_supported/);
+  assert.throws(() => terminals.resize(handle.terminalSessionId, 32_768, 40), /terminal_dimensions_invalid/);
+  assert.throws(
+    () => terminals.interrupt(handle.terminalSessionId, "sigterm" as "ctrl-c"),
+    /terminal_interrupt_kind_invalid/,
+  );
+  assert.throws(() => terminals.interrupt(handle.terminalSessionId, "ctrl-c"), /terminal_interrupt_not_supported/);
+  assert.equal(terminals.snapshot(handle.terminalSessionId).presentation.mode, "process-output");
+
+  assert.equal(terminals.stop(handle.terminalSessionId), true);
+  await handle.completion;
+});
+
+test("refuses and stops a backend session that changes capabilities after spawn", async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-terminal-backend-mismatch-"));
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  let forcedStop = false;
+  const backend: TerminalBackend = {
+    descriptor: {
+      kind: "process-pipes",
+      implementationId: "controlled-test-pipes-v1",
+      protocol: "separate-pipes",
+      capabilities: {
+        tty: false,
+        interactive: true,
+        resize: false,
+        signals: false,
+        utf8: true,
+        exitStatus: true,
+      },
+    },
+    spawn: (): TerminalBackendSession => ({
+      descriptor: {
+        kind: "windows-conpty",
+        implementationId: "forged-conpty-v1",
+        protocol: "conpty-vt",
+        capabilities: {
+          tty: true,
+          interactive: true,
+          resize: true,
+          signals: true,
+          utf8: true,
+          exitStatus: true,
+        },
+      },
+      pid: null,
+      inputClosed: false,
+      onStarted: () => {},
+      onOutput: () => {},
+      onError: () => {},
+      onExit: () => {},
+      write: () => true,
+      waitForDrain: async () => {},
+      endInput: () => {},
+      resize: () => {},
+      interrupt: () => {},
+      stop: (force) => {
+        forcedStop = force;
+        return true;
+      },
+    }),
+  };
+  const terminals = new TerminalSessionManager(workspaceRoot, { backend });
+  const workspace = await workspaces.create({
+    workspaceId: "W1",
+    contractId: "C1",
+    roleId: "executor",
+  });
+
+  await assert.rejects(
+    terminals.start(request(workspace)),
+    /terminal_backend_descriptor_changed_after_spawn/,
+  );
+  assert.equal(forcedStop, true);
+  assert.equal(terminals.list().length, 0);
 });
 
 test("refuses workspace sharing, binding mismatch and operator-owned directories", async () => {
