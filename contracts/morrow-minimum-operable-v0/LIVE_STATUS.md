@@ -12,7 +12,7 @@
 - `active_phase`: `P3`
 - `active_pr_id`: `P3-PR01`
 - `active_route_node`: `CONPTY_SPIKE_AND_ADR`
-- `active_subaction`: `P3_PR01_STATE_OF_ART_AND_BACKEND_BOUNDARY`
+- `active_subaction`: `P3_PR01_PUBLISH_AND_REMOTE_REVIEW`
 - `expected_branch_prefix`: `mvo/p3-pr01-`
 - `write_execution_allowed`: `yes, scoped only to P3-PR01 in a dedicated branch`
 - `next_authorized_action`: `START_P3_PR01`
@@ -20,15 +20,15 @@
 
 ## Próxima ação exata
 
-Executar somente `P3-PR01` na branch `mvo/p3-pr01-conpty-spike`, nascida da base integrada `06e2a4c`: medir o estado da arte de PTY/ConPTY, registrar a decisão em ADR e introduzir a interface substituível de backend com capability gate. Preservar `process-pipes` como automação/fixture e impedir mecanicamente que seja apresentado como terminal completo. Esta PR não instala nem implementa o backend ConPTY real; isso pertence à P3-PR02.
+Publicar somente o candidate `P3-PR01` da branch `mvo/p3-pr01-conpty-spike`, nascida da base integrada `06e2a4c`, e então revisar o diff remoto antes de qualquer merge. O candidate contém a decisão ConPTY, a interface substituível e o capability gate; preserva `process-pipes` como automação/fixture e impede mecanicamente que seja apresentado como terminal completo. Esta PR não instala nem implementa o backend ConPTY real; isso pertence à P3-PR02 e continua proibido.
 
-A PR #10 foi integrada em `06e2a4c`; o local terminou sincronizado com o remoto e a suíte pós-merge passou `130/130`. O reconciliador retornou `READY_FOR_EXECUTION` para P3-PR01 na branch correta. Mantenha `GPT-5.6 Sol / xhigh`, porque a escolha de ConPTY e da fronteira de terminal é uma decisão arquitetural e de segurança. Enova e qualquer target externo continuam proibidos.
+A PR #10 foi integrada em `06e2a4c`; o local terminou sincronizado com o remoto. O candidate local P3-PR01 passou testes focados `13/13`, suíte completa `138/138`, diff check e revisão adversarial `GREEN_CANDIDATE`. O reconciliador retornou `READY_FOR_EXECUTION` na branch correta. Mantenha `GPT-5.6 Sol / xhigh` durante a revisão remota. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `none` | `none` | nenhum bloqueio ativo | executar somente P3-PR01 |
+| `none` | `none` | nenhum bloqueio ativo | publicar e revisar somente P3-PR01 |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ A PR #10 foi integrada em `06e2a4c`; o local terminou sincronizado com o remoto 
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `RUNNING` | P3-PR01 em branch dedicada sobre `06e2a4c` |
+| P3 | `RUNNING` | P3-PR01 local `GREEN_CANDIDATE`; publicação/revisão remota pendente |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
@@ -52,7 +52,8 @@ A PR #10 foi integrada em `06e2a4c`; o local terminou sincronizado com o remoto 
 - Codex quota-session e shims Windows;
 - sessões processuais ao vivo, múltiplas e isoladas;
 - separação canônica dos terminais do operador;
-- 130/130 testes passando após hardening e revisão remota P2-PR06.
+- 130/130 testes passando após hardening e revisão remota P2-PR06;
+- 138/138 testes passando no candidate local P3-PR01.
 
 Isso não autoriza declarar o produto operacional. `PRS.md` define o restante.
 
