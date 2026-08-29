@@ -45,7 +45,7 @@ control.dispatch bruto
 
 O snapshot `worker-recovery-v1.json` fica sob uma raiz absoluta que contém `.morrow`. Escrita usa arquivo exclusivo temporário, sincronização e rename; leitura verifica o tamanho antes de carregar e recusa arquivo simbólico, JSON malformado, shape desconhecido, capacidade excedida, fingerprint divergente ou checksum incorreto. A raiz também recusa ancestrais simbólicos antes de criar arquivos.
 
-Uma lease `worker-recovery-v1.lock` dá posse da raiz a um único coordenador. Outra instância viva é recusada antes de ler/mutar o estado. Se o processo dono morreu, a próxima instância remove apenas a lease cujo PID já não existe e assume a raiz; lease malformada falha fechada. `close()` libera a posse em shutdown ordenado.
+Uma lease `worker-recovery-v1.lock` dá posse da raiz a um único coordenador. Outra instância viva é recusada antes de ler/mutar o estado. Se o processo dono morreu, a próxima instância remove apenas a lease cujo PID já não existe e assume a raiz; lease malformada falha fechada. `close()` impede novos aceites, espera operações já admitidas e mutações pendentes, e somente então libera a posse. Assim uma validação assíncrona não pode escrever depois que outro coordenador assumiu a raiz.
 
 ## Idempotência e retry
 
@@ -93,7 +93,7 @@ As fixtures usam somente diretórios temporários `.morrow` e target nominal fic
 - reconexão drena pendência em ordem e com idempotency key preservada;
 - retry permitido somente após recusa conhecida anterior ao efeito;
 - resultado incerto bloqueia e derruba conectividade;
-- corrupção/checksum, tamanho, capacidade e concorrência de dois coordenadores são fail-closed;
+- corrupção/checksum, tamanho, capacidade, concorrência de dois coordenadores e corrida accept/close são fail-closed;
 - provas de segurança e saída sensível não chegam ao snapshot;
 - processo separado reinicia, retoma `queued` uma vez e não repete `completed`;
 - processo é morto depois de gravar o efeito; o restart bloqueia o `running` sem replay.
