@@ -20,15 +20,15 @@
 
 ## Próxima ação exata
 
-Atualizar `mvo/p2-pr05-authenticated-dispatch` na PR #9 com o hardening que sucede `c3636cb`, então conferir SHA remoto, arquivos, merge state e checks antes de qualquer autorização de merge.
+Atualizar `mvo/p2-pr05-authenticated-dispatch` na PR #9 com a correção de lifecycle que sucede `a493dba`, então conferir SHA remoto, arquivos, merge state e checks antes de qualquer autorização de merge.
 
-O hardening `caf4eed` passou 108/108 testes após resolver três achados da revisão do head remoto inicial. Mantenha `GPT-5.6 Sol / xhigh` durante a nova conferência remota. Nesta PR continuam proibidos ConPTY/terminal completo, reconnect/retry persistente, fila, credencial real, rede, cobrança e qualquer target externo, inclusive Enova.
+O hardening `caf4eed` e a correção geracional `fec0525` passaram 109/109 testes após resolver quatro achados das revisões dos heads remotos. Mantenha `GPT-5.6 Sol / xhigh` durante a nova conferência remota. Nesta PR continuam proibidos ConPTY/terminal completo, reconnect/retry persistente, fila, credencial real, rede, cobrança e qualquer target externo, inclusive Enova.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `none` | `none` | achados locais resolvidos; falta publicar e conferir o novo head remoto | atualizar e revisar somente a PR #9 |
+| `none` | `none` | achados das revisões resolvidos localmente; falta publicar e conferir o novo head remoto | atualizar e revisar somente a PR #9 |
 
 ## Status por fase
 
@@ -52,7 +52,7 @@ O hardening `caf4eed` passou 108/108 testes após resolver três achados da revi
 - Codex quota-session e shims Windows;
 - sessões processuais ao vivo, múltiplas e isoladas;
 - separação canônica dos terminais do operador;
-- 108/108 testes passando após hardening P2-PR05.
+- 109/109 testes passando após hardening P2-PR05.
 
 Isso não autoriza declarar o produto operacional. `PRS.md` define o restante.
 

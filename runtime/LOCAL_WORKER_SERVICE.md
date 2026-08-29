@@ -38,6 +38,7 @@ Estados expostos: `stopped`, `starting`, `ready`, `stopping` e `failed`.
 - uma nova instância pode subir depois sobre a mesma raiz marcada, recebendo novo `instanceId`;
 - `status()` declara explicitamente `targetAccess: none`; `dispatchAccepted` só fica verdadeiro quando o Worker está `ready` e a composição interna anexou um dispatcher autenticado vivo por `attachAuthenticatedDispatch()`;
 - parar o Worker revoga esse attachment; restart exige nova composição, impedindo status verde herdado sem dispatcher;
+- cada attachment possui identidade própria: um manipulador de detach antigo ou repetido não pode revogar o attachment criado depois de um restart;
 - `diagnose()` verifica configuração, isolamento das raízes, marcador e filhos gerenciados sem tocar em target externo.
 
 ## Host local
