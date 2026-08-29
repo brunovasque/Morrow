@@ -28,7 +28,7 @@ Cada envelope contém:
 - autorização verificada para `dispatch` e `cancel`;
 - corpo estrito por tipo de mensagem.
 
-Campos desconhecidos são recusados. IDs e nonces repetidos são recusados. O validador não registra o replay window; o serviço P2-PR02/P2-PR06 deverá persistir/atualizar esse estado somente depois do aceite atômico.
+Campos desconhecidos são recusados. IDs e nonces repetidos são recusados. O validador não registra o replay window; P2-PR06 persiste e atualiza, no mesmo checkpoint atômico do aceite, hashes de IDs/nonces e a sequência por escopo autenticado. Valores de nonce, proof e credencial não são gravados.
 
 ## Fronteira de confiança
 

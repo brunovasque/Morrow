@@ -51,6 +51,8 @@ O serviço local que protege a raiz do Worker e expõe seu ciclo de vida está e
 
 A ligação autenticada entre WorkSpec, autoridade, PRE_DISPATCH, routing/guards, lock, workspace, PowerShell determinístico e AgentInstance está em [`AUTHENTICATED_DISPATCH.md`](AUTHENTICATED_DISPATCH.md).
 
+A fila durável, os estados online/offline, o reconnect governado e a regra fail-closed de kill/restart estão em [`WORKER_RECOVERY.md`](WORKER_RECOVERY.md).
+
 Os registries versionados de Target/Role/Skill/Capability e a fronteira opaca do Secret Broker estão em [`GOVERNANCE_REGISTRIES.md`](GOVERNANCE_REGISTRIES.md).
 
 A resolução auditável de routing/access/model e as reservas determinísticas de cota e budget estão em [`ROUTING_GUARDS.md`](ROUTING_GUARDS.md).

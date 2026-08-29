@@ -42,7 +42,7 @@ Qualquer recusa anterior à execução impede a chamada ao executor. Erros de de
 
 O envelope contém somente `{ artifactId, sha256 }`. O script ou prompt reside no `WorkSpecRegistry`, é validado, clonado, congelado e endereçado por hash canônico. O dispatch não aceita `command`, `script`, `prompt`, `cwd`, ambiente, credencial ou caminho arbitrário.
 
-Reusar `idempotencyKey` ou `dispatchId` com outro corpo é recusado. Repetições concorrentes do mesmo efeito compartilham a mesma operação e o mesmo resultado. A tabela em memória possui capacidade máxima: ao atingir o limite, efeitos novos são recusados sem remover registros anteriores e sem correr o risco de reexecutá-los. Essa memória é deliberadamente local à instância; persistência, replay window e retomada após restart pertencem a P2-PR06.
+Reusar `idempotencyKey` ou `dispatchId` com outro corpo é recusado. Repetições concorrentes do mesmo efeito compartilham a mesma operação e o mesmo resultado. A tabela em memória possui capacidade máxima: ao atingir o limite, efeitos novos são recusados sem remover registros anteriores e sem correr o risco de reexecutá-los. P2-PR06 envolve essa tentativa com fila e idempotência duráveis; a semântica de restart está em [`WORKER_RECOVERY.md`](WORKER_RECOVERY.md).
 
 ## PowerShell determinístico
 
@@ -75,7 +75,7 @@ Consumo/custo ausente, inválido ou maior que a reserva não é confiado. O serv
 - Enova permanece proibida;
 - saída ainda não é persistida nem redigida; essas garantias pertencem a P4;
 - ConPTY, input/resize completos e visualização final pertencem a P3-P5;
-- fila, checkpoint de dispatch, reconnect, retry após restart e semântica offline pertencem a P2-PR06.
+- fila, checkpoint de dispatch, reconnect, retry seguro e semântica offline são implementados pela fronteira P2-PR06; transporte concreto continua fora desta etapa.
 
 ## Provas de P2-PR05
 
