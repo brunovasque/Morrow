@@ -23,6 +23,10 @@ export function evaluatePreDispatch(
   }
 
   if (manifest.contractId !== state.contractId) reasons.push("contract_id_mismatch");
+  if (state.activeStepId === null) reasons.push("active_step_missing");
+  else if (manifest.stepId !== state.activeStepId) reasons.push("active_step_mismatch");
+  if (state.activeObjective === null) reasons.push("active_objective_missing");
+  else if (manifest.objective !== state.activeObjective) reasons.push("active_objective_mismatch");
   if (state.blockers.length > 0) reasons.push("contract_blocked");
   if (manifest.openOwnerDecisions.length > 0) reasons.push("owner_decision_open");
   if (manifest.completionCriteria.length === 0) reasons.push("completion_criteria_empty");

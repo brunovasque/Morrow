@@ -54,6 +54,22 @@ function manifest(overrides: Partial<ContextManifest> = {}): ContextManifest {
   };
 }
 
+test("PRE_DISPATCH accepts only the active contract step and objective", async () => {
+  const { kernel } = await harness();
+  await seed(kernel);
+
+  const accepted = await kernel.preDispatch(manifest());
+  assert.equal(accepted.allowed, true);
+
+  const staleStep = await kernel.preDispatch(manifest({ stepId: "S2" }));
+  assert.equal(staleStep.allowed, false);
+  assert.ok(staleStep.reasons.includes("active_step_mismatch"));
+
+  const staleObjective = await kernel.preDispatch(manifest({ objective: "different destination" }));
+  assert.equal(staleObjective.allowed, false);
+  assert.ok(staleObjective.reasons.includes("active_objective_mismatch"));
+});
+
 test("rehydrates live contract state from append-only events", async () => {
   const { file, kernel } = await harness();
   await seed(kernel);

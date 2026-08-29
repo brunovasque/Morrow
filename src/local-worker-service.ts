@@ -10,6 +10,7 @@ export interface LocalWorkerServiceConfiguration {
   managedRoot: string;
   operatorOwnedRoots: string[];
   supportedProtocolVersions: string[];
+  dispatchEnabled?: boolean;
 }
 
 export interface LocalWorkerLayout {
@@ -28,7 +29,7 @@ export interface LocalWorkerServiceStatus {
   failure: string | null;
   layout: LocalWorkerLayout | null;
   targetAccess: "none";
-  dispatchAccepted: false;
+  dispatchAccepted: boolean;
   supportedProtocolVersions: string[];
 }
 
@@ -98,7 +99,7 @@ export class LocalWorkerService {
       failure: this.failure,
       layout: this.layout ? { ...this.layout } : null,
       targetAccess: "none" as const,
-      dispatchAccepted: false as const,
+      dispatchAccepted: this.state === "ready" && this.configuration.dispatchEnabled === true,
       supportedProtocolVersions: [...this.configuration.supportedProtocolVersions],
     });
   }
@@ -129,7 +130,9 @@ export class LocalWorkerService {
     checks.push({
       id: "dispatch",
       passed: true,
-      detail: "dispatch_not_implemented_in_p2_pr02",
+      detail: this.configuration.dispatchEnabled === true
+        ? "authenticated_dispatch_enabled_by_trusted_composition"
+        : "dispatch_disabled",
     });
 
     try {
@@ -278,10 +281,13 @@ async function inspectManagedChild(root: string, name: "state" | "workspaces" | 
 
 function assertConfiguration(configuration: LocalWorkerServiceConfiguration): void {
   if (!isPlainObject(configuration)) throw new Error("worker_configuration_invalid");
-  const allowed = new Set(["workerId", "managedRoot", "operatorOwnedRoots", "supportedProtocolVersions"]);
+  const allowed = new Set(["workerId", "managedRoot", "operatorOwnedRoots", "supportedProtocolVersions", "dispatchEnabled"]);
   const unknown = Object.keys(configuration).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`worker_configuration_unknown_field:${unknown}`);
   if (!workerIdPattern.test(configuration.workerId)) throw new Error("worker_id_invalid");
+  if (configuration.dispatchEnabled !== undefined && typeof configuration.dispatchEnabled !== "boolean") {
+    throw new Error("worker_dispatch_enabled_invalid");
+  }
   if (typeof configuration.managedRoot !== "string" || !isAbsolute(configuration.managedRoot)) {
     throw new Error("worker_managed_root_must_be_absolute");
   }
