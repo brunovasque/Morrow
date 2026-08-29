@@ -25,6 +25,7 @@ const readRef = ref("repository.read", "1.0.0");
 const writeRef = ref("repository.write", "1.0.0");
 const secretRef = ref("secret.consume", "1.0.0");
 const policyRef = ref("target-secrets", "1.0.0");
+const fixedBrokerClock = () => "2026-08-28T12:00:00.000Z";
 
 function ref(id: string, version: string): RegistryRef {
   return { id, version };
@@ -292,8 +293,8 @@ test("Secret Broker accepts only resolver-issued access and returns a short-live
     consumer: { kind: "connector", id: "git-adapter" },
     delivery: "opaque-handle",
     expiresAt: "2026-08-28T12:01:00.000Z",
-  }));
-  const issued = await broker.issue(resolved.authority.secretAccess[0], "2026-08-28T12:00:00.000Z");
+  }), fixedBrokerClock);
+  const issued = await broker.issue(resolved.authority.secretAccess[0]);
   assert.equal(issued.ok, true);
   if (!issued.ok) return;
   assert.equal(issued.handle.handleId, "handle-1");
@@ -317,11 +318,11 @@ test("Secret Broker makes concurrent retries idempotent for one resolved approva
       delivery: "opaque-handle",
       expiresAt: "2026-08-28T12:01:00.000Z",
     };
-  });
+  }, fixedBrokerClock);
 
   const [first, retry] = await Promise.all([
-    broker.issue(resolved.authority.secretAccess[0], "2026-08-28T12:00:00.000Z"),
-    broker.issue(resolved.authority.secretAccess[0], "2026-08-28T12:00:00.000Z"),
+    broker.issue(resolved.authority.secretAccess[0]),
+    broker.issue(resolved.authority.secretAccess[0]),
   ]);
   assert.equal(calls, 1);
   assert.deepEqual(retry, first);
@@ -339,10 +340,10 @@ test("Secret Broker refuses one handle id being rebound to another approval", as
     consumer: approved.consumer,
     delivery: "opaque-handle",
     expiresAt: "2026-08-28T12:01:00.000Z",
-  }));
+  }), fixedBrokerClock);
 
-  const first = await broker.issue(firstResolution.authority.secretAccess[0], "2026-08-28T12:00:00.000Z");
-  const rebound = await broker.issue(secondResolution.authority.secretAccess[0], "2026-08-28T12:00:00.000Z");
+  const first = await broker.issue(firstResolution.authority.secretAccess[0]);
+  const rebound = await broker.issue(secondResolution.authority.secretAccess[0]);
   assert.equal(first.ok, true);
   assert.equal(rebound.ok, false);
   if (!rebound.ok) assert.equal(rebound.detail, "secret_handle_id_reused");
@@ -386,8 +387,8 @@ test("Secret Broker rejects material, wrong consumers, long leases and sanitized
     delivery: "opaque-handle",
     expiresAt: "2026-08-28T12:01:00.000Z",
     token: "must-not-cross-boundary",
-  }));
-  const materialResult = await withMaterial.issue(approved, "2026-08-28T12:00:00.000Z");
+  }), fixedBrokerClock);
+  const materialResult = await withMaterial.issue(approved);
   assert.equal(materialResult.ok, false);
   if (!materialResult.ok) assert.equal(materialResult.code, "SECRET_HANDLE_INVALID");
 
@@ -396,16 +397,24 @@ test("Secret Broker rejects material, wrong consumers, long leases and sanitized
     consumer: { kind: "runtime", id: "other" },
     delivery: "opaque-handle",
     expiresAt: "2026-08-28T12:01:00.000Z",
-  }));
-  assert.equal((await wrongConsumer.issue(approved, "2026-08-28T12:00:00.000Z")).ok, false);
+  }), fixedBrokerClock);
+  assert.equal((await wrongConsumer.issue(approved)).ok, false);
 
   const longLease = new SecretBrokerBoundary(resolver, async () => ({
     handleId: "handle-1",
     consumer: approved.consumer,
     delivery: "opaque-handle",
     expiresAt: "2026-08-28T12:10:00.000Z",
-  }));
-  assert.equal((await longLease.issue(approved, "2026-08-28T12:00:00.000Z")).ok, false);
+  }), fixedBrokerClock);
+  assert.equal((await longLease.issue(approved)).ok, false);
+
+  const expired = new SecretBrokerBoundary(resolver, async () => ({
+    handleId: "handle-expired",
+    consumer: approved.consumer,
+    delivery: "opaque-handle",
+    expiresAt: "2026-08-28T11:59:59.999Z",
+  }), fixedBrokerClock);
+  assert.equal((await expired.issue(approved)).ok, false);
 
   const failing = new SecretBrokerBoundary(resolver, async () => {
     throw new Error("credential-value-must-not-leak");

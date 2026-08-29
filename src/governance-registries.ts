@@ -150,6 +150,7 @@ export interface SecretHandle {
 }
 
 export type SecretHandleIssuer = (approved: ResolvedSecretAccess) => Promise<unknown>;
+export type SecretBrokerClock = () => string | number | Date;
 
 export type SecretBrokerResult =
   | { ok: true; handle: SecretHandle }
@@ -360,30 +361,33 @@ export class GovernanceResolver {
 export class SecretBrokerBoundary {
   private readonly resolver: GovernanceResolver;
   private readonly issuer: SecretHandleIssuer;
+  private readonly clock: SecretBrokerClock;
   private readonly issuances = new WeakMap<object, Promise<SecretBrokerResult>>();
   private readonly issuedHandleOwners = new Map<string, ResolvedSecretAccess>();
 
   constructor(
     resolver: GovernanceResolver,
     issuer: SecretHandleIssuer,
+    clock: SecretBrokerClock = () => Date.now(),
   ) {
     this.resolver = resolver;
     this.issuer = issuer;
+    this.clock = clock;
   }
 
-  async issue(approved: unknown, now: string | number | Date = new Date()): Promise<SecretBrokerResult> {
+  async issue(approved: unknown): Promise<SecretBrokerResult> {
     if (!this.resolver.isResolvedSecretAccess(approved)) {
       return { ok: false, code: "SECRET_ACCESS_NOT_RESOLVED", detail: "secret_access_requires_resolver_output" };
     }
 
     const existing = this.issuances.get(approved);
     if (existing) return existing;
-    const issuance = this.issueOnce(approved, now);
+    const issuance = this.issueOnce(approved);
     this.issuances.set(approved, issuance);
     return issuance;
   }
 
-  private async issueOnce(approved: ResolvedSecretAccess, now: string | number | Date): Promise<SecretBrokerResult> {
+  private async issueOnce(approved: ResolvedSecretAccess): Promise<SecretBrokerResult> {
     let issued: unknown;
     try {
       issued = await this.issuer(approved);
@@ -393,7 +397,7 @@ export class SecretBrokerBoundary {
 
     let handle: SecretHandle | null = null;
     try {
-      handle = parseSecretHandle(issued, approved, now);
+      handle = parseSecretHandle(issued, approved, this.clock());
     } catch {
       return { ok: false, code: "SECRET_HANDLE_INVALID", detail: "secret_handle_contract_invalid" };
     }

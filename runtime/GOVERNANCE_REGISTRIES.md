@@ -45,7 +45,7 @@ O emissor privado do broker pode devolver somente:
 handleId + consumer + delivery:opaque-handle + expiresAt
 ```
 
-O handle precisa pertencer ao mesmo consumidor, expirar em no máximo cinco minutos e não pode conter campo extra. Se o emissor tentar devolver `token`, `value`, `credential`, um objeto hostil ou qualquer material, o boundary recusa o objeto inteiro. Erros do emissor são convertidos em código sanitizado e não atravessam a fronteira.
+O handle precisa pertencer ao mesmo consumidor, expirar em no máximo cinco minutos segundo o relógio confiável injetado no broker e não pode conter campo extra. O chamador não fornece o horário de validação. Se o emissor tentar devolver `token`, `value`, `credential`, um objeto hostil ou qualquer material, o boundary recusa o objeto inteiro. Erros do emissor são convertidos em código sanitizado e não atravessam a fronteira.
 
 Emissões concorrentes ou retries sobre a mesma aprovação compartilham uma única operação e devolvem o mesmo resultado. Um `handleId` já associado a outra aprovação é recusado. Essa idempotência vale para a instância local; persistência e replay depois de restart continuam reservados à P2-PR06.
 
