@@ -1,0 +1,346 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://morrow.local/schema/worker-control.v1.schema.json",
+  "title": "Morrow Worker/Control Plane Protocol 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "protocolVersion",
+    "messageId",
+    "messageType",
+    "sender",
+    "recipient",
+    "issuedAt",
+    "expiresAt",
+    "sequence",
+    "correlationId",
+    "security",
+    "body"
+  ],
+  "properties": {
+    "protocol": { "const": "morrow.worker-control" },
+    "protocolVersion": { "const": "1.0" },
+    "messageId": { "$ref": "#/$defs/identifier" },
+    "messageType": {
+      "enum": [
+        "worker.hello",
+        "worker.heartbeat",
+        "control.dispatch",
+        "worker.ack",
+        "control.cancel",
+        "worker.reject"
+      ]
+    },
+    "sender": { "$ref": "#/$defs/peer" },
+    "recipient": { "$ref": "#/$defs/peer" },
+    "issuedAt": { "$ref": "#/$defs/timestamp" },
+    "expiresAt": { "$ref": "#/$defs/timestamp" },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "correlationId": { "$ref": "#/$defs/identifier" },
+    "security": { "$ref": "#/$defs/security" },
+    "authorization": { "$ref": "#/$defs/authorization" },
+    "body": {
+      "oneOf": [
+        { "$ref": "#/$defs/helloBody" },
+        { "$ref": "#/$defs/heartbeatBody" },
+        { "$ref": "#/$defs/dispatchBody" },
+        { "$ref": "#/$defs/ackBody" },
+        { "$ref": "#/$defs/cancelBody" },
+        { "$ref": "#/$defs/rejectBody" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "messageType": { "const": "control.dispatch" } } },
+      "then": {
+        "required": ["authorization"],
+        "properties": {
+          "sender": { "$ref": "#/$defs/controlPeer" },
+          "recipient": { "$ref": "#/$defs/workerPeer" },
+          "body": { "$ref": "#/$defs/dispatchBody" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "messageType": { "const": "control.cancel" } } },
+      "then": {
+        "required": ["authorization"],
+        "properties": {
+          "sender": { "$ref": "#/$defs/controlPeer" },
+          "recipient": { "$ref": "#/$defs/workerPeer" },
+          "body": { "$ref": "#/$defs/cancelBody" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "messageType": {
+            "enum": ["worker.hello", "worker.heartbeat", "worker.ack", "worker.reject"]
+          }
+        }
+      },
+      "then": {
+        "not": { "required": ["authorization"] },
+        "properties": {
+          "sender": { "$ref": "#/$defs/workerPeer" },
+          "recipient": { "$ref": "#/$defs/controlPeer" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "messageType": { "const": "worker.hello" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/helloBody" } } }
+    },
+    {
+      "if": { "properties": { "messageType": { "const": "worker.heartbeat" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/heartbeatBody" } } }
+    },
+    {
+      "if": { "properties": { "messageType": { "const": "worker.ack" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/ackBody" } } }
+    },
+    {
+      "if": { "properties": { "messageType": { "const": "worker.reject" } } },
+      "then": { "properties": { "body": { "$ref": "#/$defs/rejectBody" } } }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+    },
+    "protocolVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "componentVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "peer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "instanceId"],
+      "properties": {
+        "kind": { "enum": ["control-plane", "worker"] },
+        "id": { "$ref": "#/$defs/identifier" },
+        "instanceId": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "controlPeer": {
+      "allOf": [
+        { "$ref": "#/$defs/peer" },
+        { "properties": { "kind": { "const": "control-plane" } } }
+      ]
+    },
+    "workerPeer": {
+      "allOf": [
+        { "$ref": "#/$defs/peer" },
+        { "properties": { "kind": { "const": "worker" } } }
+      ]
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scheme", "credentialId", "nonce", "proof"],
+      "properties": {
+        "scheme": { "const": "transport-bound-v1" },
+        "credentialId": { "$ref": "#/$defs/identifier" },
+        "nonce": { "type": "string", "minLength": 16, "maxLength": 256 },
+        "proof": { "type": "string", "minLength": 16, "maxLength": 4096 }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decisionId", "scopes", "expiresAt"],
+      "properties": {
+        "decisionId": { "$ref": "#/$defs/identifier" },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "expiresAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "version": { "$ref": "#/$defs/componentVersion" }
+      }
+    },
+    "helloBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workerSessionId",
+        "hostId",
+        "platform",
+        "agentVersion",
+        "supportedProtocolVersions",
+        "capabilities",
+        "startedAt"
+      ],
+      "properties": {
+        "workerSessionId": { "$ref": "#/$defs/identifier" },
+        "hostId": { "$ref": "#/$defs/identifier" },
+        "platform": { "const": "windows" },
+        "agentVersion": { "$ref": "#/$defs/componentVersion" },
+        "supportedProtocolVersions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/protocolVersion" }
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/capability" }
+        },
+        "startedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "heartbeatBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workerSessionId", "status", "observedAt", "leaseExpiresAt", "runningDispatchIds"],
+      "properties": {
+        "workerSessionId": { "$ref": "#/$defs/identifier" },
+        "status": { "enum": ["ready", "busy", "draining"] },
+        "observedAt": { "$ref": "#/$defs/timestamp" },
+        "leaseExpiresAt": { "$ref": "#/$defs/timestamp" },
+        "runningDispatchIds": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        }
+      }
+    },
+    "dispatchBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dispatchId",
+        "idempotencyKey",
+        "contractId",
+        "stepId",
+        "targetId",
+        "kind",
+        "workSpec",
+        "workspace",
+        "requiredCapabilities",
+        "timeoutMs"
+      ],
+      "properties": {
+        "dispatchId": { "$ref": "#/$defs/identifier" },
+        "idempotencyKey": { "$ref": "#/$defs/identifier" },
+        "contractId": { "$ref": "#/$defs/identifier" },
+        "stepId": { "$ref": "#/$defs/identifier" },
+        "targetId": { "$ref": "#/$defs/identifier" },
+        "kind": { "enum": ["process", "agent"] },
+        "workSpec": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["artifactId", "sha256"],
+          "properties": {
+            "artifactId": { "$ref": "#/$defs/identifier" },
+            "sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }
+          }
+        },
+        "workspace": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["workspaceId", "isolation"],
+          "properties": {
+            "workspaceId": { "$ref": "#/$defs/identifier" },
+            "isolation": { "const": "dedicated" }
+          }
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 86400000 }
+      }
+    },
+    "ackBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ackedMessageId", "disposition"],
+      "properties": {
+        "ackedMessageId": { "$ref": "#/$defs/identifier" },
+        "disposition": { "enum": ["accepted", "duplicate", "rejected"] },
+        "dispatchId": { "$ref": "#/$defs/identifier" },
+        "reasonCode": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "cancelBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dispatchId", "idempotencyKey", "mode", "reasonCode", "gracePeriodMs"],
+      "properties": {
+        "dispatchId": { "$ref": "#/$defs/identifier" },
+        "idempotencyKey": { "$ref": "#/$defs/identifier" },
+        "mode": { "enum": ["graceful", "force-after-timeout"] },
+        "reasonCode": {
+          "enum": ["operator_requested", "contract_blocked", "timeout", "superseded", "shutdown"]
+        },
+        "gracePeriodMs": { "type": "integer", "minimum": 0, "maximum": 300000 }
+      }
+    },
+    "rejectBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rejectedMessageId", "code", "retryable"],
+      "properties": {
+        "rejectedMessageId": { "$ref": "#/$defs/identifier" },
+        "code": {
+          "enum": [
+            "INVALID_ENVELOPE",
+            "UNSUPPORTED_PROTOCOL",
+            "UNAUTHENTICATED",
+            "IDENTITY_MISMATCH",
+            "INVALID_DIRECTION",
+            "UNAUTHORIZED_MESSAGE_TYPE",
+            "AUTHORIZATION_REQUIRED",
+            "AUTHORIZATION_MISMATCH",
+            "MESSAGE_EXPIRED",
+            "MESSAGE_FROM_FUTURE",
+            "TTL_EXCEEDED",
+            "REPLAY_DETECTED",
+            "OUT_OF_ORDER",
+            "INVALID_BODY"
+          ]
+        },
+        "retryable": { "type": "boolean" },
+        "supportedProtocolVersions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/protocolVersion" }
+        }
+      }
+    }
+  }
+}
