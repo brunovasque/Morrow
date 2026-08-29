@@ -537,6 +537,8 @@ interface BudgetTotals {
   committed: number;
 }
 
+export type BudgetDimension = "invocation" | "step" | "contract" | "provider" | "period";
+
 export class BudgetGuard {
   private readonly policies: ReadonlyMap<string, BudgetPolicySpec>;
   private readonly records = new Map<string, BudgetRecord>();
@@ -624,11 +626,12 @@ export class BudgetGuard {
     return { ok: true, reservation: record.reservation };
   }
 
-  inspect(policyRef: RegistryRef, dimension: "invocation" | "step" | "contract" | "provider" | "period", dimensionId: string): BudgetTotals | null {
-    if (!validRef(policyRef) || !isIdentifier(dimensionId)) return null;
+  inspect(policyRef: RegistryRef, dimension: BudgetDimension, dimensionIds: readonly string[]): BudgetTotals | null {
+    const expectedIds = dimension === "step" ? 2 : 1;
+    if (!validRef(policyRef) || !Array.isArray(dimensionIds) || dimensionIds.length !== expectedIds || !dimensionIds.every(isIdentifier)) return null;
     const policy = this.policies.get(refKey(policyRef));
     if (!policy) return null;
-    const key = `${refKey(policyRef)}|${dimension}|${dimensionId}`;
+    const key = budgetDimensionKey(refKey(policyRef), dimension, dimensionIds);
     return deepFreeze({ ...(this.totals.get(key) ?? { reserved: 0, committed: 0 }) });
   }
 
@@ -648,12 +651,16 @@ export class BudgetGuard {
 function budgetKeys(policy: BudgetPolicySpec, request: Pick<BudgetReservationRequest, "contractId" | "stepId" | "invocationId" | "providerId">): Record<"invocation" | "step" | "contract" | "provider" | "period", string> {
   const prefix = refKey({ id: policy.policyId, version: policy.version });
   return {
-    invocation: `${prefix}|invocation|${request.invocationId}`,
-    step: `${prefix}|step|${request.contractId}/${request.stepId}`,
-    contract: `${prefix}|contract|${request.contractId}`,
-    provider: `${prefix}|provider|${request.providerId}`,
-    period: `${prefix}|period|${policy.periodId}`,
+    invocation: budgetDimensionKey(prefix, "invocation", [request.invocationId]),
+    step: budgetDimensionKey(prefix, "step", [request.contractId, request.stepId]),
+    contract: budgetDimensionKey(prefix, "contract", [request.contractId]),
+    provider: budgetDimensionKey(prefix, "provider", [request.providerId]),
+    period: budgetDimensionKey(prefix, "period", [policy.periodId]),
   };
+}
+
+function budgetDimensionKey(policyKey: string, dimension: BudgetDimension, ids: readonly string[]): string {
+  return JSON.stringify([policyKey, dimension, ...ids]);
 }
 
 function parseRoutingRequest(value: unknown): RoutingResolutionRequest | null {

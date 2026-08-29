@@ -391,7 +391,7 @@ test("Budget Guard reserves exact minor units and prevents concurrent step overs
   const blocked = guard.reserve(budgetRequest("2", 400));
   assert.equal(blocked.ok, false);
   if (!blocked.ok) assert.equal(blocked.code, "STEP_LIMIT_EXCEEDED");
-  assert.deepEqual(guard.inspect(budgetRef, "step", "contract-1/step-1"), { reserved: 400, committed: 0 });
+  assert.deepEqual(guard.inspect(budgetRef, "step", ["contract-1", "step-1"]), { reserved: 400, committed: 0 });
 });
 
 test("Budget Guard enforces invocation, contract, provider and period ceilings", () => {
@@ -442,7 +442,20 @@ test("Budget Guard commit converts reserved to actual and release restores only 
   if (!releaseAfterCommit.ok) assert.equal(releaseAfterCommit.code, "IDEMPOTENCY_CONFLICT");
   const released = guard.release("2", "owner-2");
   assert.equal(released.ok, true);
-  assert.deepEqual(guard.inspect(budgetRef, "contract", "contract-1"), { reserved: 0, committed: 250 });
+  assert.deepEqual(guard.inspect(budgetRef, "contract", ["contract-1"]), { reserved: 0, committed: 250 });
+});
+
+test("Budget Guard uses collision-safe tuples for contract and step identifiers", () => {
+  const guard = new BudgetGuard([budgetPolicy({
+    limits: { invocationMinor: 500, stepMinor: 500, contractMinor: 2_000, providerMinor: 2_000, periodMinor: 3_000 },
+  })]);
+  const first = guard.reserve(budgetRequest("1", 400, { contractId: "a/b", stepId: "c" }));
+  const second = guard.reserve(budgetRequest("2", 400, { contractId: "a", stepId: "b/c" }));
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.deepEqual(guard.inspect(budgetRef, "step", ["a/b", "c"]), { reserved: 400, committed: 0 });
+  assert.deepEqual(guard.inspect(budgetRef, "step", ["a", "b/c"]), { reserved: 400, committed: 0 });
+  assert.equal(guard.inspect(budgetRef, "step", ["a/b/c"]), null);
 });
 
 test("Budget Guard is idempotent and refuses rebinding, foreign ownership and excess commit", () => {
