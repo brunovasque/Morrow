@@ -12,23 +12,23 @@
 - `active_phase`: `P2`
 - `active_pr_id`: `P2-PR05`
 - `active_route_node`: `AUTHENTICATED_DISPATCH_AND_EXECUTION`
-- `active_subaction`: `P2_PR05_AUTHENTICATED_DISPATCH_EXECUTION`
+- `active_subaction`: `P2_PR05_PUBLISH_AND_REMOTE_REVIEW`
 - `expected_branch_prefix`: `mvo/p2-pr05-`
-- `write_execution_allowed`: `yes, scoped only to P2-PR05 in a dedicated branch`
+- `write_execution_allowed`: `yes, only publication/review corrections scoped to P2-PR05`
 - `next_authorized_action`: `START_P2_PR05`
-- `next_authorized_actor`: `Architect/Executor`
+- `next_authorized_actor`: `Operator/Reviewer`
 
 ## Próxima ação exata
 
-Implementar somente a ligação autenticada de dispatch a WorkAuthority, routing/quota/budget, locks e workspace em `mvo/p2-pr05-authenticated-dispatch`, baseada em `aba8770`, com caminhos explícitos para PowerShell determinístico sem LLM e AgentInstance governada.
+Publicar `mvo/p2-pr05-authenticated-dispatch` no commit candidato/documental atual, abrir a PR contra `phase-2/runtime-v0` e conferir head remoto, arquivos, merge state e testes antes de qualquer autorização de merge.
 
-P2-PR04 foi integrada em `aba8770`. Mantenha `GPT-5.6 Sol / xhigh`: P2-PR05 é a primeira ligação entre autorização e execução. Nesta PR são proibidos ConPTY/terminal completo, reconnect/retry persistente, fila, credencial real, rede, cobrança e qualquer target externo, inclusive Enova.
+O código candidato `cabc1db` passou 106/106 testes e revisão local `GREEN_CANDIDATE`. Mantenha `GPT-5.6 Sol / xhigh` durante a revisão remota. Nesta PR continuam proibidos ConPTY/terminal completo, reconnect/retry persistente, fila, credencial real, rede, cobrança e qualquer target externo, inclusive Enova.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `none` | `none` | nenhum bloqueio de preflight ativo | executar somente P2-PR05 |
+| `none` | `none` | nenhum bloqueio técnico local; falta prova do head remoto | publicar e revisar somente P2-PR05 |
 
 ## Status por fase
 
@@ -36,7 +36,7 @@ P2-PR04 foi integrada em `aba8770`. Mantenha `GPT-5.6 Sol / xhigh`: P2-PR05 é a
 |---|---|---|
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
-| P2 | `RUNNING` | P2-PR05 em branch dedicada sobre `aba8770` |
+| P2 | `RUNNING` | P2-PR05 local `GREEN_CANDIDATE`; publicação/revisão remota pendente |
 | P3 | `BLOCKED` | depende de P2 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
@@ -52,7 +52,7 @@ P2-PR04 foi integrada em `aba8770`. Mantenha `GPT-5.6 Sol / xhigh`: P2-PR05 é a
 - Codex quota-session e shims Windows;
 - sessões processuais ao vivo, múltiplas e isoladas;
 - separação canônica dos terminais do operador;
-- 25/25 testes passando.
+- 106/106 testes passando no candidate P2-PR05.
 
 Isso não autoriza declarar o produto operacional. `PRS.md` define o restante.
 

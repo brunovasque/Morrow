@@ -42,7 +42,7 @@ Os IDs abaixo são unidades contratuais, não números antecipados do GitHub. Ca
 | `P2-PR02` | `PROVEN` | P2-PR01 integrado | Implementar serviço Local Worker configurável com managed roots e ciclo start/stop/status | PR #6; host reiniciável, diagnóstico, raiz protegida contra junction e 56 testes; review de segurança GREEN |
 | `P2-PR03` | `PROVEN` | P2-PR02 integrado | Implementar registries/resolvers mínimos de Target, Role, Skill e Capability mais Secret Broker boundary | PR #7; registries/resolver estritos, boundary opaco, relógio confiável e 73 testes; review de segurança GREEN |
 | `P2-PR04` | `PROVEN` | P2-PR03 integrado | Implementar Routing/Access/Model registry, Quota Guard e Budget Guard mínimos | PR #8; configuração efetiva auditável, reservas quota/budget, hardening remoto e 96 testes; review de segurança GREEN |
-| `P2-PR05` | `RUNNING` | P2-PR04 | Ligar dispatch autenticado a locks/workspaces/guards e suportar PowerShell direto ou AgentInstance | teste prova job determinístico sem LLM e job de agente isolado; dispatch incompleto/indevido recusado |
+| `P2-PR05` | `RUNNING` | P2-PR04 | Ligar dispatch autenticado a locks/workspaces/guards e suportar PowerShell direto ou AgentInstance | candidate `cabc1db`; 106 testes provam PowerShell sem LLM, AgentInstance isolada e recusas mecânicas; aguardando publicação/revisão remota |
 | `P2-PR06` | `PENDING` | P2-PR05 | Implementar reconnect, retry idempotente, fila, checkpoint e estado online/offline | kill/restart não duplica efeito; pendência retoma ou bloqueia com causa explícita |
 
 ## P3 — Terminal real Windows
