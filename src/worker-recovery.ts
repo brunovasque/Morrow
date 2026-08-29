@@ -184,7 +184,12 @@ export class WorkerRecoveryCoordinator {
   private state: RecoveryState;
   private mutationTail: Promise<void> = Promise.resolve();
   private drainOperation: Promise<void> | null = null;
+  private activeOperations = 0;
+  private operationsIdle: Promise<void> = Promise.resolve();
+  private signalOperationsIdle: (() => void) | null = null;
+  private closing = false;
   private closed = false;
+  private closeOperation: Promise<void> | null = null;
 
   private constructor(
     configuration: WorkerRecoveryConfiguration,
@@ -220,7 +225,10 @@ export class WorkerRecoveryCoordinator {
   }
 
   async accept(input: unknown): Promise<RecoveryAcceptanceResult> {
-    this.assertOpen();
+    return await this.withOperation(() => this.acceptOpen(input));
+  }
+
+  private async acceptOpen(input: unknown): Promise<RecoveryAcceptanceResult> {
     let validation: ReturnType<typeof validateWorkerProtocolMessage>;
     try {
       validation = validateWorkerProtocolMessage(
@@ -293,7 +301,7 @@ export class WorkerRecoveryCoordinator {
     }
 
     if (accepted.ok) {
-      await this.drain();
+      await this.drainOpen();
       const current = this.inspect().dispatches.find((record) => record.dispatchId === body.dispatchId);
       if (current) return { ok: true, duplicate: accepted.duplicate, dispatch: current };
     }
@@ -301,7 +309,10 @@ export class WorkerRecoveryCoordinator {
   }
 
   async observe(input: unknown): Promise<RecoveryObservationResult> {
-    this.assertOpen();
+    return await this.withOperation(() => this.observeOpen(input));
+  }
+
+  private async observeOpen(input: unknown): Promise<RecoveryObservationResult> {
     let validation: ReturnType<typeof validateWorkerProtocolMessage>;
     try {
       validation = validateWorkerProtocolMessage(
@@ -376,7 +387,7 @@ export class WorkerRecoveryCoordinator {
           return { value: undefined, changed: true };
         });
         if (rejected) return rejected;
-        await this.drain();
+        await this.drainOpen();
       }
     } catch {
       return observationRejected("PERSISTENCE_FAILED", "liveness_checkpoint_failed");
@@ -385,7 +396,10 @@ export class WorkerRecoveryCoordinator {
   }
 
   async disconnect(reason: string): Promise<WorkerRecoveryView> {
-    this.assertOpen();
+    return await this.withOperation(() => this.disconnectOpen(reason));
+  }
+
+  private async disconnectOpen(reason: string): Promise<WorkerRecoveryView> {
     if (!isSafeReason(reason)) throw new Error("worker_disconnect_reason_invalid");
     await this.mutate((draft, now) => {
       const changed = draft.connection.state !== "offline"
@@ -405,7 +419,10 @@ export class WorkerRecoveryCoordinator {
   }
 
   async sweepLiveness(): Promise<WorkerRecoveryView> {
-    this.assertOpen();
+    return await this.withOperation(() => this.sweepLivenessOpen());
+  }
+
+  private async sweepLivenessOpen(): Promise<WorkerRecoveryView> {
     await this.mutate((draft, now) => {
       if (!connectionLeaseExpired(draft.connection, Date.parse(now))) {
         return { value: undefined, changed: false };
@@ -424,7 +441,10 @@ export class WorkerRecoveryCoordinator {
   }
 
   async drain(): Promise<void> {
-    this.assertOpen();
+    return await this.withOperation(() => this.drainOpen());
+  }
+
+  private async drainOpen(): Promise<void> {
     if (this.drainOperation) return await this.drainOperation;
     this.drainOperation = this.drainInternal().finally(() => {
       this.drainOperation = null;
@@ -457,16 +477,37 @@ export class WorkerRecoveryCoordinator {
   }
 
   async close(): Promise<void> {
+    if (this.closeOperation) return await this.closeOperation;
     if (this.closed) return;
-    if (this.drainOperation) await this.drainOperation;
-    await this.mutationTail;
-    if (this.closed) return;
-    this.closed = true;
-    await this.lease.release();
+    this.closing = true;
+    this.closeOperation = (async () => {
+      await this.operationsIdle;
+      if (this.drainOperation) await this.drainOperation;
+      await this.mutationTail;
+      await this.lease.release();
+      this.closed = true;
+    })();
+    return await this.closeOperation;
   }
 
-  private assertOpen(): void {
-    if (this.closed) throw new Error("worker_recovery_coordinator_closed");
+  private async withOperation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.closing || this.closed) throw new Error("worker_recovery_coordinator_closed");
+    if (this.activeOperations === 0) {
+      this.operationsIdle = new Promise((resolvePromise) => {
+        this.signalOperationsIdle = resolvePromise;
+      });
+    }
+    this.activeOperations += 1;
+    try {
+      return await operation();
+    } finally {
+      this.activeOperations -= 1;
+      if (this.activeOperations === 0) {
+        const signal = this.signalOperationsIdle;
+        this.signalOperationsIdle = null;
+        signal?.();
+      }
+    }
   }
 
   private async recoverAfterProcessRestart(): Promise<void> {

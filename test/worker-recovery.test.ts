@@ -299,6 +299,40 @@ test("allows only one active coordinator to own a recovery root", async (t) => {
   await replacement.close();
 });
 
+test("orderly close waits for an accepted operation before releasing ownership", async (t) => {
+  const { stateRoot } = await makeRoot(t);
+  let releaseValidation: (() => void) | null = null;
+  let validationStarted: (() => void) | null = null;
+  const started = new Promise<void>((resolvePromise) => { validationStarted = resolvePromise; });
+  const validationGate = new Promise<void>((resolvePromise) => { releaseValidation = resolvePromise; });
+  const coordinator = await WorkerRecoveryCoordinator.open({
+    workerId: worker.id,
+    stateRoot,
+    validationContext: async (input) => {
+      validationStarted?.();
+      await validationGate;
+      return validationContext(input);
+    },
+    attempt: async (request) => success(request),
+    clock: () => now,
+  });
+
+  const acceptance = coordinator.accept(dispatchMessage());
+  await started;
+  const closing = coordinator.close();
+  await assert.rejects(
+    coordinator.accept(dispatchMessage("2")),
+    /worker_recovery_coordinator_closed/,
+  );
+  releaseValidation?.();
+  assert.equal((await acceptance).ok, true);
+  await closing;
+
+  const replacement = await openCoordinator(stateRoot, async (request) => success(request));
+  assert.equal(replacement.inspect().dispatches[0]?.status, "queued");
+  await replacement.close();
+});
+
 test("refuses an oversized snapshot before loading its contents", async (t) => {
   const { stateRoot } = await makeRoot(t);
   const coordinator = await openCoordinator(stateRoot, async (request) => success(request));
