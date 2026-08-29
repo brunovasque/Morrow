@@ -278,11 +278,25 @@ test("refuses corrupted durable state instead of guessing recovery", async (t) =
   const parsed = JSON.parse(await readFile(snapshot, "utf8"));
   parsed.dispatches[0].body.targetId = "tampered-target";
   await writeFile(snapshot, JSON.stringify(parsed), "utf8");
+  await coordinator.close();
 
   await assert.rejects(
     openCoordinator(stateRoot, async (request) => success(request)),
     /worker_recovery_snapshot_invalid/,
   );
+});
+
+test("allows only one active coordinator to own a recovery root", async (t) => {
+  const { stateRoot } = await makeRoot(t);
+  const first = await openCoordinator(stateRoot, async (request) => success(request));
+  await assert.rejects(
+    openCoordinator(stateRoot, async (request) => success(request)),
+    /worker_recovery_coordinator_already_active/,
+  );
+  await first.close();
+  const replacement = await openCoordinator(stateRoot, async (request) => success(request));
+  assert.equal(replacement.inspect().connectivity, "offline");
+  await replacement.close();
 });
 
 test("enforces durable queue capacity without evicting idempotency history", async (t) => {
@@ -431,4 +445,24 @@ test("kill after effect blocks unknown outcome on restart without replay", async
   await connect(reopened, "worker-session-after-crash");
   assert.equal(replayAttempts, 0);
   assert.equal(await readFile(effectPath, "utf8"), "dispatch-recovery-1\n");
+
+  const nextOnSameTarget = await reopened.accept(dispatchMessage("2"));
+  assert.equal(nextOnSameTarget.ok, true);
+  assert.equal(replayAttempts, 0);
+  assert.deepEqual(reopened.inspect().dispatches.map(({ dispatchId, status, reason }) => ({
+    dispatchId,
+    status,
+    reason,
+  })), [
+    {
+      dispatchId: "dispatch-recovery-1",
+      status: "blocked",
+      reason: "execution_outcome_unknown_after_restart",
+    },
+    {
+      dispatchId: "dispatch-recovery-2",
+      status: "queued",
+      reason: "target_blocked_by_unknown_outcome",
+    },
+  ]);
 });

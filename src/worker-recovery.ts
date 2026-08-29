@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, realpath, rename } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, realpath, rename, unlink } from "node:fs/promises";
 import { isAbsolute, join, parse, relative, resolve } from "node:path";
 import type {
   AuthenticatedDispatchResult,
@@ -167,23 +167,35 @@ const terminalExecutionFailures = new Set([
   "RESOURCE_SETTLEMENT_FAILED",
   "CLEANUP_FAILED",
 ]);
+const unknownOutcomeReasons = new Set([
+  "execution_outcome_unknown_after_restart",
+  "attempt_outcome_unknown",
+  "attempt_result_invalid",
+  "worker_disconnected_during_execution",
+  "heartbeat_lease_expired_during_execution",
+  "worker_session_replaced_during_execution",
+]);
 
 export class WorkerRecoveryCoordinator {
   private readonly configuration: WorkerRecoveryConfiguration;
   private readonly store: AtomicWorkerRecoveryStore;
+  private readonly lease: WorkerRecoveryLease;
   private readonly maxDispatchRecords: number;
   private state: RecoveryState;
   private mutationTail: Promise<void> = Promise.resolve();
   private drainOperation: Promise<void> | null = null;
+  private closed = false;
 
   private constructor(
     configuration: WorkerRecoveryConfiguration,
     store: AtomicWorkerRecoveryStore,
+    lease: WorkerRecoveryLease,
     state: RecoveryState,
     maxDispatchRecords: number,
   ) {
     this.configuration = configuration;
     this.store = store;
+    this.lease = lease;
     this.state = state;
     this.maxDispatchRecords = maxDispatchRecords;
   }
@@ -192,16 +204,23 @@ export class WorkerRecoveryCoordinator {
     assertConfiguration(configuration);
     const maximum = configuration.maxDispatchRecords ?? defaultMaxDispatchRecords;
     const canonicalRoot = await prepareStateRoot(configuration.stateRoot);
-    const store = new AtomicWorkerRecoveryStore(join(canonicalRoot, recoveryFileName));
     const now = trustedNow(configuration.clock);
-    const loaded = await store.load(configuration.workerId, maximum);
-    const state = loaded ?? initialState(configuration.workerId, now);
-    const coordinator = new WorkerRecoveryCoordinator(configuration, store, state, maximum);
-    await coordinator.recoverAfterProcessRestart();
-    return coordinator;
+    const lease = await WorkerRecoveryLease.acquire(canonicalRoot, configuration.workerId, now);
+    try {
+      const store = new AtomicWorkerRecoveryStore(join(canonicalRoot, recoveryFileName));
+      const loaded = await store.load(configuration.workerId, maximum);
+      const state = loaded ?? initialState(configuration.workerId, now);
+      const coordinator = new WorkerRecoveryCoordinator(configuration, store, lease, state, maximum);
+      await coordinator.recoverAfterProcessRestart();
+      return coordinator;
+    } catch (error) {
+      await lease.release().catch(() => undefined);
+      throw error;
+    }
   }
 
   async accept(input: unknown): Promise<RecoveryAcceptanceResult> {
+    this.assertOpen();
     let validation: ReturnType<typeof validateWorkerProtocolMessage>;
     try {
       validation = validateWorkerProtocolMessage(
@@ -282,6 +301,7 @@ export class WorkerRecoveryCoordinator {
   }
 
   async observe(input: unknown): Promise<RecoveryObservationResult> {
+    this.assertOpen();
     let validation: ReturnType<typeof validateWorkerProtocolMessage>;
     try {
       validation = validateWorkerProtocolMessage(
@@ -365,6 +385,7 @@ export class WorkerRecoveryCoordinator {
   }
 
   async disconnect(reason: string): Promise<WorkerRecoveryView> {
+    this.assertOpen();
     if (!isSafeReason(reason)) throw new Error("worker_disconnect_reason_invalid");
     await this.mutate((draft, now) => {
       const changed = draft.connection.state !== "offline"
@@ -384,6 +405,7 @@ export class WorkerRecoveryCoordinator {
   }
 
   async sweepLiveness(): Promise<WorkerRecoveryView> {
+    this.assertOpen();
     await this.mutate((draft, now) => {
       if (!connectionLeaseExpired(draft.connection, Date.parse(now))) {
         return { value: undefined, changed: false };
@@ -402,6 +424,7 @@ export class WorkerRecoveryCoordinator {
   }
 
   async drain(): Promise<void> {
+    this.assertOpen();
     if (this.drainOperation) return await this.drainOperation;
     this.drainOperation = this.drainInternal().finally(() => {
       this.drainOperation = null;
@@ -431,6 +454,19 @@ export class WorkerRecoveryCoordinator {
       revision: this.state.revision,
       dispatches: this.state.dispatches.map(viewRecord),
     });
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    if (this.drainOperation) await this.drainOperation;
+    await this.mutationTail;
+    if (this.closed) return;
+    this.closed = true;
+    await this.lease.release();
+  }
+
+  private assertOpen(): void {
+    if (this.closed) throw new Error("worker_recovery_coordinator_closed");
   }
 
   private async recoverAfterProcessRestart(): Promise<void> {
@@ -500,7 +536,22 @@ export class WorkerRecoveryCoordinator {
       if (draft.connection.state !== "online" || draft.connection.workerSessionId === null) {
         return { value: null, changed };
       }
-      const record = draft.dispatches.find((item) => item.status === "queued");
+      const targetsWithUnknownOutcome = new Set(
+        draft.dispatches
+          .filter((item) => item.status === "blocked" && item.reason !== null && unknownOutcomeReasons.has(item.reason))
+          .map((item) => item.body.targetId),
+      );
+      for (const queued of draft.dispatches.filter((item) => item.status === "queued")) {
+        if (!targetsWithUnknownOutcome.has(queued.body.targetId)) continue;
+        if (queued.reason !== "target_blocked_by_unknown_outcome") {
+          queued.reason = "target_blocked_by_unknown_outcome";
+          queued.updatedAt = now;
+          changed = true;
+        }
+      }
+      const record = draft.dispatches.find(
+        (item) => item.status === "queued" && !targetsWithUnknownOutcome.has(item.body.targetId),
+      );
       if (!record) return { value: null, changed };
       const attemptId = randomUUID();
       record.status = "running";
@@ -618,6 +669,7 @@ class AtomicWorkerRecoveryStore {
     try {
       const entry = await lstat(this.filePath);
       if (entry.isSymbolicLink() || !entry.isFile()) throw new Error("worker_recovery_snapshot_file_invalid");
+      if (entry.size > maxRecoverySnapshotBytes) throw new Error("worker_recovery_snapshot_too_large");
       raw = await readFile(this.filePath, "utf8");
     } catch (error) {
       if (isNotFound(error)) return null;
@@ -666,6 +718,120 @@ class AtomicWorkerRecoveryStore {
       if (handle) await handle.close().catch(() => undefined);
       throw sanitizeStoreError(error, "worker_recovery_snapshot_write_failed");
     }
+  }
+}
+
+interface PersistedWorkerRecoveryLease {
+  format: "morrow.worker-recovery-lease/v1";
+  workerId: string;
+  ownerId: string;
+  processId: number;
+  acquiredAt: string;
+}
+
+class WorkerRecoveryLease {
+  private readonly lockPath: string;
+  private readonly ownerId: string;
+  private released = false;
+
+  private constructor(lockPath: string, ownerId: string) {
+    this.lockPath = lockPath;
+    this.ownerId = ownerId;
+  }
+
+  static async acquire(root: string, workerId: string, now: string): Promise<WorkerRecoveryLease> {
+    const lockPath = join(root, "worker-recovery-v1.lock");
+    const ownerId = randomUUID();
+    const record: PersistedWorkerRecoveryLease = {
+      format: "morrow.worker-recovery-lease/v1",
+      workerId,
+      ownerId,
+      processId: process.pid,
+      acquiredAt: now,
+    };
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      let handle: Awaited<ReturnType<typeof open>> | null = null;
+      try {
+        handle = await open(lockPath, "wx", 0o600);
+        await handle.writeFile(`${JSON.stringify(record)}\n`, "utf8");
+        await handle.sync();
+        await handle.close();
+        return new WorkerRecoveryLease(lockPath, ownerId);
+      } catch (error) {
+        if (handle) await handle.close().catch(() => undefined);
+        if (!isAlreadyExists(error)) throw sanitizeStoreError(error, "worker_recovery_lease_acquire_failed");
+      }
+
+      const existing = await readRecoveryLease(lockPath, workerId);
+      if (processIsAlive(existing.processId)) {
+        throw new Error("worker_recovery_coordinator_already_active");
+      }
+      const stalePath = `${lockPath}.stale.${randomUUID()}`;
+      try {
+        await rename(lockPath, stalePath);
+        await unlink(stalePath);
+      } catch (error) {
+        if (!isNotFound(error)) throw sanitizeStoreError(error, "worker_recovery_stale_lease_cleanup_failed");
+      }
+    }
+    throw new Error("worker_recovery_lease_contention");
+  }
+
+  async release(): Promise<void> {
+    if (this.released) return;
+    const existing = await readRecoveryLease(this.lockPath, null);
+    if (existing.ownerId !== this.ownerId || existing.processId !== process.pid) {
+      throw new Error("worker_recovery_lease_owner_mismatch");
+    }
+    try {
+      await unlink(this.lockPath);
+    } catch (error) {
+      if (!isNotFound(error)) throw sanitizeStoreError(error, "worker_recovery_lease_release_failed");
+    }
+    this.released = true;
+  }
+}
+
+async function readRecoveryLease(lockPath: string, expectedWorkerId: string | null): Promise<PersistedWorkerRecoveryLease> {
+  let entry: Awaited<ReturnType<typeof lstat>>;
+  let raw: string;
+  try {
+    entry = await lstat(lockPath);
+    if (entry.isSymbolicLink() || !entry.isFile() || entry.size > 4_096) {
+      throw new Error("worker_recovery_lease_file_invalid");
+    }
+    raw = await readFile(lockPath, "utf8");
+  } catch (error) {
+    throw sanitizeStoreError(error, "worker_recovery_lease_read_failed");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error("worker_recovery_lease_invalid_json");
+  }
+  if (
+    !isDataRecord(value)
+    || exactKeys(value, ["format", "workerId", "ownerId", "processId", "acquiredAt"]) !== null
+    || value.format !== "morrow.worker-recovery-lease/v1"
+    || !isIdentifier(value.workerId)
+    || (expectedWorkerId !== null && value.workerId !== expectedWorkerId)
+    || !isIdentifier(value.ownerId)
+    || !positiveSafeInteger(value.processId)
+    || !isTimestamp(value.acquiredAt)
+  ) {
+    throw new Error("worker_recovery_lease_invalid");
+  }
+  return value as unknown as PersistedWorkerRecoveryLease;
+}
+
+function processIsAlive(processId: number): boolean {
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch (error) {
+    return !(error instanceof Error && "code" in error && error.code === "ESRCH");
   }
 }
 
@@ -965,6 +1131,10 @@ function containsMorrowSegment(path: string): boolean {
 
 function isNotFound(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function isAlreadyExists(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "EEXIST";
 }
 
 function sanitizeStoreError(error: unknown, fallback: string): Error {
