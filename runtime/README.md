@@ -48,3 +48,5 @@ A experiência de operação que governa esses itens está em [`OPERATOR_EXPERIE
 O protocolo versionado entre Control Plane e Local Worker, suas fronteiras de confiança e o limite entre referência de trabalho e execução estão em [`ADR_WORKER_CONTROL_PROTOCOL.md`](ADR_WORKER_CONTROL_PROTOCOL.md).
 
 O serviço local que protege a raiz do Worker e expõe seu ciclo de vida sem ainda executar trabalho está em [`LOCAL_WORKER_SERVICE.md`](LOCAL_WORKER_SERVICE.md).
+
+Os registries versionados de Target/Role/Skill/Capability e a fronteira opaca do Secret Broker estão em [`GOVERNANCE_REGISTRIES.md`](GOVERNANCE_REGISTRIES.md).
