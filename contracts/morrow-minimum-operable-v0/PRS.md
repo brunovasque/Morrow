@@ -39,7 +39,7 @@ Os IDs abaixo são unidades contratuais, não números antecipados do GitHub. Ca
 | PR-ID | status | dependências | objetivo único | saída/prova de conclusão |
 |---|---|---|---|---|
 | `P2-PR01` | `PROVEN` | P0-PR03, P1 | Definir protocolo Worker/control plane: identidade, capabilities, heartbeat, dispatch, ack, cancel e versões | PR #5; ADR/schema/decoder; 48 testes; review de arquitetura e segurança GREEN |
-| `P2-PR02` | `READY` | P2-PR01 integrado | Implementar serviço Local Worker configurável com managed roots e ciclo start/stop/status | processo reiniciável, diagnóstico local e nenhum target implícito |
+| `P2-PR02` | `RUNNING` | P2-PR01 integrado | Implementar serviço Local Worker configurável com managed roots e ciclo start/stop/status | processo reiniciável, diagnóstico local e nenhum target implícito |
 | `P2-PR03` | `PENDING` | P2-PR02 | Implementar registries/resolvers mínimos de Target, Role, Skill e Capability mais Secret Broker boundary | dispatch sem target/role/skill/capability/secret policy válido é recusado e nenhuma credencial entra no contexto indevido |
 | `P2-PR04` | `PENDING` | P2-PR03 | Implementar Routing/Access/Model registry, Quota Guard e Budget Guard mínimos | effective configuration auditável; concorrência/cota/budget bloqueiam sem downgrade/fallback silencioso |
 | `P2-PR05` | `PENDING` | P2-PR04 | Ligar dispatch autenticado a locks/workspaces/guards e suportar PowerShell direto ou AgentInstance | teste prova job determinístico sem LLM e job de agente isolado; dispatch incompleto/indevido recusado |
