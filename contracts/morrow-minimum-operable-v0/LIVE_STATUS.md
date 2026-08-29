@@ -10,25 +10,25 @@
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
 - `active_phase`: `P2`
-- `active_pr_id`: `P2-PR05`
-- `active_route_node`: `AUTHENTICATED_DISPATCH_AND_EXECUTION`
-- `active_subaction`: `P2_PR05_PUBLISH_AND_REMOTE_REVIEW`
-- `expected_branch_prefix`: `mvo/p2-pr05-`
-- `write_execution_allowed`: `yes, only publication/review corrections scoped to P2-PR05`
-- `next_authorized_action`: `START_P2_PR05`
-- `next_authorized_actor`: `Operator/Reviewer`
+- `active_pr_id`: `P2-PR06`
+- `active_route_node`: `WORKER_RECOVERY_AND_OFFLINE_STATE`
+- `active_subaction`: `MERGE_PR_9_THEN_START_P2_PR06`
+- `expected_branch_prefix`: `mvo/p2-pr06-`
+- `write_execution_allowed`: `no product write before PR #9 merge; after merge, scoped only to P2-PR06 in a dedicated branch`
+- `next_authorized_action`: `START_P2_PR06`
+- `next_authorized_actor`: `Architect after integration`
 
 ## Próxima ação exata
 
-Atualizar `mvo/p2-pr05-authenticated-dispatch` na PR #9 com a correção de lifecycle que sucede `a493dba`, então conferir SHA remoto, arquivos, merge state e checks antes de qualquer autorização de merge.
+Integrar a PR #9 já provada. Depois, iniciar `P2-PR06` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e implementar somente reconnect, retry idempotente, fila, checkpoint e estado online/offline.
 
-O hardening `caf4eed` e a correção geracional `fec0525` passaram 109/109 testes após resolver quatro achados das revisões dos heads remotos. Mantenha `GPT-5.6 Sol / xhigh` durante a nova conferência remota. Nesta PR continuam proibidos ConPTY/terminal completo, reconnect/retry persistente, fila, credencial real, rede, cobrança e qualquer target externo, inclusive Enova.
+P2-PR05 foi revisada no head remoto `96dfdb0`, com `109/109`, 14 arquivos previstos, `mergeable: true`, merge state `clean` e parecer `GREEN`. Mantenha `GPT-5.6 Sol / xhigh` para P2-PR06, porque recovery e idempotência após restart são fronteiras críticas. Nenhuma escrita de P2-PR06 está autorizada antes da integração da PR #9.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `none` | `none` | achados das revisões resolvidos localmente; falta publicar e conferir o novo head remoto | atualizar e revisar somente a PR #9 |
+| `P2-INTEGRATION-05` | `integration` | P2-PR05 está provada na PR #9, ainda aberta | integrar PR #9 antes de criar a branch P2-PR06 |
 
 ## Status por fase
 
@@ -36,7 +36,7 @@ O hardening `caf4eed` e a correção geracional `fec0525` passaram 109/109 teste
 |---|---|---|
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
-| P2 | `RUNNING` | P2-PR05 hardening local `GREEN_CANDIDATE`; atualização/revisão da PR #9 pendente |
+| P2 | `READY` | P2-PR05 provada; P2-PR06 aguarda integração da PR #9 |
 | P3 | `BLOCKED` | depende de P2 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
