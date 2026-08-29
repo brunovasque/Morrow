@@ -10,25 +10,24 @@
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
 - `active_phase`: `P2`
-- `active_pr_id`: `P2-PR02`
-- `active_route_node`: `WORKER_SERVICE`
-- `active_subaction`: `P2_PR02_LOCAL_WORKER_LIFECYCLE`
-- `expected_branch_prefix`: `mvo/p2-pr02-`
-- `write_execution_allowed`: `yes, scoped only to P2-PR02 in a dedicated branch`
-- `next_authorized_action`: `START_P2_PR02`
-- `next_authorized_actor`: `Executor`
+- `active_pr_id`: `P2-PR03`
+- `active_route_node`: `WORKER_REGISTRIES`
+- `active_subaction`: `MERGE_PR_6_THEN_START_P2_PR03`
+- `write_execution_allowed`: `no product write before PR #6 merge; after merge, scoped only to P2-PR03 in a dedicated branch`
+- `next_authorized_action`: `START_P2_PR03`
+- `next_authorized_actor`: `Architect`
 
 ## Próxima ação exata
 
-Implementar somente o serviço Local Worker configurável, suas raízes gerenciadas e ciclo start/stop/status em `mvo/p2-pr02-worker-service`, baseada em `7b6ad6b`.
+Integrar a PR #6 já provada. Depois, iniciar `P2-PR03` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e implementar somente os registries/resolvers mínimos de Target, Role, Skill e Capability e a fronteira do Secret Broker.
 
-P2-PR01 foi revisada com `GPT-5.6 Sol / xhigh`. Após o merge, o operador poderá trocar para `GPT-5.6 Terra / high` na implementação de P2-PR02; o fechamento de segurança volta a Sol se houver decisão de transporte/credencial de alto risco. Nenhuma implementação de P2-PR03 está autorizada antes de `P2-PR02: PROVEN`.
+P2-PR02 foi revisada com `GPT-5.6 Sol / xhigh`, incluindo correção adversarial de escape por junction. P2-PR03 lida com autoridade, registries e fronteira de segredos; mantenha `GPT-5.6 Sol / xhigh` durante sua arquitetura e implementação. Nenhuma escrita de P2-PR03 está autorizada antes da integração da PR #6.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `none` | `none` | nenhum bloqueio de preflight ativo | executar somente P2-PR02 |
+| `P2-INTEGRATION-02` | `integration` | P2-PR02 está provada na PR #6, ainda aberta | integrar PR #6 antes de criar a branch P2-PR03 |
 
 ## Status por fase
 
@@ -36,7 +35,7 @@ P2-PR01 foi revisada com `GPT-5.6 Sol / xhigh`. Após o merge, o operador poder�
 |---|---|---|
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
-| P2 | `RUNNING` | P2-PR02 em branch dedicada sobre `7b6ad6b` |
+| P2 | `READY` | P2-PR02 provada; P2-PR03 aguarda integração da PR #6 |
 | P3 | `BLOCKED` | depende de P2 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
