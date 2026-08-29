@@ -12,23 +12,23 @@
 - `active_phase`: `P2`
 - `active_pr_id`: `P2-PR05`
 - `active_route_node`: `AUTHENTICATED_DISPATCH_AND_EXECUTION`
-- `active_subaction`: `MERGE_PR_8_THEN_START_P2_PR05`
+- `active_subaction`: `P2_PR05_AUTHENTICATED_DISPATCH_EXECUTION`
 - `expected_branch_prefix`: `mvo/p2-pr05-`
-- `write_execution_allowed`: `no product write before PR #8 merge; after merge, scoped only to P2-PR05 in a dedicated branch`
+- `write_execution_allowed`: `yes, scoped only to P2-PR05 in a dedicated branch`
 - `next_authorized_action`: `START_P2_PR05`
-- `next_authorized_actor`: `Architect after integration`
+- `next_authorized_actor`: `Architect/Executor`
 
 ## Próxima ação exata
 
-Integrar a PR #8 já provada. Depois, iniciar `P2-PR05` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e ligar somente dispatch autenticado a locks/workspaces/guards, com PowerShell determinístico ou AgentInstance governada.
+Implementar somente a ligação autenticada de dispatch a WorkAuthority, routing/quota/budget, locks e workspace em `mvo/p2-pr05-authenticated-dispatch`, baseada em `aba8770`, com caminhos explícitos para PowerShell determinístico sem LLM e AgentInstance governada.
 
-P2-PR04 foi revisada no head remoto `e8cd2e6`, com `96/96`, merge state `CLEAN` e parecer `GREEN`. Mantenha `GPT-5.6 Sol / xhigh` para P2-PR05, pois será a primeira ligação de autorização a execução. Nenhuma escrita de P2-PR05 está autorizada antes da integração da PR #8.
+P2-PR04 foi integrada em `aba8770`. Mantenha `GPT-5.6 Sol / xhigh`: P2-PR05 é a primeira ligação entre autorização e execução. Nesta PR são proibidos ConPTY/terminal completo, reconnect/retry persistente, fila, credencial real, rede, cobrança e qualquer target externo, inclusive Enova.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P2-INTEGRATION-04` | `integration` | P2-PR04 está provada na PR #8, ainda aberta | integrar PR #8 antes de criar a branch P2-PR05 |
+| `none` | `none` | nenhum bloqueio de preflight ativo | executar somente P2-PR05 |
 
 ## Status por fase
 
@@ -36,7 +36,7 @@ P2-PR04 foi revisada no head remoto `e8cd2e6`, com `96/96`, merge state `CLEAN` 
 |---|---|---|
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
-| P2 | `READY` | P2-PR04 provada; P2-PR05 aguarda integração da PR #8 |
+| P2 | `RUNNING` | P2-PR05 em branch dedicada sobre `aba8770` |
 | P3 | `BLOCKED` | depende de P2 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
