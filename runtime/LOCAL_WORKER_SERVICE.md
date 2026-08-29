@@ -47,7 +47,7 @@ O host ainda não é um serviço Windows instalado/autostart. Instalação, ACL 
 
 ## Fora desta PR
 
-- transporte autenticado e conexão outbound concreta: P2-PR02/P2-PR06 conforme a fronteira da P2-PR01;
+- transporte autenticado, conexão outbound concreta e recovery: P2-PR06 conforme a fronteira definida na P2-PR01;
 - Target/Role/Skill/Capability/Secret registries: P2-PR03;
 - routing, quota e budget: P2-PR04;
 - dispatch, locks, workspace por target e PowerShell/AgentInstance: P2-PR05;
