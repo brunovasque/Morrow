@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { WORKER_PROTOCOL_VERSION } from "./worker-protocol.ts";
 
 export type LocalWorkerServiceState = "stopped" | "starting" | "ready" | "stopping" | "failed";
@@ -106,6 +106,9 @@ export class LocalWorkerService {
   async diagnose(): Promise<LocalWorkerDiagnostic> {
     const checks: LocalWorkerDiagnostic["checks"] = [];
     const root = resolve(this.configuration.managedRoot);
+    const operatorIsolated = !this.configuration.operatorOwnedRoots.some(
+      (operatorRoot) => pathsOverlap(root, operatorRoot),
+    );
     checks.push({
       id: "managed_root_name",
       passed: containsMorrowSegment(root),
@@ -113,8 +116,10 @@ export class LocalWorkerService {
     });
     checks.push({
       id: "operator_isolation",
-      passed: !this.configuration.operatorOwnedRoots.some((operatorRoot) => pathsOverlap(root, operatorRoot)),
-      detail: "managed_root_does_not_overlap_declared_operator_roots",
+      passed: operatorIsolated,
+      detail: operatorIsolated
+        ? "managed_root_does_not_overlap_declared_operator_roots"
+        : "worker_managed_root_overlaps_operator_root",
     });
     checks.push({
       id: "target_access",
@@ -161,11 +166,15 @@ export class LocalWorkerService {
 
 async function initializeOwnedLayout(configuration: LocalWorkerServiceConfiguration): Promise<LocalWorkerLayout> {
   const requestedRoot = resolve(configuration.managedRoot);
+  await assertNoSymbolicLinkAncestors(requestedRoot);
   await mkdir(requestedRoot, { recursive: true });
   const rootEntry = await lstat(requestedRoot);
   if (rootEntry.isSymbolicLink()) throw new Error("worker_managed_root_symlink_refused");
 
   const managedRoot = await realpath(requestedRoot);
+  if (!containsMorrowSegment(managedRoot)) {
+    throw new Error("worker_managed_root_canonical_path_requires_morrow_segment");
+  }
   for (const operatorRoot of configuration.operatorOwnedRoots) {
     if (pathsOverlap(managedRoot, await resolvedPath(operatorRoot))) {
       throw new Error("worker_managed_root_overlaps_operator_root");
@@ -177,6 +186,24 @@ async function initializeOwnedLayout(configuration: LocalWorkerServiceConfigurat
   const workspaceRoot = await ensureManagedChild(managedRoot, "workspaces");
   const diagnosticsRoot = await ensureManagedChild(managedRoot, "diagnostics");
   return deepFreeze({ managedRoot, stateRoot, workspaceRoot, diagnosticsRoot });
+}
+
+async function assertNoSymbolicLinkAncestors(path: string): Promise<void> {
+  const root = parse(path).root;
+  const segments = relative(root, path).split(/[\\/]+/).filter(Boolean);
+  let current = root;
+  for (const segment of segments) {
+    current = join(current, segment);
+    try {
+      const entry = await lstat(current);
+      if (entry.isSymbolicLink()) {
+        throw new Error("worker_managed_root_symbolic_ancestor_refused");
+      }
+    } catch (error) {
+      if (isNotFound(error)) return;
+      throw error;
+    }
+  }
 }
 
 async function inspectOwnedLayout(root: string, workerId: string): Promise<LocalWorkerLayout> {

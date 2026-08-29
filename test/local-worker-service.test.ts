@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -126,6 +126,19 @@ test("refuses forged managed children instead of following files or links", asyn
   const worker = new LocalWorkerService(configuration(managedRoot));
   await assert.rejects(worker.start(), /worker_managed_child_invalid:workspaces/);
   assert.equal(await readFile(join(managedRoot, "workspaces"), "utf8"), "not-a-directory");
+});
+
+test("refuses a symbolic .morrow ancestor before writing through it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-local-worker-symbolic-root-"));
+  const externalRoot = join(root, "operator-owned-external-root");
+  const symbolicMorrowRoot = join(root, ".morrow");
+  await mkdir(externalRoot, { recursive: true });
+  await symlink(externalRoot, symbolicMorrowRoot, process.platform === "win32" ? "junction" : "dir");
+
+  const managedRoot = join(symbolicMorrowRoot, "workers", "worker-local-1");
+  const worker = new LocalWorkerService(configuration(managedRoot));
+  await assert.rejects(worker.start(), /worker_managed_root_symbolic_ancestor_refused/);
+  await assert.rejects(access(join(externalRoot, "workers")), { code: "ENOENT" });
 });
 
 test("requires a unique protocol version set that includes the accepted worker protocol", async () => {

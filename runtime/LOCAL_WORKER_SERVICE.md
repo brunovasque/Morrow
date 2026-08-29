@@ -24,7 +24,8 @@ Ao iniciar, o Worker:
 1. cria a raiz somente se ela estiver vazia;
 2. grava o marcador `.morrow-local-worker-root.json` com seu `workerId`;
 3. cria somente `state`, `workspaces` e `diagnostics` abaixo da raiz;
-4. recusa raiz sem marcador e com conteúdo, marcador de outro Worker, link simbólico ou filho que não seja diretório gerenciado.
+4. recusa raiz sem marcador e com conteúdo, marcador de outro Worker, qualquer ancestral simbólico/junction ou filho que não seja diretório gerenciado;
+5. confirma que o caminho canônico, depois de resolvido pelo sistema operacional, continua dentro de um segmento `.morrow` antes de aceitar a raiz.
 
 Assim, uma pasta de projeto aberta pelo operador não é adotada por acaso como área de trabalho do Morrow. O Worker não recebe nenhum target nesta etapa.
 
