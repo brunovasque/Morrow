@@ -10,25 +10,25 @@
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
 - `active_phase`: `P2`
-- `active_pr_id`: `P2-PR05`
-- `active_route_node`: `AUTHENTICATED_DISPATCH_AND_EXECUTION`
-- `active_subaction`: `MERGE_PR_8_THEN_START_P2_PR05`
-- `expected_branch_prefix`: `mvo/p2-pr05-`
-- `write_execution_allowed`: `no product write before PR #8 merge; after merge, scoped only to P2-PR05 in a dedicated branch`
-- `next_authorized_action`: `START_P2_PR05`
+- `active_pr_id`: `P2-PR06`
+- `active_route_node`: `WORKER_RECOVERY_AND_OFFLINE_STATE`
+- `active_subaction`: `MERGE_PR_9_THEN_START_P2_PR06`
+- `expected_branch_prefix`: `mvo/p2-pr06-`
+- `write_execution_allowed`: `no product write before PR #9 merge; after merge, scoped only to P2-PR06 in a dedicated branch`
+- `next_authorized_action`: `START_P2_PR06`
 - `next_authorized_actor`: `Architect after integration`
 
 ## Próxima ação exata
 
-Integrar a PR #8 já provada. Depois, iniciar `P2-PR05` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e ligar somente dispatch autenticado a locks/workspaces/guards, com PowerShell determinístico ou AgentInstance governada.
+Integrar a PR #9 já provada. Depois, iniciar `P2-PR06` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e implementar somente reconnect, retry idempotente, fila, checkpoint e estado online/offline.
 
-P2-PR04 foi revisada no head remoto `e8cd2e6`, com `96/96`, merge state `CLEAN` e parecer `GREEN`. Mantenha `GPT-5.6 Sol / xhigh` para P2-PR05, pois será a primeira ligação de autorização a execução. Nenhuma escrita de P2-PR05 está autorizada antes da integração da PR #8.
+P2-PR05 foi revisada no head remoto `96dfdb0`, com `109/109`, 14 arquivos previstos, `mergeable: true`, merge state `clean` e parecer `GREEN`. Mantenha `GPT-5.6 Sol / xhigh` para P2-PR06, porque recovery e idempotência após restart são fronteiras críticas. Nenhuma escrita de P2-PR06 está autorizada antes da integração da PR #9.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P2-INTEGRATION-04` | `integration` | P2-PR04 está provada na PR #8, ainda aberta | integrar PR #8 antes de criar a branch P2-PR05 |
+| `P2-INTEGRATION-05` | `integration` | P2-PR05 está provada na PR #9, ainda aberta | integrar PR #9 antes de criar a branch P2-PR06 |
 
 ## Status por fase
 
@@ -36,7 +36,7 @@ P2-PR04 foi revisada no head remoto `e8cd2e6`, com `96/96`, merge state `CLEAN` 
 |---|---|---|
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
-| P2 | `READY` | P2-PR04 provada; P2-PR05 aguarda integração da PR #8 |
+| P2 | `READY` | P2-PR05 provada; P2-PR06 aguarda integração da PR #9 |
 | P3 | `BLOCKED` | depende de P2 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
@@ -52,7 +52,7 @@ P2-PR04 foi revisada no head remoto `e8cd2e6`, com `96/96`, merge state `CLEAN` 
 - Codex quota-session e shims Windows;
 - sessões processuais ao vivo, múltiplas e isoladas;
 - separação canônica dos terminais do operador;
-- 25/25 testes passando.
+- 109/109 testes passando após hardening P2-PR05.
 
 Isso não autoriza declarar o produto operacional. `PRS.md` define o restante.
 
