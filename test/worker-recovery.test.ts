@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -297,6 +297,19 @@ test("allows only one active coordinator to own a recovery root", async (t) => {
   const replacement = await openCoordinator(stateRoot, async (request) => success(request));
   assert.equal(replacement.inspect().connectivity, "offline");
   await replacement.close();
+});
+
+test("refuses an oversized snapshot before loading its contents", async (t) => {
+  const { stateRoot } = await makeRoot(t);
+  const coordinator = await openCoordinator(stateRoot, async (request) => success(request));
+  await coordinator.accept(dispatchMessage());
+  await coordinator.close();
+  await truncate(join(stateRoot, "worker-recovery-v1.json"), 33_554_433);
+
+  await assert.rejects(
+    openCoordinator(stateRoot, async (request) => success(request)),
+    /worker_recovery_snapshot_too_large/,
+  );
 });
 
 test("enforces durable queue capacity without evicting idempotency history", async (t) => {
