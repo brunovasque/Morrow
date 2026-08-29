@@ -12,7 +12,7 @@
 - `active_phase`: `P2`
 - `active_pr_id`: `P2-PR04`
 - `active_route_node`: `ROUTING_AND_RESOURCE_GUARDS`
-- `active_subaction`: `P2_PR04_ROUTING_QUOTA_BUDGET_GUARDS`
+- `active_subaction`: `PUBLISH_AND_REVIEW_P2_PR04_CANDIDATE`
 - `expected_branch_prefix`: `mvo/p2-pr04-`
 - `write_execution_allowed`: `yes, scoped only to P2-PR04 in a dedicated branch`
 - `next_authorized_action`: `START_P2_PR04`
@@ -20,9 +20,9 @@
 
 ## Próxima ação exata
 
-Implementar somente Routing/Access/Model registry, resolução de configuração efetiva e Quota/Budget Guards mínimos em `mvo/p2-pr04-routing-guards`, baseada em `7d3e91b`.
+Publicar `mvo/p2-pr04-routing-guards` no head local `8c68d87`, abrir a PR contra `phase-2/runtime-v0` e conferir branch, base, head, diff e estado remoto antes da revisão final.
 
-P2-PR03 foi integrada em `7d3e91b`. P2-PR04 fixa routing, acesso, modelo, esforço, cota e budget; mantenha `GPT-5.6 Sol / xhigh`. Nenhum dispatch, processo, shell, credencial, transporte, target externo ou cobrança real está autorizado nesta PR.
+P2-PR03 foi integrada em `7d3e91b`. O candidate local de P2-PR04 está `GREEN_CANDIDATE` com 94/94 testes, mas permanece `RUNNING` até o head remoto exato ser revisado. Mantenha `GPT-5.6 Sol / xhigh`. Nenhum dispatch, processo, shell, credencial, transporte, target externo ou cobrança real está autorizado nesta PR.
 
 ## Bloqueios atuais
 
