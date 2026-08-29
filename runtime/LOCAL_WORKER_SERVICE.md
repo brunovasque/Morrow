@@ -1,6 +1,6 @@
-# Serviço Local Worker — P2-PR02 + ciclo de dispatch P2-PR05
+# Serviço Local Worker — P2-PR02 + dispatch P2-PR05 + recovery P2-PR06
 
-O Local Worker é o processo local do Morrow que hospeda execução governada. P2-PR02 criou o serviço sem dispatch; P2-PR05 acrescenta um attachment interno e revogável, documentado em [`AUTHENTICATED_DISPATCH.md`](AUTHENTICATED_DISPATCH.md). O serviço continua sem listener de rede, credencial real, target implícito ou terminal completo.
+O Local Worker é o processo local do Morrow que hospeda execução governada. P2-PR02 criou o serviço sem dispatch; P2-PR05 acrescentou um attachment interno e revogável, documentado em [`AUTHENTICATED_DISPATCH.md`](AUTHENTICATED_DISPATCH.md). P2-PR06 acrescenta o coordenador durável documentado em [`WORKER_RECOVERY.md`](WORKER_RECOVERY.md): fila offline, reconnect por hello/heartbeat e bloqueio conservador quando restart deixa o resultado de um efeito incerto. O serviço continua sem listener de rede, credencial real, target implícito ou terminal completo.
 
 ## Configuração explícita
 
@@ -47,11 +47,17 @@ Estados expostos: `stopped`, `starting`, `ready`, `stopping` e `failed`.
 
 O host ainda não é um serviço Windows instalado/autostart e seu stdin não transporta dispatch. Instalação, ACL de serviço e operação diária sem terminal manual pertencem a P8-PR01. A ligação autenticada P2-PR05 é uma fronteira de runtime separada.
 
-## Fora desta PR
+## Composição de recovery
 
-- transporte autenticado, conexão outbound concreta e recovery: P2-PR06 conforme a fronteira definida na P2-PR01;
+O host básico continua sem transportar trabalho pelo stdin. A composição confiável conecta o protocolo autenticado ao `WorkerRecoveryCoordinator`; o coordenador só entrega o corpo governado à fronteira de tentativa depois do checkpoint `running`. Um restart nunca herda status `online`: a nova instância exige nova sessão e heartbeat.
+
+O estado fica em filho gerenciado de `stateRoot`, nunca no projeto/terminal do operador. O snapshot não contém envelope, credencial, script, prompt nem saída de processo.
+
+## Fora destas etapas
+
+- transporte remoto concreto: fora desta PR; o MVO local-first pode compor a fronteira localmente e qualquer topologia remota futura continua outbound conforme a P2-PR01 e os débitos `D-004/D-009`;
 - Target/Role/Skill/Capability/Secret registries: P2-PR03;
 - routing, quota e budget: P2-PR04;
 - dispatch sem WorkSpec imutável, autoridade, guards, lock e workspace: proibido; o caminho aceito é P2-PR05;
-- reconnect, fila, checkpoint e replay persistente: P2-PR06;
+- eventos canônicos, transcript/redaction e replay de observabilidade: P4;
 - ConPTY e terminais reais: P3.

@@ -12,7 +12,7 @@
 - `active_phase`: `P2`
 - `active_pr_id`: `P2-PR06`
 - `active_route_node`: `WORKER_RECOVERY_AND_OFFLINE_STATE`
-- `active_subaction`: `P2_PR06_DESIGN_AND_IMPLEMENT_RECOVERY`
+- `active_subaction`: `P2_PR06_PUBLISH_AND_REVIEW_REMOTE_HEAD`
 - `expected_branch_prefix`: `mvo/p2-pr06-`
 - `write_execution_allowed`: `yes, scoped only to P2-PR06 in a dedicated branch`
 - `next_authorized_action`: `START_P2_PR06`
@@ -20,7 +20,7 @@
 
 ## Próxima ação exata
 
-Implementar somente P2-PR06 na branch `mvo/p2-pr06-recovery`: reconnect, retry idempotente, fila durável, checkpoint e estado online/offline do Local Worker. A prova obrigatória mata/reinicia o processo sem duplicar efeito e faz cada pendência retomar com segurança ou bloquear com causa explícita.
+Publicar e revisar somente o candidate P2-PR06 na branch `mvo/p2-pr06-recovery`. O código/teste `d2c54de` implementa reconnect, retry idempotente, fila durável, checkpoint e estado online/offline; testes focados passaram 11/11 e a suíte completa 120/120. A PR ainda não existe remotamente, portanto o resultado permanece `RUNNING/GREEN_CANDIDATE`, não `PROVEN`.
 
 P2-PR05 foi integrada pela PR #9 em `9b96a8b`; a base integrada passou `109/109` e ficou limpa. Mantenha `GPT-5.6 Sol / xhigh` para P2-PR06, porque recovery e idempotência após restart são fronteiras críticas. Nesta PR permanecem proibidos ConPTY/P3, transcript/redaction/P4, credencial real, transporte de rede concreto e qualquer target externo, inclusive Enova.
 
