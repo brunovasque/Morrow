@@ -10,7 +10,6 @@ export interface LocalWorkerServiceConfiguration {
   managedRoot: string;
   operatorOwnedRoots: string[];
   supportedProtocolVersions: string[];
-  dispatchEnabled?: boolean;
 }
 
 export interface LocalWorkerLayout {
@@ -56,6 +55,7 @@ export class LocalWorkerService {
   private failure: string | null = null;
   private layout: LocalWorkerLayout | null = null;
   private startOperation: Promise<LocalWorkerServiceStatus> | null = null;
+  private dispatchAttached = false;
 
   constructor(configuration: LocalWorkerServiceConfiguration) {
     assertConfiguration(configuration);
@@ -86,7 +86,20 @@ export class LocalWorkerService {
     this.state = "stopped";
     this.stoppedAt = new Date().toISOString();
     this.instanceId = null;
+    this.dispatchAttached = false;
     return this.status();
+  }
+
+  attachAuthenticatedDispatch(): () => void {
+    if (this.state !== "ready") throw new Error("worker_not_ready_for_dispatch_attachment");
+    if (this.dispatchAttached) throw new Error("worker_dispatch_already_attached");
+    this.dispatchAttached = true;
+    let detached = false;
+    return () => {
+      if (detached) return;
+      detached = true;
+      this.dispatchAttached = false;
+    };
   }
 
   status(): LocalWorkerServiceStatus {
@@ -99,7 +112,7 @@ export class LocalWorkerService {
       failure: this.failure,
       layout: this.layout ? { ...this.layout } : null,
       targetAccess: "none" as const,
-      dispatchAccepted: this.state === "ready" && this.configuration.dispatchEnabled === true,
+      dispatchAccepted: this.state === "ready" && this.dispatchAttached,
       supportedProtocolVersions: [...this.configuration.supportedProtocolVersions],
     });
   }
@@ -130,7 +143,7 @@ export class LocalWorkerService {
     checks.push({
       id: "dispatch",
       passed: true,
-      detail: this.configuration.dispatchEnabled === true
+      detail: this.dispatchAttached
         ? "authenticated_dispatch_enabled_by_trusted_composition"
         : "dispatch_disabled",
     });
@@ -281,13 +294,10 @@ async function inspectManagedChild(root: string, name: "state" | "workspaces" | 
 
 function assertConfiguration(configuration: LocalWorkerServiceConfiguration): void {
   if (!isPlainObject(configuration)) throw new Error("worker_configuration_invalid");
-  const allowed = new Set(["workerId", "managedRoot", "operatorOwnedRoots", "supportedProtocolVersions", "dispatchEnabled"]);
+  const allowed = new Set(["workerId", "managedRoot", "operatorOwnedRoots", "supportedProtocolVersions"]);
   const unknown = Object.keys(configuration).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`worker_configuration_unknown_field:${unknown}`);
   if (!workerIdPattern.test(configuration.workerId)) throw new Error("worker_id_invalid");
-  if (configuration.dispatchEnabled !== undefined && typeof configuration.dispatchEnabled !== "boolean") {
-    throw new Error("worker_dispatch_enabled_invalid");
-  }
   if (typeof configuration.managedRoot !== "string" || !isAbsolute(configuration.managedRoot)) {
     throw new Error("worker_managed_root_must_be_absolute");
   }

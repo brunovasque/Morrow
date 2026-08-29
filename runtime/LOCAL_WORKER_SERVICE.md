@@ -1,6 +1,6 @@
 # Serviço Local Worker — P2-PR02 + ciclo de dispatch P2-PR05
 
-O Local Worker é o processo local do Morrow que hospeda execução governada. P2-PR02 criou o serviço sem dispatch; P2-PR05 acrescenta uma composição explicitamente habilitada, documentada em [`AUTHENTICATED_DISPATCH.md`](AUTHENTICATED_DISPATCH.md). O serviço continua sem listener de rede, credencial real, target implícito ou terminal completo.
+O Local Worker é o processo local do Morrow que hospeda execução governada. P2-PR02 criou o serviço sem dispatch; P2-PR05 acrescenta um attachment interno e revogável, documentado em [`AUTHENTICATED_DISPATCH.md`](AUTHENTICATED_DISPATCH.md). O serviço continua sem listener de rede, credencial real, target implícito ou terminal completo.
 
 ## Configuração explícita
 
@@ -11,12 +11,11 @@ O host recebe um único arquivo JSON de configuração. O formato aceito é estr
   "workerId": "worker-local-1",
   "managedRoot": "C:\\...\\.morrow\\workers\\worker-local-1",
   "operatorOwnedRoots": ["C:\\...\\meu-projeto"],
-  "supportedProtocolVersions": ["1.0"],
-  "dispatchEnabled": false
+  "supportedProtocolVersions": ["1.0"]
 }
 ```
 
-`managedRoot` precisa ser absoluto e conter o segmento `.morrow`. `operatorOwnedRoots` declara diretórios que jamais podem se sobrepor à raiz do Worker. `dispatchEnabled` é opcional e só é ativado pela composição confiável P2-PR05; não autoriza um efeito sem os demais gates. A configuração não possui `targetId`, comando, script, ambiente ou token; campos extras são recusados.
+`managedRoot` precisa ser absoluto e conter o segmento `.morrow`. `operatorOwnedRoots` declara diretórios que jamais podem se sobrepor à raiz do Worker. A configuração não possui `targetId`, comando, script, ambiente, token ou chave para habilitar dispatch; campos extras — inclusive `dispatchEnabled` — são recusados.
 
 ## Posse da raiz
 
@@ -37,7 +36,8 @@ Estados expostos: `stopped`, `starting`, `ready`, `stopping` e `failed`.
 - `start()` é idempotente enquanto o Worker está `ready`;
 - `stop()` é idempotente e não remove a raiz aprovada;
 - uma nova instância pode subir depois sobre a mesma raiz marcada, recebendo novo `instanceId`;
-- `status()` declara explicitamente `targetAccess: none`; `dispatchAccepted` só fica verdadeiro quando o Worker está `ready` e a composição confiável habilitou o dispatcher;
+- `status()` declara explicitamente `targetAccess: none`; `dispatchAccepted` só fica verdadeiro quando o Worker está `ready` e a composição interna anexou um dispatcher autenticado vivo por `attachAuthenticatedDispatch()`;
+- parar o Worker revoga esse attachment; restart exige nova composição, impedindo status verde herdado sem dispatcher;
 - `diagnose()` verifica configuração, isolamento das raízes, marcador e filhos gerenciados sem tocar em target externo.
 
 ## Host local

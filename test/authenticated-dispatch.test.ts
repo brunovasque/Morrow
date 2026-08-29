@@ -79,6 +79,7 @@ interface HarnessOptions {
   quotaBlocked?: boolean;
   budgetBlocked?: boolean;
   specTargetId?: string;
+  maxInMemoryDispatchRecords?: number;
 }
 
 interface Harness {
@@ -119,13 +120,14 @@ async function buildHarness(t: { after(callback: () => void | Promise<void>): vo
     managedRoot,
     operatorOwnedRoots: [operatorRoot],
     supportedProtocolVersions: [WORKER_PROTOCOL_VERSION],
-    dispatchEnabled: true,
   });
   const workerStatus = await worker.start();
   assert.equal(workerStatus.state, "ready");
   assert.ok(workerStatus.layout);
+  const detachDispatch = worker.attachAuthenticatedDispatch();
   const layout = workerStatus.layout!;
   t.after(async () => {
+    detachDispatch();
     await worker.stop();
     await rm(root, { recursive: true, force: true });
   });
@@ -354,6 +356,7 @@ async function buildHarness(t: { after(callback: () => void | Promise<void>): vo
     preDispatch: (input) => evaluatePreDispatch(input, state),
     processExecutor: options.processExecutor ?? { execute: async () => okProcess() },
     agentExecutor: options.agentExecutor ?? { execute: async () => okAgent() },
+    maxInMemoryDispatchRecords: options.maxInMemoryDispatchRecords,
   });
 
   let sequence = 10;
@@ -549,6 +552,30 @@ test("shares one concurrent idempotent effect and refuses rebinding", async (t) 
   const reboundResult = await harness.service.dispatch(rebound);
   assert.equal(reboundResult.ok, false);
   if (!reboundResult.ok) assert.equal(reboundResult.code, "IDEMPOTENCY_CONFLICT");
+});
+
+test("bounds in-memory idempotency without evicting and replaying an earlier effect", async (t) => {
+  let executions = 0;
+  const harness = await buildHarness(t, {
+    maxInMemoryDispatchRecords: 1,
+    processExecutor: { execute: async () => { executions += 1; return okProcess(); } },
+  });
+  const firstMessage = harness.message();
+  assert.equal((await harness.service.dispatch(firstMessage)).ok, true);
+
+  const second = harness.message({
+    dispatchId: "dispatch-capacity-second",
+    idempotencyKey: "effect-capacity-second",
+    workspace: { workspaceId: "workspace-capacity-second", isolation: "dedicated" },
+  } as never);
+  const secondResult = await harness.service.dispatch(second);
+  assert.equal(secondResult.ok, false);
+  if (!secondResult.ok) assert.equal(secondResult.code, "IDEMPOTENCY_CAPACITY_EXHAUSTED");
+
+  const retry = await harness.service.dispatch(structuredClone(firstMessage));
+  assert.equal(retry.ok, true);
+  assert.equal(retry.duplicate, true);
+  assert.equal(executions, 1);
 });
 
 test("refuses target lock contention without creating a workspace", async (t) => {

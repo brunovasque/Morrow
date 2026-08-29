@@ -7,7 +7,7 @@
 
 ## Objetivo
 
-P2-PR05 liga a mensagem autenticada do Control Plane à execução local sem permitir que texto de chat, corpo de dispatch ou parâmetro improvisado vire comando. O Local Worker aceita um efeito novo somente quando seu ciclo de vida declara `dispatchAccepted: true`.
+P2-PR05 liga a mensagem autenticada do Control Plane à execução local sem permitir que texto de chat, corpo de dispatch ou parâmetro improvisado vire comando. O Local Worker aceita um efeito novo somente quando está `ready` e a composição interna anexou um dispatcher autenticado vivo. Esse poder não existe no arquivo de configuração e é revogado no stop.
 
 Há dois caminhos explícitos:
 
@@ -42,7 +42,7 @@ Qualquer recusa anterior à execução impede a chamada ao executor. Erros de de
 
 O envelope contém somente `{ artifactId, sha256 }`. O script ou prompt reside no `WorkSpecRegistry`, é validado, clonado, congelado e endereçado por hash canônico. O dispatch não aceita `command`, `script`, `prompt`, `cwd`, ambiente, credencial ou caminho arbitrário.
 
-Reusar `idempotencyKey` ou `dispatchId` com outro corpo é recusado. Repetições concorrentes do mesmo efeito compartilham a mesma operação e o mesmo resultado. Essa memória é deliberadamente local à instância; persistência, replay window e retomada após restart pertencem a P2-PR06.
+Reusar `idempotencyKey` ou `dispatchId` com outro corpo é recusado. Repetições concorrentes do mesmo efeito compartilham a mesma operação e o mesmo resultado. A tabela em memória possui capacidade máxima: ao atingir o limite, efeitos novos são recusados sem remover registros anteriores e sem correr o risco de reexecutá-los. Essa memória é deliberadamente local à instância; persistência, replay window e retomada após restart pertencem a P2-PR06.
 
 ## PowerShell determinístico
 
@@ -54,6 +54,8 @@ Reusar `idempotencyKey` ou `dispatchId` com outro corpo é recusado. Repetiçõe
 - `cwd` igual ao workspace gerenciado;
 - ambiente explícito e sem nomes de variáveis semelhantes a token/segredo/senha/chave;
 - timeout e limite de captura de saída.
+
+Falha ao entregar o script pelo stdin também encerra o processo e atravessa a fronteira apenas como erro sanitizado.
 
 Isso prova execução PowerShell direta sem LLM e sem depender de uma janela aberta pelo operador. O workspace dedicado e a ausência de comando vindo do envelope são cercas desta PR; sandbox de sistema operacional, árvore de processos e terminal PTY não são alegados aqui.
 
@@ -84,5 +86,6 @@ Os testes usam somente targets fictícios em memória e raízes temporárias `.m
 - recusa antes de execução por autenticação, hash, campo de comando bruto, PRE_DISPATCH, Worker parado e lock;
 - Quota Guard e Budget Guard bloqueando execução;
 - um único efeito para retries concorrentes e recusa de rebinding;
+- capacidade de idempotência esgotada recusa efeito novo sem evict/replay;
 - settlement conservador para retorno inválido/excessivo;
 - liberação de lock/workspace e erro sanitizado após falha do executor.

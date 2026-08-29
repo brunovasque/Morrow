@@ -209,6 +209,7 @@ export class PowerShellProcessExecutor implements DeterministicProcessExecutor {
       let timedOut = false;
       let settled = false;
       let outputLimitExceeded = false;
+      let inputFailed = false;
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       const capture = (stream: "stdout" | "stderr", chunk: string): void => {
@@ -223,6 +224,11 @@ export class PowerShellProcessExecutor implements DeterministicProcessExecutor {
       };
       child.stdout.on("data", (chunk) => { capture("stdout", chunk); });
       child.stderr.on("data", (chunk) => { capture("stderr", chunk); });
+      child.stdin.once("error", () => {
+        if (settled) return;
+        inputFailed = true;
+        child.kill("SIGKILL");
+      });
       const timer = setTimeout(() => {
         timedOut = true;
         child.kill("SIGKILL");
@@ -237,8 +243,8 @@ export class PowerShellProcessExecutor implements DeterministicProcessExecutor {
         clearTimeout(timer);
         if (settled) return;
         settled = true;
-        if (outputLimitExceeded) {
-          reject(new Error("powershell_output_limit_exceeded"));
+        if (outputLimitExceeded || inputFailed) {
+          reject(new Error(outputLimitExceeded ? "powershell_output_limit_exceeded" : "powershell_input_failed"));
           return;
         }
         resolvePromise(deepFreeze({
@@ -258,6 +264,7 @@ export type DispatchRejectionCode =
   | "PROTOCOL_REJECTED"
   | "MESSAGE_NOT_DISPATCH"
   | "IDEMPOTENCY_CONFLICT"
+  | "IDEMPOTENCY_CAPACITY_EXHAUSTED"
   | "WORKER_NOT_READY"
   | "WORK_SPEC_NOT_FOUND"
   | "WORK_SPEC_KIND_MISMATCH"
@@ -319,6 +326,7 @@ export interface AuthenticatedDispatchDependencies {
   preDispatch: DispatchPreflight;
   processExecutor: DeterministicProcessExecutor;
   agentExecutor: GovernedAgentExecutor;
+  maxInMemoryDispatchRecords?: number;
 }
 
 interface DispatchRecord {
@@ -336,9 +344,15 @@ export class AuthenticatedDispatchService {
   private readonly dependencies: AuthenticatedDispatchDependencies;
   private readonly idempotency = new Map<string, DispatchRecord>();
   private readonly dispatchIds = new Map<string, string>();
+  private readonly maxInMemoryDispatchRecords: number;
 
   constructor(dependencies: AuthenticatedDispatchDependencies) {
+    const maximum = dependencies.maxInMemoryDispatchRecords ?? defaultMaxInMemoryDispatchRecords;
+    if (!positiveSafeInteger(maximum) || maximum > absoluteMaxInMemoryDispatchRecords) {
+      throw new Error("authenticated_dispatch_capacity_invalid");
+    }
     this.dependencies = dependencies;
+    this.maxInMemoryDispatchRecords = maximum;
   }
 
   async dispatch(input: unknown): Promise<AuthenticatedDispatchResult> {
@@ -382,6 +396,9 @@ export class AuthenticatedDispatchService {
     const existingKey = this.dispatchIds.get(body.dispatchId);
     if (existingKey && existingKey !== body.idempotencyKey) {
       return rejected("IDEMPOTENCY_CONFLICT", "dispatch_id_rebound");
+    }
+    if (this.idempotency.size >= this.maxInMemoryDispatchRecords) {
+      return rejected("IDEMPOTENCY_CAPACITY_EXHAUSTED", "in_memory_dispatch_capacity_exhausted");
     }
 
     try {
@@ -816,7 +833,7 @@ function validProcessExecutionResult(value: unknown): value is ProcessExecutionR
   if (!isDataRecord(value) || !onlyKeys(value, [
     "exitCode", "timedOut", "durationMs", "stdout", "stderr", "quotaConsumedUnits", "actualCostMinor",
   ])) return false;
-  return (value.exitCode === null || Number.isSafeInteger(value.exitCode))
+  return (value.exitCode === null || nonNegativeSafeInteger(value.exitCode))
     && typeof value.timedOut === "boolean"
     && nonNegativeSafeInteger(value.durationMs)
     && typeof value.stdout === "string"
@@ -968,3 +985,5 @@ class WorkSpecValidationError extends Error {}
 
 const maxCapturedOutputCharacters = 16_777_216;
 const lockCleanupGraceMs = 60_000;
+const defaultMaxInMemoryDispatchRecords = 4_096;
+const absoluteMaxInMemoryDispatchRecords = 65_536;

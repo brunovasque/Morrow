@@ -73,6 +73,25 @@ test("start and stop are idempotent and a new service instance can restart the o
   await access(restarted.layout!.workspaceRoot);
 });
 
+test("accepts dispatch only while a trusted runtime attachment is live", async () => {
+  const { managedRoot } = await harness();
+  const worker = new LocalWorkerService(configuration(managedRoot));
+  assert.throws(() => worker.attachAuthenticatedDispatch(), /worker_not_ready_for_dispatch_attachment/);
+  await worker.start();
+  assert.equal(worker.status().dispatchAccepted, false);
+
+  const detach = worker.attachAuthenticatedDispatch();
+  assert.equal(worker.status().dispatchAccepted, true);
+  assert.throws(() => worker.attachAuthenticatedDispatch(), /worker_dispatch_already_attached/);
+  detach();
+  detach();
+  assert.equal(worker.status().dispatchAccepted, false);
+
+  worker.attachAuthenticatedDispatch();
+  assert.equal(worker.status().dispatchAccepted, true);
+  assert.equal((await worker.stop()).dispatchAccepted, false);
+});
+
 test("refuses roots outside .morrow, declared operator roots, and hidden target configuration", async () => {
   const { root, managedRoot, operatorRoot } = await harness();
 
@@ -90,6 +109,13 @@ test("refuses roots outside .morrow, declared operator roots, and hidden target 
       targetId: "external-target",
     } as LocalWorkerServiceConfiguration),
     /worker_configuration_unknown_field:targetId/,
+  );
+  assert.throws(
+    () => new LocalWorkerService({
+      ...configuration(managedRoot, [operatorRoot]),
+      dispatchEnabled: true,
+    } as LocalWorkerServiceConfiguration),
+    /worker_configuration_unknown_field:dispatchEnabled/,
   );
 });
 
