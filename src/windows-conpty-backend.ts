@@ -276,7 +276,7 @@ class WindowsConptyTerminalSession implements TerminalBackendSession {
   }
 
   private releaseManagedProcess(): void {
-    if (this.jobReady || this.exited) return;
+    if (this.jobReady || this.exited || this.expectedJobControllerExit) return;
     if (this.startupTimer) clearTimeout(this.startupTimer);
     this.startupTimer = null;
     try {

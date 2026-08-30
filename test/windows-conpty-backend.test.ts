@@ -227,3 +227,31 @@ test("ConPTY accepts input before a silent child emits its first byte", {
   assert.equal(result.status, "completed");
   assert.ok(result.stdout.includes("__SILENT_INPUT_arrived-before-output__"));
 });
+
+test("an immediate stop cannot release the governed command during startup", {
+  skip: !windowsConptyAvailable,
+  timeout: 15_000,
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-stopped-startup-conpty-"));
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  const workspace = await workspaces.create({ workspaceId: "W1", contractId: "C1", roleId: "executor" });
+  const terminals = new TerminalSessionManager(workspaceRoot, { backend: new WindowsConptyTerminalBackend() });
+  const handle = await terminals.start({
+    terminalSessionId: "T-stop-startup",
+    agentInstanceId: "A-stop-startup",
+    contractId: "C1",
+    roleId: "executor",
+    runtimeId: "stopped-startup-conpty",
+    accessMode: "local",
+    workspaceId: "W1",
+    workspace,
+    command: process.execPath,
+    args: ["-e", "process.stdout.write('__COMMAND_MUST_NOT_RUN__')"],
+    timeoutMs: 10_000,
+  });
+  assert.equal(terminals.stop(handle.terminalSessionId), true);
+  const result = await handle.completion;
+  assert.equal(result.status, "stopped");
+  assert.equal(result.stdout.includes("__COMMAND_MUST_NOT_RUN__"), false);
+});
