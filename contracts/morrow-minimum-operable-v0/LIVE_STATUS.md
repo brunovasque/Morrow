@@ -20,9 +20,9 @@
 
 ## Próxima ação exata
 
-Fechar documentalmente o candidate local `31d2104`, repetir probe Codex/ConPTY, baseline quota, probe ConPTY, suíte completa, diff check e reconciliador; depois publicar a branch `mvo/p3-pr03-codex-conpty`, abrir a PR contra `phase-2/runtime-v0`, conferir mecanicamente base/branch/SHA e revisar adversarialmente o diff remoto exato antes de qualquer merge.
+Fechar documentalmente o hardening `4b197b0`, repetir probe Codex/ConPTY, baseline quota, probe ConPTY, suíte completa, diff check e reconciliador; depois publicar a correção na PR #13, conferir mecanicamente base/branch/SHA e revalidar adversarialmente o diff remoto exato antes de qualquer merge.
 
-A PR #12 foi integrada em `1d40eb7`; o head provado `a1c69a7` é ancestral da integração. A P3-PR03 tem código/teste candidate `31d2104` e hardening `e4243ba`: probe real Codex/ConPTY verde com CLI `0.147.0`, modelo `gpt-5.6-sol`, provider `openai`, approval `never`, sandbox `read-only`, output anterior à conclusão, cwd correto e fixture intacta; baseline quota verde, probe ConPTY `5/5`, testes focados `22/22` e suíte `155/155`. O review local corrigiu nove achados e está `GREEN_CANDIDATE`; publicação e revisão remota permanecem necessárias. Enova e qualquer target externo continuam proibidos.
+A PR #12 foi integrada em `1d40eb7`; o head provado `a1c69a7` é ancestral da integração. A PR #13 foi aberta com head `8ed056b`; a revisão remota exata encontrou falso positivo possível no status auth, corrigido localmente em `4b197b0` com linha positiva exata e contraprova negativa. Probe real Codex/ConPTY verde com CLI `0.147.0`, modelo `gpt-5.6-sol`, provider `openai`, approval `never`, sandbox `read-only`, output anterior à conclusão, cwd correto e fixture intacta; baseline quota verde, probe ConPTY `5/5`, testes focados `22/22` e suíte `155/155`. Dez achados estão corrigidos; estado `GREEN_CANDIDATE` até publicar e revalidar o novo head. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 

@@ -6,6 +6,7 @@
 - base: `1d40eb717bf4f66cf1d532c498279877ae0ec299`
 - candidate de código/teste: `31d2104ed509710431f8486e1f132808e6530dd5`
 - hardening de snapshot da invocação: `e4243ba9a04f5440e1eae8815ea4f4038a8ca413`
+- hardening de status auth exato: `4b197b0df3367c8ecedcf65b8cab0e01dcbf075f`
 - ambiente medido: Windows build `19045` x64, Node `24.14.1`, Codex CLI `0.147.0`
 
 ## Resultado
@@ -33,7 +34,7 @@ runtime confiável cria adapter
   → recusa qualquer variável que habilite API/base URL
   → exige descriptor ConPTY completo antes de spawn
   → sessão auth gerenciada executa somente `codex login status`
-  → exige “Logged in using ChatGPT” e exit 0
+  → exige linha exata “Logged in using ChatGPT” e exit 0
   → sessão principal executa `codex exec` efêmero/read-only
   → stream ConPTY produz eventos ao vivo vinculados às identidades
   → header da própria CLI fornece versão/model/provider/políticas
@@ -46,7 +47,7 @@ Não existe busca de outro provider, runtime, modo de acesso ou backend. Falha d
 
 O ambiente do runtime é capturado no construtor do adapter, antes de qualquer invocação, e reduzido a uma allowlist de caminhos do sistema, diretórios de perfil necessários à sessão Codex, `CODEX_HOME` quando configurado e PATH para a resolução segura do shim instalado. Valores arbitrários do dispatch não atravessam a fronteira; mutar o objeto de configuração depois da construção não rebinda a sessão. Cada invocação também é destacada antes do primeiro `await`, impedindo troca tardia de prompt, identidades ou workspace durante o preflight.
 
-`OPENAI_API_KEY`, `CODEX_API_KEY` e `OPENAI_BASE_URL` são recusados sem depender de caixa. A prova não lê arquivo de autenticação, não imprime token e não entrega material de credencial ao prompt. A própria CLI usa sua sessão local e só o status público “Logged in using ChatGPT” é interpretado.
+`OPENAI_API_KEY`, `CODEX_API_KEY` e `OPENAI_BASE_URL` são recusados sem depender de caixa. A prova não lê arquivo de autenticação, não imprime token e não entrega material de credencial ao prompt. A própria CLI usa sua sessão local e só uma linha exatamente positiva “Logged in using ChatGPT” é aceita; texto negativo contendo a mesma substring falha fechado mesmo com exit `0`.
 
 ## Prompt e eventos
 

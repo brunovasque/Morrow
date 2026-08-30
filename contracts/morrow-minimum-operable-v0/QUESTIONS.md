@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhum; P3-PR03 tem candidate local `31d2104` e review `GREEN_CANDIDATE`, aguardando publicação e revisão adversarial do head remoto exato antes de integração
+- bloqueio atual: nenhum; PR #13 aberta, revisão do head remoto inicial corrigida em `4b197b0`; publicar e revalidar o novo head exato antes de integração
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 
