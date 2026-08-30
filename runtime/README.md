@@ -55,6 +55,8 @@ A fila durável, os estados online/offline, o reconnect governado e a regra fail
 
 A decisão state-of-art do terminal Windows, a fronteira substituível de backend e o capability gate que impede chamar pipes de terminal completo estão em [`ADR_WINDOWS_TERMINAL_BACKEND.md`](ADR_WINDOWS_TERMINAL_BACKEND.md).
 
+A implementação real da P3-PR02, sua ativação protegida por Job Object, interrupções distinguíveis, drenagem e provas de ausência de descendentes órfãos estão em [`WINDOWS_CONPTY_BACKEND.md`](WINDOWS_CONPTY_BACKEND.md).
+
 Os registries versionados de Target/Role/Skill/Capability e a fronteira opaca do Secret Broker estão em [`GOVERNANCE_REGISTRIES.md`](GOVERNANCE_REGISTRIES.md).
 
 A resolução auditável de routing/access/model e as reservas determinísticas de cota e budget estão em [`ROUTING_GUARDS.md`](ROUTING_GUARDS.md).

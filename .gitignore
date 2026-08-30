@@ -13,3 +13,4 @@ Thumbs.db
 secrets/
 private/
 data/logs/
+.npm-cache/
