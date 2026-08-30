@@ -12,23 +12,23 @@
 - `active_phase`: `P3`
 - `active_pr_id`: `P3-PR04`
 - `active_route_node`: `CONPTY_MULTIPLEXING_AND_CLEANUP`
-- `active_subaction`: `MERGE_PR_13_THEN_START_P3_PR04`
-- `expected_branch_prefix`: `mvo/p3-pr03-`
-- `write_execution_allowed`: `no product write before PR #13 merge; after merge, scoped only to P3-PR04 in a new dedicated branch`
+- `active_subaction`: `P3_PR04_MULTIPLEXING_CLEANUP_TIMEOUT_COLLISIONS`
+- `expected_branch_prefix`: `mvo/p3-pr04-`
+- `write_execution_allowed`: `yes, scoped only to P3-PR04 in a dedicated branch`
 - `next_authorized_action`: `START_P3_PR04`
-- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer after integration`
+- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer`
 
 ## Próxima ação exata
 
-Integrar a PR #13 já provada. Depois, sincronizar `phase-2/runtime-v0`, executar regressão pós-merge e iniciar somente `P3-PR04` em nova branch dedicada para provar multiplexing, cleanup, timeout/cancel e colisões sob múltiplas sessões. Nenhum trabalho P3-PR04 pode começar antes do merge.
+Executar somente `P3-PR04` na branch `mvo/p3-pr04-conpty-multiplexing`, nascida da base integrada `5624e2a`: provar multiplexing simultâneo, isolamento de workspace/identidade/input, timeout e cancel distinguíveis, colisões fail-closed e cleanup sem processo órfão.
 
-P3-PR03 passou probes Codex/ConPTY e quota reais, focados com backend `28/28`, ConPTY `5/5`, suíte `156/156`, diff check e revisão adversarial final `GREEN`. O head remoto corrigido `adc87b8` foi revalidado com mergeable `true`, state `clean`, 15 arquivos previstos e nenhum check remoto configurado. Os comentários P1/P2 foram respondidos e os doze achados estão fechados. Enova e qualquer target externo continuam proibidos.
+A PR #13 foi integrada em `5624e2a`; o head provado `ffe0cc4` é ancestral da integração. O pós-merge passou `npm ci`, probes Codex/ConPTY e quota reais, ConPTY `5/5` e suíte `156/156`, com branch oficial sincronizada e limpa. P3-PR04 deve usar somente sessões e raízes temporárias controladas pelo Morrow; terminais/projetos do operador, Enova e targets externos continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P3-INTEGRATION-03` | `integration` | P3-PR03 está provada na PR #13, ainda aberta | integrar PR #13 antes de criar a branch P3-PR04 |
+| `none` | `none` | nenhum bloqueio ativo | executar somente P3-PR04 e parar diante de processo órfão, workspace compartilhado ou identidade ambígua |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ P3-PR03 passou probes Codex/ConPTY e quota reais, focados com backend `28/28`, C
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `READY` | P3-PR03 provada; P3-PR04 aguarda integração da PR #13 |
+| P3 | `RUNNING` | P3-PR04 em branch dedicada sobre `5624e2a`; multiplexing/cleanup/timeout/cancel/colisões em execução |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
