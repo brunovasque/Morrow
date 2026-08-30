@@ -71,7 +71,7 @@ O adapter exige `provider: openai`, `approval: never` e `sandbox: read-only`. Ca
 - `npm run probe:codex-conpty`: sessão real verde, metadata completa, output ao vivo, cwd vinculado e fixture intacta;
 - `npm run probe:codex-quota`: adapter baseline por pipes permaneceu verde;
 - `npm run probe:conpty`: `5/5`;
-- `npm test`: `155/155`;
+- `npm test`: `156/156`;
 - fixture controlada prova auth ausente, API em caixa alternativa, backend pipes, ambiente canário, mutação tardia, spoof de metadata e redaction do prompt;
 - nenhum target externo, repositório do operador ou material de credencial foi usado como fixture.
 

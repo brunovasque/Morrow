@@ -51,7 +51,7 @@ Os IDs abaixo são unidades contratuais, não números antecipados do GitHub. Ca
 |---|---|---|---|---|
 | `P3-PR01` | `PROVEN` | P2-PR01/02 | Fazer spike/ADR de PTY/ConPTY e criar interface de backend com capability gate | PR #11; decisão Windows ConPTY/node-pty 1.1.0 para probe, ativação sem janela cega, backend process-pipes preservado, capability/protocol gate e 141 testes; review de segurança GREEN |
 | `P3-PR02` | `PROVEN` | P3-PR01, P2-PR02 | Implementar backend ConPTY com input, resize, sinais, UTF-8 e exit status | PR #12; head remoto corrigido `c32fcb1`; ambiente governado sem herança do operador, PowerShell persistente real, UTF-8/VT, resize, Ctrl+C/Ctrl+Break, exit após handles, drainage de 512 KiB, árvore isolada e 149 testes; review de segurança GREEN |
-| `P3-PR03` | `RUNNING` | P3-PR02, P1-PR03 | Executar Codex quota-session pelo terminal gerenciado sem extrair credencial/API | PR #13; hardening local `1864852` corrige comentários P1/P2 com terminador `--` e validação pré-auth do envelope ConPTY; probe real e focados `28/28` verdes; review `GREEN_CANDIDATE`, publicação/revalidação e suíte completa pendentes |
+| `P3-PR03` | `RUNNING` | P3-PR02, P1-PR03 | Executar Codex quota-session pelo terminal gerenciado sem extrair credencial/API | PR #13; hardening local `1864852` corrige comentários P1/P2 com terminador `--` e validação pré-auth do envelope ConPTY; probes reais verdes, focados `28/28`, ConPTY `5/5` e suíte `156/156`; review `GREEN_CANDIDATE`, publicação/revalidação pendentes |
 | `P3-PR04` | `PENDING` | P3-PR03 | Provar multiplexing, cleanup, timeout/cancel e colisões sob múltiplas sessões | soak concorrente sem processo órfão, workspace compartilhado ou perda de identidade |
 
 ## P4 — Observabilidade durável

@@ -20,9 +20,9 @@
 
 ## Próxima ação exata
 
-Executar a suíte completa e o reconciliador sobre o hardening `1864852`; publicar a correção na PR #13, responder aos comentários P1/P2 e revalidar mecanicamente base/branch/SHA/diff/checks antes de qualquer novo fechamento `GREEN/PROVEN`.
+Publicar o hardening `1864852` e este fechamento factual na PR #13, responder aos comentários P1/P2 e revalidar mecanicamente base/branch/SHA/diff/checks antes de qualquer novo fechamento `GREEN/PROVEN`.
 
-Os comentários remotos tardios P1 `3890154247` e P2 `3890154252` invalidaram o fechamento anterior: um prompt iniciado por opção podia habilitar flag da CLI, e um prompt longo podia estourar o envelope do launcher com erro mascarado. `1864852` adiciona terminador `--`, encoder compartilhado e recusa antes de auth; probe real verde e focados com backend `28/28`. A unidade está novamente `RUNNING/GREEN_CANDIDATE` até suíte completa, publicação e revalidação remota. Enova e qualquer target externo continuam proibidos.
+Os comentários remotos tardios P1 `3890154247` e P2 `3890154252` invalidaram o fechamento anterior: um prompt iniciado por opção podia habilitar flag da CLI, e um prompt longo podia estourar o envelope do launcher com erro mascarado. `1864852` adiciona terminador `--`, encoder compartilhado e recusa antes de auth; probes Codex/ConPTY e quota verdes, focados com backend `28/28`, ConPTY `5/5` e suíte `156/156`. A unidade está novamente `RUNNING/GREEN_CANDIDATE` até publicação e revalidação remota. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
