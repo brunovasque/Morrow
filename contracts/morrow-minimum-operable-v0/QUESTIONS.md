@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhum do dono; P3-PR02 está `PROVEN` e P3-PR03 aguarda somente a integração sequencial da PR #12
+- bloqueio atual: nenhum; P3-PR03 iniciou na base integrada `1d40eb7` e deve provar Codex quota-session pelo ConPTY sem extrair credencial/API
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 

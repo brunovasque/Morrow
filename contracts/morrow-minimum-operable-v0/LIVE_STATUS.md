@@ -12,23 +12,23 @@
 - `active_phase`: `P3`
 - `active_pr_id`: `P3-PR03`
 - `active_route_node`: `CODEX_QUOTA_SESSION_IN_CONPTY`
-- `active_subaction`: `MERGE_PR_12_THEN_START_P3_PR03`
-- `expected_branch_prefix`: `mvo/p3-pr02-`
-- `write_execution_allowed`: `no product write before PR #12 merge; after merge, scoped only to P3-PR03 in a new dedicated branch`
+- `active_subaction`: `P3_PR03_CODEX_CONPTY_INTEGRATION`
+- `expected_branch_prefix`: `mvo/p3-pr03-`
+- `write_execution_allowed`: `yes, scoped only to P3-PR03 in a dedicated branch`
 - `next_authorized_action`: `START_P3_PR03`
-- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer after integration`
+- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer`
 
 ## Próxima ação exata
 
-Integrar a PR #12 já provada. Depois, sincronizar `phase-2/runtime-v0`, executar regressão pós-merge e iniciar somente `P3-PR03` em nova branch dedicada: executar Codex quota-session pelo terminal ConPTY gerenciado sem extrair credencial/API, com stream, cwd isolado e metadata do runtime. Nenhum trabalho P3-PR03 pode começar antes do merge.
+Executar somente `P3-PR03` na branch `mvo/p3-pr03-codex-conpty`, nascida da base integrada `1d40eb7`: ligar o adapter Codex quota-session ao `TerminalSessionManager` com backend ConPTY, confirmar autenticação sem extrair credencial/API, preservar stream ao vivo, cwd/workspace isolado e metadata efetiva do runtime, e falhar fechado diante de ambiente API ou autenticação ausente.
 
-P3-PR02 passou probe Windows real `5/5`, suíte completa `149/149`, diff check e revisão adversarial final `GREEN`. O head remoto corrigido `c32fcb1` foi revalidado com mergeable `true`, state `clean`, 20 arquivos previstos e nenhum check remoto configurado. O comentário remoto P1 sobre espera do Job Controller foi corrigido por `29974cf` e coberto por drainage/removibilidade do workspace. Enova e qualquer target externo continuam proibidos.
+A PR #12 foi integrada em `1d40eb7`; o head provado `a1c69a7` é ancestral da integração. O pós-merge passou `npm ci`, probe ConPTY `5/5` e suíte `149/149`, com branch oficial sincronizada e limpa. A P3-PR03 deve usar somente fixture temporária controlada pelo Morrow e a sessão quota já autenticada, sem ler/exportar material de credencial e sem fallback API. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P3-INTEGRATION-02` | `integration` | P3-PR02 está provada na PR #12, ainda aberta | integrar PR #12 antes de criar a branch P3-PR03 |
+| `none` | `none` | nenhum bloqueio ativo | executar somente P3-PR03 e parar se a própria CLI não confirmar sessão quota autenticada |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ P3-PR02 passou probe Windows real `5/5`, suíte completa `149/149`, diff check e
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `READY` | P3-PR02 provada; P3-PR03 aguarda integração da PR #12 |
+| P3 | `RUNNING` | P3-PR03 em branch dedicada sobre `1d40eb7`; integração Codex quota-session/ConPTY em execução |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
