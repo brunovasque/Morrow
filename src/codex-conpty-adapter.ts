@@ -9,6 +9,7 @@ import {
   type TerminalProtocol,
 } from "./terminal-session.ts";
 import { resolveWindowsNpmCommand } from "./windows-npm-shim.ts";
+import { encodeWindowsConptyLaunchSpec } from "./windows-conpty-backend.ts";
 
 const AUTHENTICATION_TIMEOUT_MS = 30_000;
 const MANAGED_ENVIRONMENT_KEYS = [
@@ -94,6 +95,7 @@ export function buildCodexConptyReadOnlyArgs(prompt: string): string[] {
     "--skip-git-repo-check",
     "--sandbox",
     "read-only",
+    "--",
     prompt,
   ];
 }
@@ -122,6 +124,8 @@ export class CodexQuotaConptyAdapter {
       throw new Error("codex_quota_timeout_invalid");
     }
     const resolved = await resolveWindowsNpmCommand(this.command, this.environment);
+    const invocationArgs = [...resolved.prefixArgs, ...buildCodexConptyReadOnlyArgs(input.prompt)];
+    encodeWindowsConptyLaunchSpec(resolved.command, invocationArgs);
     const authTerminalSessionId = `${input.terminalSessionId}-auth`;
 
     const auth = await this.transport.invoke({
@@ -151,7 +155,6 @@ export class CodexQuotaConptyAdapter {
       throw new Error("codex_quota_auth_not_confirmed");
     }
 
-    const invocationArgs = [...resolved.prefixArgs, ...buildCodexConptyReadOnlyArgs(input.prompt)];
     const result = await this.transport.invoke({
       invocationId: input.invocationId,
       terminalSessionId: input.terminalSessionId,

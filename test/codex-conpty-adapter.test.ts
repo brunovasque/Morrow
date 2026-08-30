@@ -31,6 +31,7 @@ if (args[0] === "login" && args[1] === "status") {
   process.exit(${authenticationExitCode});
 }
 if (args[0] !== "exec") process.exit(9);
+if (args.at(-2) !== "--") process.exit(8);
 const prompt = args.at(-1);
 {
   process.stdout.write([
@@ -86,6 +87,7 @@ test("builds a fixed read-only redacted transport and a minimal quota environmen
     "--skip-git-repo-check",
     "--sandbox",
     "read-only",
+    "--",
     "controlled-prompt",
   ]);
   const environment = buildCodexQuotaTerminalEnvironment({
@@ -204,6 +206,34 @@ test("refuses API environment before opening a terminal", async () => {
       command: "codex-fixture",
       environment: { OPENAI_API_KEY: "forbidden" },
     }), /codex_quota_environment_unsafe:OPENAI_API_KEY/);
+    assert.equal(terminals.list().length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("refuses a prompt that cannot fit the ConPTY launch envelope before authentication", async () => {
+  const { root, managedRoot, workspace, environment } = await fixture();
+  try {
+    const terminals = new TerminalSessionManager(managedRoot, {
+      backend: new WindowsConptyTerminalBackend(),
+    });
+    const adapter = new CodexQuotaConptyAdapter(terminals, {
+      command: "codex-fixture",
+      environment,
+    });
+    await assert.rejects(adapter.invoke({
+      invocationId: "I-oversized",
+      terminalSessionId: "T-oversized",
+      agentInstanceId: "A-oversized",
+      contractId: "C-codex",
+      roleId: "executor",
+      runtimeId: "codex-fixture-runtime",
+      workspaceId: "W-codex",
+      workspace,
+      prompt: "x".repeat(30_000),
+      timeoutMs: 10_000,
+    }), /terminal_launch_spec_too_large/);
     assert.equal(terminals.list().length, 0);
   } finally {
     await rm(root, { recursive: true, force: true });

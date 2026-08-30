@@ -21,6 +21,15 @@ const DEFAULT_CONTROL_HELPER = resolve(SCRIPT_ROOT, "windows-console-control.ps1
 const DEFAULT_JOB_CONTROLLER = resolve(SCRIPT_ROOT, "windows-job-controller.ps1");
 const DEFAULT_LAUNCHER = resolve(SCRIPT_ROOT, "windows-conpty-launcher.mjs");
 const SYSTEM_POWERSHELL = resolveWindowsPowerShellPath();
+const MAX_WINDOWS_CONPTY_LAUNCH_SPEC_LENGTH = 24_000;
+
+export function encodeWindowsConptyLaunchSpec(command: string, args: readonly string[]): string {
+  const encoded = Buffer.from(JSON.stringify({ command, args }), "utf8").toString("base64url");
+  if (encoded.length > MAX_WINDOWS_CONPTY_LAUNCH_SPEC_LENGTH) {
+    throw new Error("terminal_launch_spec_too_large");
+  }
+  return encoded;
+}
 
 const WINDOWS_CONPTY_DESCRIPTOR: TerminalBackendDescriptor = Object.freeze({
   kind: "windows-conpty",
@@ -174,8 +183,7 @@ class WindowsConptyTerminalSession implements TerminalBackendSession {
   start(): void {
     if (this.started) throw new Error("terminal_backend_session_already_started");
     this.started = true;
-    const encodedSpec = Buffer.from(JSON.stringify({ command: this.request.command, args: this.request.args }), "utf8").toString("base64url");
-    if (encodedSpec.length > 24_000) throw new Error("terminal_launch_spec_too_large");
+    const encodedSpec = encodeWindowsConptyLaunchSpec(this.request.command, this.request.args);
     const terminal = pty.spawn(process.execPath, [this.options.launcherPath, this.releasePath, encodedSpec], {
       name: "xterm-256color",
       cols: 80,
