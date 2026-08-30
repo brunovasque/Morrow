@@ -243,7 +243,7 @@ export class TerminalSessionManager {
       resolveCompletion = resolvePromise;
     });
 
-    const backendSession = this.backend.spawn({
+    const backendSession = this.backend.create({
       command: request.command,
       args: [...request.args],
       cwd: workspaceRoot,
@@ -274,7 +274,7 @@ export class TerminalSessionManager {
       } catch {
         // The descriptor mismatch remains the authoritative refusal.
       }
-      throw new Error("terminal_backend_descriptor_changed_after_spawn");
+      throw new Error("terminal_backend_descriptor_changed_for_session");
     }
 
     const record: SessionRecord = {
@@ -302,7 +302,17 @@ export class TerminalSessionManager {
     this.sessions.set(request.terminalSessionId, record);
     this.activeAgentInstances.set(request.agentInstanceId, request.terminalSessionId);
     this.activeWorkspaceRoots.set(workspaceRoot, request.terminalSessionId);
-    this.attach(record);
+    try {
+      this.attach(record);
+      backendSession.start();
+    } catch {
+      this.fail(record, "terminal_backend_start_failed");
+      try {
+        backendSession.stop(true);
+      } catch {
+        // The startup failure remains the authoritative refusal.
+      }
+    }
 
     return { terminalSessionId: request.terminalSessionId, completion };
   }
@@ -380,6 +390,10 @@ export class TerminalSessionManager {
     const { backendSession, request } = record;
 
     backendSession.onStarted(() => {
+      if (record.status !== "starting") {
+        this.failAndStop(record, "terminal_backend_duplicate_start");
+        return;
+      }
       record.status = "running";
       record.startedAt = new Date().toISOString();
       this.emit(record, "TERMINAL_SESSION_STARTED", {
@@ -403,25 +417,28 @@ export class TerminalSessionManager {
     });
 
     backendSession.onOutput((stream, chunk) => {
+      if (!isTerminalOutputAllowed(record.backendDescriptor, stream) || typeof chunk !== "string") {
+        this.failAndStop(record, "terminal_backend_output_protocol_violation");
+        return;
+      }
       if (stream === "stderr") record.stderr += chunk;
       else record.stdout += chunk;
       this.emit(record, "TERMINAL_OUTPUT", { stream, data: chunk });
     });
 
     backendSession.onError((error) => {
-      if (record.settled) return;
-      record.error = error.message;
-      record.status = "failed";
-      record.endedAt = new Date().toISOString();
-      this.emit(record, "TERMINAL_SESSION_FAILED", {
-        error: error.message,
-        durationMs: this.duration(record),
-      });
-      this.settle(record);
+      this.failAndStop(
+        record,
+        error instanceof Error ? error.message : "terminal_backend_error",
+      );
     });
 
     backendSession.onExit(({ exitCode, signal }) => {
       if (record.settled) return;
+      if (record.status === "starting") {
+        this.fail(record, "terminal_backend_exit_before_start");
+        return;
+      }
       record.exitCode = exitCode;
       record.signal = signal;
       record.endedAt = new Date().toISOString();
@@ -554,6 +571,27 @@ export class TerminalSessionManager {
     });
   }
 
+  private fail(record: SessionRecord, error: string): void {
+    if (record.settled) return;
+    record.error = error;
+    record.status = "failed";
+    record.endedAt = new Date().toISOString();
+    this.emit(record, "TERMINAL_SESSION_FAILED", {
+      error,
+      durationMs: this.duration(record),
+    });
+    this.settle(record);
+  }
+
+  private failAndStop(record: SessionRecord, error: string): void {
+    this.fail(record, error);
+    try {
+      record.backendSession.stop(true);
+    } catch {
+      // The protocol violation remains the authoritative failure.
+    }
+  }
+
   private snapshotRecord(record: SessionRecord): TerminalSessionSnapshot {
     return {
       terminalSessionId: record.request.terminalSessionId,
@@ -597,6 +635,14 @@ function sameTerminalCapabilities(
     && left.signals === right.signals
     && left.utf8 === right.utf8
     && left.exitStatus === right.exitStatus;
+}
+
+function isTerminalOutputAllowed(
+  descriptor: TerminalBackendDescriptor,
+  stream: unknown,
+): stream is "stdout" | "stderr" | "terminal" {
+  if (descriptor.protocol === "conpty-vt") return stream === "terminal";
+  return stream === "stdout" || stream === "stderr";
 }
 
 export class ManagedTerminalRuntimeAdapter {

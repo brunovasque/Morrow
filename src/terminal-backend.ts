@@ -44,6 +44,9 @@ export interface TerminalBackendSession {
   readonly descriptor: TerminalBackendDescriptor;
   readonly pid: number | null;
   readonly inputClosed: boolean;
+  /** Starts execution only after every observer below has been registered. */
+  start(): void;
+  /** Registration must not invoke listeners before start(). */
   onStarted(listener: () => void): void;
   onOutput(listener: (stream: TerminalOutputStream, data: string) => void): void;
   onError(listener: (error: Error) => void): void;
@@ -58,7 +61,8 @@ export interface TerminalBackendSession {
 
 export interface TerminalBackend {
   readonly descriptor: TerminalBackendDescriptor;
-  spawn(request: TerminalBackendSpawnRequest): TerminalBackendSession;
+  /** Creates an inert session. Implementations must not spawn from create(). */
+  create(request: TerminalBackendSpawnRequest): TerminalBackendSession;
 }
 
 const PROCESS_PIPES_DESCRIPTOR = freezeDescriptor({
@@ -78,74 +82,111 @@ const PROCESS_PIPES_DESCRIPTOR = freezeDescriptor({
 export class ProcessPipesTerminalBackend implements TerminalBackend {
   readonly descriptor = PROCESS_PIPES_DESCRIPTOR;
 
-  spawn(request: TerminalBackendSpawnRequest): TerminalBackendSession {
-    const child = spawn(request.command, request.args, {
-      cwd: request.cwd,
-      env: request.env,
-      shell: false,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return new ProcessPipesTerminalSession(child, this.descriptor);
+  create(request: TerminalBackendSpawnRequest): TerminalBackendSession {
+    return new ProcessPipesTerminalSession(request, this.descriptor);
   }
 }
 
 class ProcessPipesTerminalSession implements TerminalBackendSession {
-  private readonly child: ChildProcessWithoutNullStreams;
+  private readonly request: TerminalBackendSpawnRequest;
+  private child: ChildProcessWithoutNullStreams | null = null;
+  private started = false;
+  private readonly startedListeners: Array<() => void> = [];
+  private readonly outputListeners: Array<(stream: TerminalOutputStream, data: string) => void> = [];
+  private readonly errorListeners: Array<(error: Error) => void> = [];
+  private readonly exitListeners: Array<(result: TerminalBackendExit) => void> = [];
   readonly descriptor: TerminalBackendDescriptor;
 
-  constructor(child: ChildProcessWithoutNullStreams, descriptor: TerminalBackendDescriptor) {
-    this.child = child;
+  constructor(request: TerminalBackendSpawnRequest, descriptor: TerminalBackendDescriptor) {
+    this.request = {
+      command: request.command,
+      args: [...request.args],
+      cwd: request.cwd,
+      env: { ...request.env },
+    };
     this.descriptor = descriptor;
-    this.child.stdout.setEncoding("utf8");
-    this.child.stderr.setEncoding("utf8");
   }
 
   get pid(): number | null {
-    return this.child.pid ?? null;
+    return this.child?.pid ?? null;
   }
 
   get inputClosed(): boolean {
-    return this.child.stdin.destroyed || this.child.stdin.writableEnded;
+    if (!this.started) return false;
+    return !this.child || this.child.stdin.destroyed || this.child.stdin.writableEnded;
+  }
+
+  start(): void {
+    if (this.started) throw new Error("terminal_backend_session_already_started");
+    this.started = true;
+    const child = spawn(this.request.command, this.request.args, {
+      cwd: this.request.cwd,
+      env: this.request.env,
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    this.child = child;
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.once("spawn", () => {
+      for (const listener of this.startedListeners) listener();
+    });
+    child.stdout.on("data", (chunk: string) => {
+      for (const listener of this.outputListeners) listener("stdout", chunk);
+    });
+    child.stderr.on("data", (chunk: string) => {
+      for (const listener of this.outputListeners) listener("stderr", chunk);
+    });
+    child.once("error", (error) => {
+      for (const listener of this.errorListeners) listener(error);
+    });
+    child.once("close", (exitCode, signal) => {
+      for (const listener of this.exitListeners) listener({ exitCode, signal });
+    });
   }
 
   onStarted(listener: () => void): void {
-    this.child.once("spawn", listener);
+    this.assertRegistrationOpen();
+    this.startedListeners.push(listener);
   }
 
   onOutput(listener: (stream: TerminalOutputStream, data: string) => void): void {
-    this.child.stdout.on("data", (chunk: string) => listener("stdout", chunk));
-    this.child.stderr.on("data", (chunk: string) => listener("stderr", chunk));
+    this.assertRegistrationOpen();
+    this.outputListeners.push(listener);
   }
 
   onError(listener: (error: Error) => void): void {
-    this.child.once("error", listener);
+    this.assertRegistrationOpen();
+    this.errorListeners.push(listener);
   }
 
   onExit(listener: (result: TerminalBackendExit) => void): void {
-    this.child.once("close", (exitCode, signal) => listener({ exitCode, signal }));
+    this.assertRegistrationOpen();
+    this.exitListeners.push(listener);
   }
 
   write(data: string): boolean {
-    return this.child.stdin.write(data, "utf8");
+    return this.requireChild().stdin.write(data, "utf8");
   }
 
   waitForDrain(): Promise<void> {
+    const child = this.requireChild();
     return new Promise<void>((resolvePromise, reject) => {
       const onDrain = () => {
-        this.child.stdin.off("error", onError);
+        child.stdin.off("error", onError);
         resolvePromise();
       };
       const onError = (error: Error) => {
-        this.child.stdin.off("drain", onDrain);
+        child.stdin.off("drain", onDrain);
         reject(error);
       };
-      this.child.stdin.once("drain", onDrain);
-      this.child.stdin.once("error", onError);
+      child.stdin.once("drain", onDrain);
+      child.stdin.once("error", onError);
     });
   }
 
   endInput(): void {
-    this.child.stdin.end();
+    this.requireChild().stdin.end();
   }
 
   resize(_columns: number, _rows: number): void {
@@ -157,7 +198,17 @@ class ProcessPipesTerminalSession implements TerminalBackendSession {
   }
 
   stop(force: boolean): boolean {
+    if (!this.child) return false;
     return this.child.kill(force ? "SIGKILL" : "SIGTERM");
+  }
+
+  private assertRegistrationOpen(): void {
+    if (this.started) throw new Error("terminal_backend_listener_registration_closed");
+  }
+
+  private requireChild(): ChildProcessWithoutNullStreams {
+    if (!this.child) throw new Error("terminal_backend_session_not_started");
+    return this.child;
   }
 }
 
