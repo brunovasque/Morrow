@@ -247,7 +247,10 @@ export class TerminalSessionManager {
       command: request.command,
       args: [...request.args],
       cwd: workspaceRoot,
-      env: request.env ? { ...process.env, ...request.env } : process.env,
+      // A managed terminal must not inherit the operator process environment
+      // implicitly. Runtimes receive only the environment resolved by the
+      // governed dispatch; an omitted environment is intentionally empty.
+      env: request.env ? { ...request.env } : {},
     });
     let actualDescriptor: TerminalBackendDescriptor;
     try {

@@ -1,4 +1,4 @@
-import { execFileSync, spawn as spawnProcess, type ChildProcess } from "node:child_process";
+import { spawn as spawnProcess, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { release } from "node:os";
@@ -20,11 +20,11 @@ const SCRIPT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../scripts
 const DEFAULT_CONTROL_HELPER = resolve(SCRIPT_ROOT, "windows-console-control.ps1");
 const DEFAULT_JOB_CONTROLLER = resolve(SCRIPT_ROOT, "windows-job-controller.ps1");
 const DEFAULT_LAUNCHER = resolve(SCRIPT_ROOT, "windows-conpty-launcher.mjs");
-const SYSTEM_POWERSHELL = resolveSystemPowerShell();
+const SYSTEM_POWERSHELL = resolveWindowsPowerShellPath();
 
 const WINDOWS_CONPTY_DESCRIPTOR: TerminalBackendDescriptor = Object.freeze({
   kind: "windows-conpty",
-  implementationId: "node-pty-1.1.0-system-conpty-job-v1",
+  implementationId: "node-pty-1.1.0-system-conpty-job-v2",
   protocol: "conpty-vt",
   capabilities: Object.freeze({
     tty: true,
@@ -57,7 +57,10 @@ interface NodePtyInternals {
       off(event: "drain", listener: () => void): unknown;
       off(event: "error", listener: (error: Error) => void): unknown;
     };
-    _conoutSocketWorker?: { dispose(): void };
+    _conoutSocketWorker?: {
+      dispose(): void;
+      _worker?: { terminate(): Promise<number> };
+    };
   };
   on?: (event: "error", listener: (error: Error) => void) => unknown;
 }
@@ -141,6 +144,7 @@ class WindowsConptyTerminalSession implements TerminalBackendSession {
   private startupTimer: NodeJS.Timeout | null = null;
   private started = false;
   private closedInput = false;
+  private exitFinalizing = false;
   private exited = false;
   private readonly controlHelpers = new Set<ChildProcess>();
   private readonly startedListeners: Array<() => void> = [];
@@ -181,21 +185,26 @@ class WindowsConptyTerminalSession implements TerminalBackendSession {
       useConpty: true,
       useConptyDll: false,
     });
-    this.terminal = terminal;
     const internals = terminal as pty.IPty & NodePtyInternals;
-    if (typeof internals._agent?.inSocket?.write !== "function"
-      || typeof internals._agent?.inSocket?.end !== "function"
-      || typeof internals._agent?.inSocket?.once !== "function"
-      || typeof internals._agent?.inSocket?.off !== "function"
-      || typeof internals._agent?._conoutSocketWorker?.dispose !== "function") {
-      try { process.kill(terminal.pid); } catch { /* compatibility refusal remains authoritative */ }
-      throw new Error("node_pty_1_1_0_compatibility_hook_unavailable");
-    }
+    this.terminal = terminal;
+    // Register lifecycle observers immediately after spawn. Any compatibility
+    // refusal below can then still confirm physical exit and release the
+    // manager's workspace reservation instead of hanging after a partial start.
     terminal.onData((data) => {
       for (const listener of this.outputListeners) listener("terminal", data);
     });
     terminal.onExit((event) => this.handleTerminalExit(terminal, event.exitCode));
     internals.on?.("error", (error) => this.emitError(error));
+    if (typeof internals._agent?.inSocket?.write !== "function"
+      || typeof internals._agent?.inSocket?.end !== "function"
+      || typeof internals._agent?.inSocket?.once !== "function"
+      || typeof internals._agent?.inSocket?.off !== "function"
+      || typeof internals._agent?._conoutSocketWorker?.dispose !== "function"
+      || typeof internals._agent?._conoutSocketWorker?._worker?.terminate !== "function") {
+      this.closedInput = true;
+      try { process.kill(terminal.pid); } catch { /* compatibility refusal remains authoritative */ }
+      throw new Error("node_pty_1_1_0_compatibility_hook_unavailable");
+    }
     this.startJobController(terminal.pid);
   }
 
@@ -237,6 +246,7 @@ class WindowsConptyTerminalSession implements TerminalBackendSession {
   stop(_force: boolean): boolean {
     if (!this.terminal || this.exited) return false;
     this.closedInput = true;
+    if (this.exitFinalizing) return true;
     this.expectedJobControllerExit = true;
     if (this.jobController?.stdin?.writable) {
       this.jobController.stdin.end("stop\n");
@@ -318,29 +328,57 @@ class WindowsConptyTerminalSession implements TerminalBackendSession {
     });
     helper.once("close", (exitCode) => {
       this.controlHelpers.delete(helper);
-      if (exitCode !== 0 && !this.exited) {
+      if (exitCode !== 0 && !this.exited && !this.exitFinalizing) {
         this.emitError(new Error(`terminal_ctrl_break_helper_failed:${exitCode}:${stderr.trim()}`));
       }
     });
   }
 
   private handleTerminalExit(terminal: pty.IPty, exitCode: number): void {
-    this.exited = true;
+    if (this.exited || this.exitFinalizing) return;
+    this.exitFinalizing = true;
     this.closedInput = true;
     if (this.startupTimer) clearTimeout(this.startupTimer);
     this.startupTimer = null;
     rmSync(this.releasePath, { force: true });
     this.expectedJobControllerExit = true;
-    this.jobController?.stdin?.end("close\n");
-    for (const helper of this.controlHelpers) helper.kill();
+    const controller = this.jobController;
+    const helpers = [...this.controlHelpers];
+    const childCleanup = [controller, ...helpers]
+      .filter((child): child is ChildProcess => child !== null)
+      .map((child) => waitForChildExit(child));
+    controller?.stdin?.end("close\n");
+    for (const helper of helpers) helper.kill();
     this.controlHelpers.clear();
-    this.disposeNaturalExitWorker(terminal);
+    void this.finalizeTerminalExit(terminal, exitCode, childCleanup);
+  }
+
+  private async finalizeTerminalExit(
+    terminal: pty.IPty,
+    exitCode: number,
+    childCleanup: readonly Promise<void>[],
+  ): Promise<void> {
+    const cleanup = await Promise.allSettled([
+      this.terminateNaturalExitWorker(terminal),
+      ...childCleanup,
+    ]);
+    const failed = cleanup.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failed) {
+      this.emitError(new Error("terminal_conpty_cleanup_failed", { cause: asError(failed.reason) }));
+    }
+    this.exited = true;
+    this.exitFinalizing = false;
     for (const listener of this.exitListeners) listener({ exitCode, signal: null });
   }
 
-  private disposeNaturalExitWorker(terminal: pty.IPty): void {
-    try { (terminal as pty.IPty & NodePtyInternals)._agent!._conoutSocketWorker!.dispose(); }
-    catch (error) { this.emitError(new Error("terminal_conpty_cleanup_failed", { cause: asError(error) })); }
+  private async terminateNaturalExitWorker(terminal: pty.IPty): Promise<void> {
+    const worker = (terminal as pty.IPty & NodePtyInternals)._agent?._conoutSocketWorker;
+    if (typeof worker?._worker?.terminate !== "function") {
+      throw new Error("terminal_conpty_cleanup_hook_unavailable");
+    }
+    // The public exit arrives only after node-pty's output-socket flush. Wait
+    // for the residual worker handle before confirming exit to the manager.
+    await worker._worker.terminate();
   }
   private emitError(error: Error): void { for (const listener of this.errorListeners) listener(error); }
   private assertRegistrationOpen(): void { if (this.started) throw new Error("terminal_backend_listener_registration_closed"); }
@@ -368,36 +406,25 @@ function readInstalledNodePtyVersion(): string | null {
 }
 function asError(value: unknown): Error { return value instanceof Error ? value : new Error(String(value)); }
 
-function resolveSystemPowerShell(): string {
-  const conventional = resolve(process.env.ProgramFiles ?? "C:\\Program Files", "PowerShell/7/pwsh.exe");
-  if (existsSync(conventional)) return conventional;
-  try {
-    const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
-    const where = resolve(systemRoot, "System32/where.exe");
-    const output = execFileSync(where, ["pwsh.exe"], {
-      cwd: systemRoot,
-      env: helperEnvironment(true),
-      encoding: "utf8",
-      windowsHide: true,
-    });
-    const candidate = output.split(/\r?\n/).map((line) => line.trim())
-      .find((line) => isAbsolute(line) && existsSync(line));
-    if (candidate) return candidate;
-  } catch {
-    // Constructor reports one stable unavailable reason below.
-  }
-  return conventional;
+function waitForChildExit(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise<void>((resolvePromise) => child.once("close", () => resolvePromise()));
 }
 
-function helperEnvironment(includePath = false): NodeJS.ProcessEnv {
+export function resolveWindowsPowerShellPath(
+  systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? "C:\\Windows",
+): string {
+  const trustedRoot = isAbsolute(systemRoot) ? systemRoot : "C:\\Windows";
+  // Do not search PATH: a user/workspace shim must never become the controller
+  // that owns Job Object and console-control capabilities.
+  return resolve(trustedRoot, "System32/WindowsPowerShell/v1.0/powershell.exe");
+}
+
+function helperEnvironment(): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
-  for (const key of ["SystemRoot", "WINDIR", "TEMP", "TMP", "ComSpec", "PATHEXT"] as const) {
+  for (const key of ["SystemRoot", "WINDIR", "TEMP", "TMP"] as const) {
     const value = process.env[key];
     if (value !== undefined) environment[key] = value;
-  }
-  if (includePath) {
-    const pathValue = process.env.Path ?? process.env.PATH;
-    if (pathValue !== undefined) environment.Path = pathValue;
   }
   return environment;
 }

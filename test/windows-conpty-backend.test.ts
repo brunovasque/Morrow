@@ -1,19 +1,44 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { resolveTerminalPresentation } from "../src/terminal-backend.ts";
 import { TerminalSessionManager, type TerminalSessionEvent } from "../src/terminal-session.ts";
 import {
   inspectWindowsConptySupport,
+  resolveWindowsPowerShellPath,
   WindowsConptyTerminalBackend,
 } from "../src/windows-conpty-backend.ts";
 import { LocalWorkspaceManager } from "../src/workspace-manager.ts";
 
 const windowsConptyAvailable = inspectWindowsConptySupport().available;
+
+async function controlledWindowsEnvironment(workspaceRoot: string): Promise<Record<string, string>> {
+  const profileRoot = join(workspaceRoot, ".morrow-test-profile");
+  const appData = join(profileRoot, "AppData", "Roaming");
+  const localAppData = join(profileRoot, "AppData", "Local");
+  await mkdir(appData, { recursive: true });
+  await mkdir(localAppData, { recursive: true });
+  const environment: Record<string, string> = {
+    HOME: profileRoot,
+    USERPROFILE: profileRoot,
+    APPDATA: appData,
+    LOCALAPPDATA: localAppData,
+    POWERSHELL_TELEMETRY_OPTOUT: "1",
+  };
+  for (const key of ["SystemRoot", "WINDIR", "TEMP", "TMP"] as const) {
+    const value = process.env[key];
+    if (value !== undefined) environment[key] = value;
+  }
+  environment.PSModulePath = resolve(
+    environment.SystemRoot ?? environment.WINDIR ?? "C:\\Windows",
+    "System32/WindowsPowerShell/v1.0/Modules",
+  );
+  return environment;
+}
 
 test("ConPTY support gate refuses platform, architecture, build and package drift", () => {
   const support = inspectWindowsConptySupport({
@@ -46,32 +71,47 @@ test("real Windows ConPTY preserves state, terminal bytes, resize and both inter
     contractId: "C1",
     roleId: "executor",
   });
-  const signalFixture = join(workspace.root, "signal-fixture.ps1");
-  await writeFile(signalFixture, String.raw`
-Add-Type -TypeDefinition @'
+  const signalSource = join(workspace.root, "signal-fixture.cs");
+  const signalExecutable = join(workspace.root, "signal-fixture.exe");
+  const powershellPath = resolveWindowsPowerShellPath();
+  const environment = await controlledWindowsEnvironment(workspace.root);
+  await writeFile(signalSource, String.raw`
 using System;
 using System.Threading;
 public static class MorrowSignalProbe
 {
-    private static volatile bool _received;
-    public static void Run()
+    private static readonly ManualResetEvent Received = new ManualResetEvent(false);
+    public static int Main()
     {
-        _received = false;
         Console.CancelKeyPress += OnCancel;
         Console.WriteLine("__MORROW_SIGNAL_READY__");
-        while (!_received) Thread.Sleep(20);
+        if (!Received.WaitOne(8000)) return 2;
         Console.CancelKeyPress -= OnCancel;
+        return 0;
     }
     private static void OnCancel(object sender, ConsoleCancelEventArgs eventArgs)
     {
         Console.WriteLine("__MORROW_SIGNAL_{0}__", eventArgs.SpecialKey);
         eventArgs.Cancel = true;
-        _received = true;
+        Received.Set();
     }
 }
-'@
-[MorrowSignalProbe]::Run()
 `, "utf8");
+  const escapedSource = signalSource.replaceAll("'", "''");
+  const escapedExecutable = signalExecutable.replaceAll("'", "''");
+  await new Promise<void>((resolvePromise, reject) => {
+    execFile(
+      powershellPath,
+      [
+        "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+        `Add-Type -Path '${escapedSource}' -OutputAssembly '${escapedExecutable}' -OutputType ConsoleApplication`,
+      ],
+      { cwd: workspace.root, env: environment, windowsHide: true },
+      (error, _stdout, stderr) => error
+        ? reject(new Error(`signal_fixture_compile_failed:${stderr}`, { cause: error }))
+        : resolvePromise(),
+    );
+  });
 
   const backend = new WindowsConptyTerminalBackend();
   assert.deepEqual(resolveTerminalPresentation(backend.descriptor), {
@@ -96,8 +136,9 @@ public static class MorrowSignalProbe
     accessMode: "local",
     workspaceId: "W1",
     workspace,
-    command: "pwsh.exe",
+    command: powershellPath,
     args: ["-NoLogo", "-NoProfile", "-NoExit"],
+    env: environment,
     timeoutMs: 25_000,
   });
 
@@ -120,25 +161,18 @@ public static class MorrowSignalProbe
     await waitForCount("__MORROW_STATE_estado-á-ç__", 1);
 
     await line("[Console]::Write([char]27 + '[31m__MORROW_VT__' + [char]27 + '[0m')");
-    await waitForCount("\u001b[31m\r\n__MORROW_VT__", 1);
+    const vtDeadline = Date.now() + 8_000;
+    while (!/\u001b\[31m(?:\r\n)?__MORROW_VT__/.test(output)) {
+      if (Date.now() >= vtDeadline) {
+        throw new Error(`vt_marker_timeout:${JSON.stringify(output.slice(-1_000))}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
 
     terminals.resize("T1", 101, 37);
     await line("[Console]::WriteLine('__MORROW_SIZE_' + [Console]::WindowWidth + 'x' + [Console]::WindowHeight + '__')");
     await waitForCount("__MORROW_SIZE_101x37__", 1);
 
-    const escapedFixture = signalFixture.replaceAll("'", "''");
-    await line(`& pwsh.exe -NoLogo -NoProfile -File '${escapedFixture}'`);
-    await waitForCount("__MORROW_SIGNAL_READY__", 1);
-    terminals.interrupt("T1", "ctrl-c");
-    await waitForCount("__MORROW_SIGNAL_ControlC__", 1);
-
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    await line(`& pwsh.exe -NoLogo -NoProfile -File '${escapedFixture}'`);
-    await waitForCount("__MORROW_SIGNAL_READY__", 2);
-    terminals.interrupt("T1", "ctrl-break");
-    await waitForCount("__MORROW_SIGNAL_ControlBreak__", 1);
-
-    await new Promise((resolve) => setTimeout(resolve, 300));
     await line("[Console]::WriteLine('__MORROW_DRAINED_TAIL__'); exit 7");
     const result = await handle.completion;
 
@@ -155,6 +189,37 @@ public static class MorrowSignalProbe
         .every((event) => event.type === "TERMINAL_OUTPUT" && event.payload.stream === "terminal"),
       true,
     );
+
+    const runSignalProbe = async (kind: "ctrl-c" | "ctrl-break", suffix: string, marker: string) => {
+      const readyCount = markerCount("__MORROW_SIGNAL_READY__");
+      const signalHandle = await terminals.start({
+        terminalSessionId: `T-signal-${suffix}`,
+        agentInstanceId: `A-signal-${suffix}`,
+        contractId: "C1",
+        roleId: "executor",
+        runtimeId: "signal-conpty",
+        accessMode: "local",
+        workspaceId: "W1",
+        workspace,
+        command: signalExecutable,
+        args: [],
+        env: environment,
+        timeoutMs: 10_000,
+      });
+      try {
+        await waitForCount("__MORROW_SIGNAL_READY__", readyCount + 1);
+        terminals.interrupt(signalHandle.terminalSessionId, kind);
+        await waitForCount(marker, 1);
+        const signalResult = await signalHandle.completion;
+        assert.equal(signalResult.status, "completed");
+        assert.equal(signalResult.exitCode, 0);
+      } finally {
+        terminals.stop(signalHandle.terminalSessionId);
+      }
+    };
+
+    await runSignalProbe("ctrl-c", "ctrl-c", "__MORROW_SIGNAL_ControlC__");
+    await runSignalProbe("ctrl-break", "ctrl-break", "__MORROW_SIGNAL_ControlBreak__");
     assert.deepEqual(
       events.filter((event) => event.type === "TERMINAL_INTERRUPT_REQUESTED")
         .map((event) => event.type === "TERMINAL_INTERRUPT_REQUESTED" && event.payload.kind),
@@ -181,12 +246,14 @@ test("ConPTY child exits after natural drainage and forced stop without a live w
   const proof = JSON.parse(result.stdout.trim()) as {
     naturalExitCode: number;
     drainedTail: boolean;
+    drainedBytes: number;
     stoppedPid: number;
     descendantPid: number;
   };
   assert.equal(result.stderr, "");
   assert.equal(proof.naturalExitCode, 7);
   assert.equal(proof.drainedTail, true);
+  assert.equal(proof.drainedBytes, 512 * 1_024);
   assert.ok(proof.stoppedPid > 0);
   assert.ok(proof.descendantPid > 0);
   const descendantAlive = await new Promise<boolean>((resolve, reject) => {
@@ -220,6 +287,7 @@ test("ConPTY accepts input before a silent child emits its first byte", {
     workspace,
     command: process.execPath,
     args: ["-e", "process.stdin.setEncoding('utf8');process.stdin.once('data',d=>{process.stdout.write('__SILENT_INPUT_'+d.trim()+'__');process.exit(0)})"],
+    env: await controlledWindowsEnvironment(workspace.root),
     timeoutMs: 10_000,
   });
   await terminals.write(handle.terminalSessionId, "arrived-before-output\r");
@@ -248,6 +316,7 @@ test("an immediate stop cannot release the governed command during startup", {
     workspace,
     command: process.execPath,
     args: ["-e", "process.stdout.write('__COMMAND_MUST_NOT_RUN__')"],
+    env: await controlledWindowsEnvironment(workspace.root),
     timeoutMs: 10_000,
   });
   assert.equal(terminals.stop(handle.terminalSessionId), true);
