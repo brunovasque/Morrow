@@ -10,25 +10,25 @@
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
 - `active_phase`: `P3`
-- `active_pr_id`: `P3-PR01`
-- `active_route_node`: `CONPTY_SPIKE_AND_ADR`
-- `active_subaction`: `P3_PR01_PUBLISH_AND_REMOTE_REVIEW`
-- `expected_branch_prefix`: `mvo/p3-pr01-`
-- `write_execution_allowed`: `yes, scoped only to P3-PR01 in a dedicated branch`
-- `next_authorized_action`: `START_P3_PR01`
-- `next_authorized_actor`: `Architect/Experimenter/Executor`
+- `active_pr_id`: `P3-PR02`
+- `active_route_node`: `CONPTY_BACKEND_IMPLEMENTATION`
+- `active_subaction`: `MERGE_PR_11_THEN_START_P3_PR02`
+- `expected_branch_prefix`: `mvo/p3-pr02-`
+- `write_execution_allowed`: `no product write before PR #11 merge; after merge, scoped only to P3-PR02 in a dedicated branch`
+- `next_authorized_action`: `START_P3_PR02`
+- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer after integration`
 
 ## Próxima ação exata
 
-Publicar somente o hardening `ecdbc55` na PR #11 e então revalidar o head/diff remoto antes de qualquer merge. A revisão do primeiro head remoto encontrou janela de perda de output inicial, stream sem binding ao protocolo e erro fatal sem stop; o hardening introduz sessão inerte, liga todos os observers antes de `start()`, valida o stream e falha fechada. Esta PR não instala nem implementa o backend ConPTY real; isso pertence à P3-PR02 e continua proibido.
+Integrar a PR #11 já provada. Depois, iniciar somente `P3-PR02` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e implementar/provar o backend ConPTY conforme o gate de `ADR_WINDOWS_TERMINAL_BACKEND.md`: PowerShell persistente, output inicial, UTF-8/VT, input, resize, interrupts, exit, drainage e cleanup. Nenhum trabalho P3-PR02 pode começar antes do merge.
 
-A PR #10 foi integrada em `06e2a4c`; o local terminou sincronizado com o remoto. O hardening local P3-PR01 passou testes focados `16/16`, suíte completa `141/141`, diff check e revisão adversarial `GREEN_CANDIDATE`. O primeiro head remoto foi `792951d`; `ecdbc55` ainda precisa ser publicado e revalidado. Mantenha `GPT-5.6 Sol / xhigh`. Enova e qualquer target externo continuam proibidos.
+P3-PR01 passou testes focados `16/16`, suíte completa `141/141`, diff check e revisão adversarial final `GREEN`. O head remoto `8817f03` foi revalidado com mergeable `true`, state `clean`, 11 arquivos previstos e nenhum check remoto configurado. Mantenha `GPT-5.6 Sol / xhigh` para a integração e o início do probe nativo P3-PR02. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `none` | `none` | nenhum bloqueio ativo | publicar e revisar somente P3-PR01 |
+| `P3-INTEGRATION-01` | `integration` | P3-PR01 está provada na PR #11, ainda aberta | integrar PR #11 antes de criar a branch P3-PR02 |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ A PR #10 foi integrada em `06e2a4c`; o local terminou sincronizado com o remoto.
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `RUNNING` | P3-PR01 hardening local `GREEN_CANDIDATE`; republicação/revalidação remota pendente |
+| P3 | `READY` | P3-PR01 provada; P3-PR02 aguarda integração da PR #11 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
