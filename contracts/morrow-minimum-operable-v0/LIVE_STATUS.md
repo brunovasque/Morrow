@@ -20,9 +20,9 @@
 
 ## Próxima ação exata
 
-Publicar somente o candidate `P3-PR01` da branch `mvo/p3-pr01-conpty-spike`, nascida da base integrada `06e2a4c`, e então revisar o diff remoto antes de qualquer merge. O candidate contém a decisão ConPTY, a interface substituível e o capability gate; preserva `process-pipes` como automação/fixture e impede mecanicamente que seja apresentado como terminal completo. Esta PR não instala nem implementa o backend ConPTY real; isso pertence à P3-PR02 e continua proibido.
+Publicar somente o hardening `ecdbc55` na PR #11 e então revalidar o head/diff remoto antes de qualquer merge. A revisão do primeiro head remoto encontrou janela de perda de output inicial, stream sem binding ao protocolo e erro fatal sem stop; o hardening introduz sessão inerte, liga todos os observers antes de `start()`, valida o stream e falha fechada. Esta PR não instala nem implementa o backend ConPTY real; isso pertence à P3-PR02 e continua proibido.
 
-A PR #10 foi integrada em `06e2a4c`; o local terminou sincronizado com o remoto. O candidate local P3-PR01 passou testes focados `13/13`, suíte completa `138/138`, diff check e revisão adversarial `GREEN_CANDIDATE`. O reconciliador retornou `READY_FOR_EXECUTION` na branch correta. Mantenha `GPT-5.6 Sol / xhigh` durante a revisão remota. Enova e qualquer target externo continuam proibidos.
+A PR #10 foi integrada em `06e2a4c`; o local terminou sincronizado com o remoto. O hardening local P3-PR01 passou testes focados `16/16`, suíte completa `141/141`, diff check e revisão adversarial `GREEN_CANDIDATE`. O primeiro head remoto foi `792951d`; `ecdbc55` ainda precisa ser publicado e revalidado. Mantenha `GPT-5.6 Sol / xhigh`. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
@@ -37,7 +37,7 @@ A PR #10 foi integrada em `06e2a4c`; o local terminou sincronizado com o remoto.
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `RUNNING` | P3-PR01 local `GREEN_CANDIDATE`; publicação/revisão remota pendente |
+| P3 | `RUNNING` | P3-PR01 hardening local `GREEN_CANDIDATE`; republicação/revalidação remota pendente |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
@@ -53,7 +53,7 @@ A PR #10 foi integrada em `06e2a4c`; o local terminou sincronizado com o remoto.
 - sessões processuais ao vivo, múltiplas e isoladas;
 - separação canônica dos terminais do operador;
 - 130/130 testes passando após hardening e revisão remota P2-PR06;
-- 138/138 testes passando no candidate local P3-PR01.
+- 141/141 testes passando no hardening local P3-PR01.
 
 Isso não autoriza declarar o produto operacional. `PRS.md` define o restante.
 

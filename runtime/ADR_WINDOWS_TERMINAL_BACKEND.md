@@ -69,7 +69,7 @@ O build medido supera o gate conservador `18309` usado pelo `node-pty` para ConP
 
 - identidade imutável: `kind`, `implementationId` e `protocol`;
 - capabilities explícitas: `tty`, `interactive`, `resize`, `signals`, `utf8`, `exitStatus`;
-- ciclo mínimo: `spawn`, started/output/error/exit, `write`, backpressure, end input, `resize`, `interrupt` e `stop`;
+- ciclo mínimo sem janela cega: `create` inerte, registro de todos os observers, `start`, started/output/error/exit, `write`, backpressure, end input, `resize`, `interrupt` e `stop`;
 - protocolos distintos: `separate-pipes` e `conpty-vt`;
 - apresentação calculada: `process-output` ou `full-terminal`.
 
@@ -89,6 +89,13 @@ Qualquer capability ausente produz `process-output` e uma lista mecânica do que
 
 O backend padrão permanece `ProcessPipesTerminalBackend`. Seu perfil é validado estritamente e não pode alegar TTY, resize ou sinais. A sessão registra backend, implementação, protocolo, capabilities e apresentação junto da identidade já existente.
 
+`create()` não pode iniciar o processo nem invocar callbacks. O manager registra started,
+output, error e exit antes de chamar `start()`. Essa ordem é parte da interface porque um
+PTY pode produzir prompt/VT imediatamente; conectar o observer depois do spawn abriria
+uma janela de perda justamente no começo da sessão. Além disso, `separate-pipes` aceita
+somente `stdout/stderr`, enquanto `conpty-vt` aceita somente o stream combinado `terminal`.
+Violação de protocolo ou erro fatal falha fechada e força o encerramento da sessão.
+
 ## Gate obrigatório da P3-PR02
 
 Antes de declarar o adapter ConPTY aceito, a P3-PR02 precisa provar em Windows real:
@@ -97,14 +104,15 @@ Antes de declarar o adapter ConPTY aceito, a P3-PR02 precisa provar em Windows r
 2. instalação reproduzível do pacote fixado, preferencialmente por prebuild; necessidade de toolchain vira requisito explícito de bootstrap;
 3. import no Node suportado e recusa clara em plataforma/arquitetura incompatível;
 4. PowerShell persistente recebe duas escritas separadas e preserva estado entre elas;
-5. `cwd`, workspace, contrato, agente, runtime e PID permanecem os vinculados pelo Morrow;
-6. saída incremental UTF-8 com caracteres não ASCII e sequências VT chega sem transcodificação indevida;
-7. resize altera as dimensões observáveis pela aplicação hospedada;
-8. interrupção de foreground por `Ctrl+C` e `Ctrl+Break` tem resultado distinguível de stop/timeout; incapacidade em qualquer uma mantém `signals: false`;
-9. exit status correto em sucesso e falha;
-10. teardown continua drenando output e não entra no deadlock advertido pela Microsoft;
-11. nenhum processo/handle fica órfão após stop, timeout ou falha de startup;
-12. `process-pipes` continua verde e continua rotulado somente como `process-output`.
+5. observers são ligados antes do start e nenhum byte inicial/prompt se perde, inclusive quando a fixture emite sincronicamente;
+6. `cwd`, workspace, contrato, agente, runtime e PID permanecem os vinculados pelo Morrow;
+7. saída incremental UTF-8 com caracteres não ASCII e sequências VT chega somente pelo stream `terminal`, sem transcodificação indevida;
+8. resize altera as dimensões observáveis pela aplicação hospedada;
+9. interrupção de foreground por `Ctrl+C` e `Ctrl+Break` tem resultado distinguível de stop/timeout; incapacidade em qualquer uma mantém `signals: false`;
+10. exit status correto em sucesso e falha;
+11. teardown continua drenando output e não entra no deadlock advertido pela Microsoft;
+12. nenhum processo/handle fica órfão após stop, timeout, erro fatal ou falha de startup;
+13. `process-pipes` continua verde e continua rotulado somente como `process-output`.
 
 Se `node-pty` `1.1.0` falhar em Node 24/build suportado e não houver correção pequena e reproduzível, P3-PR02 retorna a este ADR. Um addon/sidecar próprio ou outra versão só entra com comparação nova; a rota não pode simplesmente aceitar o beta conhecido como regressivo.
 
