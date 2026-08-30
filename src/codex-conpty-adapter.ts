@@ -116,6 +116,7 @@ export class CodexQuotaConptyAdapter {
   }
 
   async invoke(input: CodexConptyInvocation): Promise<CodexConptyResult> {
+    input = detachCodexConptyInvocation(input);
     if (!input.prompt) throw new Error("codex_quota_prompt_required");
     if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) {
       throw new Error("codex_quota_timeout_invalid");
@@ -184,6 +185,13 @@ export class CodexQuotaConptyAdapter {
       presentation: snapshot.presentation,
     };
   }
+}
+
+function detachCodexConptyInvocation(input: CodexConptyInvocation): CodexConptyInvocation {
+  return {
+    ...input,
+    workspace: { ...input.workspace },
+  };
 }
 
 function assertFullConpty(snapshot: ReturnType<TerminalSessionManager["snapshot"]>): void {

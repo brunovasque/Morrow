@@ -133,7 +133,7 @@ test("runs a quota fixture through managed ConPTY with live output and bound met
       ) resolveEarly();
     });
     let settled = false;
-    const invocation = adapter.invoke({
+    const mutableInvocation = {
       invocationId: "I-codex",
       terminalSessionId: "T-codex",
       agentInstanceId: "A-codex",
@@ -144,7 +144,12 @@ test("runs a quota fixture through managed ConPTY with live output and bound met
       workspace,
       prompt: "MORROW_PROMPT_NOT_IN_START_EVENT",
       timeoutMs: 10_000,
-    }).finally(() => { settled = true; });
+    };
+    const invocation = adapter.invoke(mutableInvocation).finally(() => { settled = true; });
+    mutableInvocation.terminalSessionId = "T-mutated-must-not-rebind";
+    mutableInvocation.agentInstanceId = "A-mutated-must-not-rebind";
+    mutableInvocation.workspaceId = "W-mutated-must-not-rebind";
+    mutableInvocation.prompt = "MUTATED_PROMPT_MUST_NOT_REACH_PROCESS";
 
     await earlyOutput;
     assert.equal(settled, false);
@@ -162,7 +167,11 @@ test("runs a quota fixture through managed ConPTY with live output and bound met
     assert.equal(result.backend, "windows-conpty");
     assert.equal(result.terminalProtocol, "conpty-vt");
     assert.equal(result.presentation.fullTerminal, true);
+    assert.equal(result.terminalSessionId, "T-codex");
+    assert.equal(result.agentInstanceId, "A-codex");
     assert.equal(result.workspaceId, workspace.workspaceId);
+    assert.match(result.stdout, /MORROW_PROMPT_NOT_IN_START_EVENT/);
+    assert.doesNotMatch(result.stdout, /MUTATED_PROMPT_MUST_NOT_REACH_PROCESS/);
     assert.match(result.stdout, /canary: absent/);
     assert.match(result.stdout, /__MORROW_CODEX_DONE__/);
     assert.ok(events.some((event) => event.terminalSessionId === "T-codex-auth"));
