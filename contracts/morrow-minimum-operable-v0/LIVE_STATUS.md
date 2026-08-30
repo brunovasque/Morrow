@@ -12,7 +12,7 @@
 - `active_phase`: `P3`
 - `active_pr_id`: `P3-PR03`
 - `active_route_node`: `CODEX_QUOTA_SESSION_IN_CONPTY`
-- `active_subaction`: `P3_PR03_CODEX_CONPTY_INTEGRATION`
+- `active_subaction`: `P3_PR03_LOCAL_REVIEW_GREEN_CANDIDATE`
 - `expected_branch_prefix`: `mvo/p3-pr03-`
 - `write_execution_allowed`: `yes, scoped only to P3-PR03 in a dedicated branch`
 - `next_authorized_action`: `START_P3_PR03`
@@ -20,15 +20,15 @@
 
 ## Próxima ação exata
 
-Executar somente `P3-PR03` na branch `mvo/p3-pr03-codex-conpty`, nascida da base integrada `1d40eb7`: ligar o adapter Codex quota-session ao `TerminalSessionManager` com backend ConPTY, confirmar autenticação sem extrair credencial/API, preservar stream ao vivo, cwd/workspace isolado e metadata efetiva do runtime, e falhar fechado diante de ambiente API ou autenticação ausente.
+Fechar documentalmente o candidate local `31d2104`, repetir probe Codex/ConPTY, baseline quota, probe ConPTY, suíte completa, diff check e reconciliador; depois publicar a branch `mvo/p3-pr03-codex-conpty`, abrir a PR contra `phase-2/runtime-v0`, conferir mecanicamente base/branch/SHA e revisar adversarialmente o diff remoto exato antes de qualquer merge.
 
-A PR #12 foi integrada em `1d40eb7`; o head provado `a1c69a7` é ancestral da integração. O pós-merge passou `npm ci`, probe ConPTY `5/5` e suíte `149/149`, com branch oficial sincronizada e limpa. A P3-PR03 deve usar somente fixture temporária controlada pelo Morrow e a sessão quota já autenticada, sem ler/exportar material de credencial e sem fallback API. Enova e qualquer target externo continuam proibidos.
+A PR #12 foi integrada em `1d40eb7`; o head provado `a1c69a7` é ancestral da integração. A P3-PR03 tem código/teste candidate `31d2104`: probe real Codex/ConPTY verde com CLI `0.147.0`, modelo `gpt-5.6-sol`, provider `openai`, approval `never`, sandbox `read-only`, output anterior à conclusão, cwd correto e fixture intacta; baseline quota verde, probe ConPTY `5/5`, testes focados `22/22` e suíte `155/155`. O review local corrigiu oito achados e está `GREEN_CANDIDATE`; publicação e revisão remota permanecem necessárias. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `none` | `none` | nenhum bloqueio ativo | executar somente P3-PR03 e parar se a própria CLI não confirmar sessão quota autenticada |
+| `none` | `none` | nenhum bloqueio ativo | publicar e revisar o head exato da P3-PR03; integrar somente após todos os gates verdes |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ A PR #12 foi integrada em `1d40eb7`; o head provado `a1c69a7` é ancestral da in
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `RUNNING` | P3-PR03 em branch dedicada sobre `1d40eb7`; integração Codex quota-session/ConPTY em execução |
+| P3 | `RUNNING` | P3-PR03 em branch dedicada sobre `1d40eb7`; candidate local e review `GREEN_CANDIDATE`, aguardando publicação/revisão remota |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
