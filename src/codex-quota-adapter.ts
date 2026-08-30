@@ -29,7 +29,10 @@ const forbiddenApiEnvironment = [
 ] as const;
 
 export function assertCodexQuotaEnvironment(env: NodeJS.ProcessEnv = process.env): void {
-  const present = forbiddenApiEnvironment.filter((key) => Boolean(env[key]));
+  const entries = Object.entries(env);
+  const present = forbiddenApiEnvironment.filter((key) => entries.some(
+    ([candidate, value]) => candidate.toUpperCase() === key && Boolean(value),
+  ));
   if (present.length > 0) {
     throw new Error(`codex_quota_environment_unsafe:${present.join(",")}`);
   }

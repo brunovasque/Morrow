@@ -50,6 +50,7 @@ export interface TerminalSessionRequest {
   workspace: AgentWorkspaceBinding;
   command: string;
   args: string[];
+  sensitiveArgIndexes?: number[];
   env?: Record<string, string>;
   timeoutMs?: number;
 }
@@ -160,6 +161,7 @@ export interface ManagedTerminalInvocation extends Omit<RuntimeInvocation, "cwd"
   roleId: string;
   workspaceId: string;
   workspace: AgentWorkspaceBinding;
+  sensitiveArgIndexes?: number[];
 }
 
 export interface ManagedTerminalResult extends RuntimeResult {
@@ -224,8 +226,13 @@ export class TerminalSessionManager {
     return () => { this.listeners.delete(listener); };
   }
 
+  descriptor(): TerminalBackendDescriptor {
+    return this.backendDescriptor;
+  }
+
   async start(request: TerminalSessionRequest): Promise<TerminalSessionHandle> {
     this.assertIdentity(request);
+    request = detachTerminalSessionRequest(request);
     if (this.sessions.has(request.terminalSessionId)) {
       throw new Error("terminal_session_id_already_exists");
     }
@@ -398,7 +405,7 @@ export class TerminalSessionManager {
         pid: backendSession.pid,
         cwd: record.workspaceRoot,
         command: request.command,
-        args: [...request.args],
+        args: redactSensitiveArgs(request.args, request.sensitiveArgIndexes),
         backend: record.backendDescriptor.kind,
         backendImplementationId: record.backendDescriptor.implementationId,
         terminalProtocol: record.backendDescriptor.protocol,
@@ -503,6 +510,7 @@ export class TerminalSessionManager {
       }
     }
     if (!request.command) throw new Error("terminal_command_required");
+    validateSensitiveArgIndexes(request.args, request.sensitiveArgIndexes);
     if (request.timeoutMs !== undefined && request.timeoutMs <= 0) {
       throw new Error("terminal_timeout_must_be_positive");
     }
@@ -671,6 +679,7 @@ export class ManagedTerminalRuntimeAdapter {
       workspace: input.workspace,
       command: input.command,
       args: input.args,
+      sensitiveArgIndexes: input.sensitiveArgIndexes,
       env: input.env,
       timeoutMs: input.timeoutMs,
     });
@@ -700,4 +709,31 @@ export class ManagedTerminalRuntimeAdapter {
 function samePath(left: string, right: string): boolean {
   if (process.platform === "win32") return left.toLowerCase() === right.toLowerCase();
   return left === right;
+}
+
+function validateSensitiveArgIndexes(args: readonly string[], indexes: readonly number[] | undefined): void {
+  if (indexes === undefined) return;
+  if (new Set(indexes).size !== indexes.length) throw new Error("terminal_sensitive_arg_indexes_invalid");
+  if (indexes.some((index) => !Number.isInteger(index) || index < 0 || index >= args.length)) {
+    throw new Error("terminal_sensitive_arg_indexes_invalid");
+  }
+
+}
+
+function redactSensitiveArgs(args: readonly string[], indexes: readonly number[] | undefined): string[] {
+  if (indexes === undefined || indexes.length === 0) return [...args];
+  const sensitive = new Set(indexes);
+  return args.map((arg, index) => sensitive.has(index) ? "[REDACTED]" : arg);
+}
+
+function detachTerminalSessionRequest(request: TerminalSessionRequest): TerminalSessionRequest {
+  return {
+    ...request,
+    workspace: { ...request.workspace },
+    args: [...request.args],
+    sensitiveArgIndexes: request.sensitiveArgIndexes === undefined
+      ? undefined
+      : [...request.sensitiveArgIndexes],
+    env: request.env === undefined ? undefined : { ...request.env },
+  };
 }
