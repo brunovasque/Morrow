@@ -12,7 +12,7 @@
 - `active_phase`: `P3`
 - `active_pr_id`: `P3-PR02`
 - `active_route_node`: `CONPTY_BACKEND_IMPLEMENTATION`
-- `active_subaction`: `P3_PR02_LOCAL_REVIEW_GREEN_CANDIDATE`
+- `active_subaction`: `P3_PR02_REMOTE_REVIEW_CORRECTIONS_LOCAL_GREEN`
 - `expected_branch_prefix`: `mvo/p3-pr02-`
 - `write_execution_allowed`: `yes, scoped only to P3-PR02 in a dedicated branch`
 - `next_authorized_action`: `START_P3_PR02`
@@ -20,15 +20,15 @@
 
 ## Próxima ação exata
 
-Publicar somente o candidate `P3-PR02` da branch `mvo/p3-pr02-conpty-backend`, nascida da base integrada `6168ade`, abrir a PR contra `phase-2/runtime-v0` e executar revisão adversarial remota do diff exato. Não iniciar P3-PR03 e não marcar P3-PR02 como `PROVEN` antes de corrigir achados, revalidar o head remoto e integrar a PR.
+Publicar as correções adversariais da `P3-PR02` na PR [`#12`](https://github.com/brunovasque/Morrow/pull/12), confirmar base `phase-2/runtime-v0`, branch `mvo/p3-pr02-conpty-backend` e novo head exato, e reexecutar os gates contra esse head remoto. Não iniciar P3-PR03 e não marcar P3-PR02 como `PROVEN` antes da revalidação e integração.
 
-A implementação local passou o probe Windows real `5/5` e a suíte completa `147/147`. O head local `3a28b54` contém o hardening de startup/teardown sobre o candidate `bad3942`; a revisão registrada em `reviews/P3-PR02.md` está `GREEN_CANDIDATE`, não `GREEN` final. Mantenha `GPT-5.6 Sol / xhigh`, pois dependência nativa, processo, sinais e cleanup exigem revisão de segurança. Enova e qualquer target externo continuam proibidos.
+O head remoto inicial `85b755c` foi revisado integralmente. A primeira suíte reproduziu um cruzamento de ambiente/histórico do operador (`146/147`) e a revisão encontrou também falha pós-spawn sem observer, liberação antecipada de handles/cwd e fallback de helper por PATH. O commit local `29974cf` corrige essas superfícies; probe Windows real `5/5`, suíte completa `149/149` e contraprovas de 512 KiB/removibilidade do workspace estão verdes. A revisão em `reviews/P3-PR02.md` permanece `GREEN_CANDIDATE` somente até publicação e revalidação remota. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `none` | `none` | nenhum bloqueio ativo; candidate local pronto para publicação/revisão remota | publicar somente P3-PR02, revisar o diff remoto e corrigir qualquer achado antes do merge |
+| `none` | `none` | nenhum bloqueio ativo; correções da revisão remota estão verdes localmente | publicar somente P3-PR02 e revalidar o head remoto exato antes do merge |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ A implementação local passou o probe Windows real `5/5` e a suíte completa `1
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `RUNNING` | P3-PR02 em branch dedicada sobre `6168ade`; candidate local `3a28b54` com probe 5/5 e suíte 147/147 aguarda PR/review remoto |
+| P3 | `RUNNING` | PR #12 sobre `6168ade`; correções adversariais `29974cf` com probe 5/5 e suíte 149/149 aguardam publicação/revalidação remota |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
@@ -54,7 +54,7 @@ A implementação local passou o probe Windows real `5/5` e a suíte completa `1
 - separação canônica dos terminais do operador;
 - 130/130 testes passando após hardening e revisão remota P2-PR06;
 - 141/141 testes passando no fechamento P3-PR01;
-- 147/147 testes e probe ConPTY 5/5 passando no candidate local P3-PR02.
+- 149/149 testes e probe ConPTY 5/5 passando após as correções adversariais locais P3-PR02.
 
 Isso não autoriza declarar o produto operacional. `PRS.md` define o restante.
 
