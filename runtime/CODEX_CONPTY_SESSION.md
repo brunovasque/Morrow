@@ -2,7 +2,7 @@
 
 - contract: `MORROW-MVO-001`
 - PR-ID: `P3-PR03`
-- estado: `GREEN_CANDIDATE`
+- estado: `PROVEN`
 - base: `1d40eb717bf4f66cf1d532c498279877ae0ec299`
 - candidate de código/teste: `31d2104ed509710431f8486e1f132808e6530dd5`
 - hardening de snapshot da invocação: `e4243ba9a04f5440e1eae8815ea4f4038a8ca413`
