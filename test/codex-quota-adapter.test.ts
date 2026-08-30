@@ -7,6 +7,10 @@ test("codex quota adapter refuses API-bearing environments", () => {
     () => assertCodexQuotaEnvironment({ OPENAI_API_KEY: "present" }),
     /codex_quota_environment_unsafe:OPENAI_API_KEY/,
   );
+  assert.throws(
+    () => assertCodexQuotaEnvironment({ openai_api_key: "present" }),
+    /codex_quota_environment_unsafe:OPENAI_API_KEY/,
+  );
 });
 
 test("codex quota adapter accepts environment without API override", () => {

@@ -9,6 +9,7 @@
     "contract:reconcile": "node --experimental-strip-types src/contract-reconciler.ts",
     "worker:host": "node --experimental-strip-types src/local-worker-host.ts",
     "probe:codex-quota": "node --experimental-strip-types src/probes/codex-quota.ts",
+    "probe:codex-conpty": "node --experimental-strip-types src/probes/codex-conpty.ts",
     "probe:conpty": "node --experimental-strip-types --test test/windows-conpty-backend.test.ts"
   },
   "engines": {

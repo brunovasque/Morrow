@@ -220,6 +220,39 @@ test("passes only the governed environment into a managed terminal", async () =>
   }
 });
 
+test("redacts declared sensitive arguments from terminal start events", async () => {
+  const { workspaces, terminals } = await harness();
+  const workspace = await workspaces.create({
+    workspaceId: "W-sensitive-args",
+    contractId: "C1",
+    roleId: "executor",
+  });
+  const secretArgument = "MORROW_SENSITIVE_ARGUMENT_MUST_NOT_PERSIST";
+  const mutableRequest = request(workspace, {
+    terminalSessionId: "terminal-sensitive-args",
+    agentInstanceId: "agent-sensitive-args",
+    args: ["-e", "process.stdout.write(process.argv[1])", secretArgument],
+    sensitiveArgIndexes: [2],
+  });
+  const pendingHandle = terminals.start(mutableRequest);
+  mutableRequest.args[2] = "MUTATED_ARGUMENT_MUST_NOT_REACH_PROCESS";
+  mutableRequest.sensitiveArgIndexes![0] = 0;
+  const handle = await pendingHandle;
+  const result = await handle.completion;
+  assert.equal(result.stdout, secretArgument);
+  const started = terminals.history(handle.terminalSessionId)
+    .find((event) => event.type === "TERMINAL_SESSION_STARTED");
+  assert.ok(started?.type === "TERMINAL_SESSION_STARTED");
+  assert.deepEqual(started.payload.args, ["-e", "process.stdout.write(process.argv[1])", "[REDACTED]"]);
+  assert.equal(JSON.stringify(started).includes(secretArgument), false);
+
+  await assert.rejects(terminals.start(request(workspace, {
+    terminalSessionId: "terminal-invalid-sensitive-args",
+    agentInstanceId: "agent-invalid-sensitive-args",
+    sensitiveArgIndexes: [3],
+  })), /terminal_sensitive_arg_indexes_invalid/);
+});
+
 test("refuses resize, interrupt and full-terminal presentation on process pipes", async () => {
   const { workspaces, terminals } = await harness();
   const workspace = await workspaces.create({

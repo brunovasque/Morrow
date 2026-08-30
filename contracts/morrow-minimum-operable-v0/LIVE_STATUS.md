@@ -10,25 +10,25 @@
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
 - `active_phase`: `P3`
-- `active_pr_id`: `P3-PR03`
-- `active_route_node`: `CODEX_QUOTA_SESSION_IN_CONPTY`
-- `active_subaction`: `MERGE_PR_12_THEN_START_P3_PR03`
-- `expected_branch_prefix`: `mvo/p3-pr02-`
-- `write_execution_allowed`: `no product write before PR #12 merge; after merge, scoped only to P3-PR03 in a new dedicated branch`
-- `next_authorized_action`: `START_P3_PR03`
+- `active_pr_id`: `P3-PR04`
+- `active_route_node`: `CONPTY_MULTIPLEXING_AND_CLEANUP`
+- `active_subaction`: `MERGE_PR_13_THEN_START_P3_PR04`
+- `expected_branch_prefix`: `mvo/p3-pr03-`
+- `write_execution_allowed`: `no product write before PR #13 merge; after merge, scoped only to P3-PR04 in a new dedicated branch`
+- `next_authorized_action`: `START_P3_PR04`
 - `next_authorized_actor`: `Executor/Test Designer/Security Reviewer after integration`
 
 ## Próxima ação exata
 
-Integrar a PR #12 já provada. Depois, sincronizar `phase-2/runtime-v0`, executar regressão pós-merge e iniciar somente `P3-PR03` em nova branch dedicada: executar Codex quota-session pelo terminal ConPTY gerenciado sem extrair credencial/API, com stream, cwd isolado e metadata do runtime. Nenhum trabalho P3-PR03 pode começar antes do merge.
+Integrar a PR #13 já provada. Depois, sincronizar `phase-2/runtime-v0`, executar regressão pós-merge e iniciar somente `P3-PR04` em nova branch dedicada para provar multiplexing, cleanup, timeout/cancel e colisões sob múltiplas sessões. Nenhum trabalho P3-PR04 pode começar antes do merge.
 
-P3-PR02 passou probe Windows real `5/5`, suíte completa `149/149`, diff check e revisão adversarial final `GREEN`. O head remoto corrigido `c32fcb1` foi revalidado com mergeable `true`, state `clean`, 20 arquivos previstos e nenhum check remoto configurado. O comentário remoto P1 sobre espera do Job Controller foi corrigido por `29974cf` e coberto por drainage/removibilidade do workspace. Enova e qualquer target externo continuam proibidos.
+P3-PR03 passou probes Codex/ConPTY e quota reais, focados com backend `28/28`, ConPTY `5/5`, suíte `156/156`, diff check e revisão adversarial final `GREEN`. O head remoto corrigido `adc87b8` foi revalidado com mergeable `true`, state `clean`, 15 arquivos previstos e nenhum check remoto configurado. Os comentários P1/P2 foram respondidos e os doze achados estão fechados. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P3-INTEGRATION-02` | `integration` | P3-PR02 está provada na PR #12, ainda aberta | integrar PR #12 antes de criar a branch P3-PR03 |
+| `P3-INTEGRATION-03` | `integration` | P3-PR03 está provada na PR #13, ainda aberta | integrar PR #13 antes de criar a branch P3-PR04 |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ P3-PR02 passou probe Windows real `5/5`, suíte completa `149/149`, diff check e
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `READY` | P3-PR02 provada; P3-PR03 aguarda integração da PR #12 |
+| P3 | `READY` | P3-PR03 provada; P3-PR04 aguarda integração da PR #13 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
