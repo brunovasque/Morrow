@@ -12,23 +12,23 @@
 - `active_phase`: `P3`
 - `active_pr_id`: `P3-PR02`
 - `active_route_node`: `CONPTY_BACKEND_IMPLEMENTATION`
-- `active_subaction`: `MERGE_PR_11_THEN_START_P3_PR02`
+- `active_subaction`: `P3_PR02_NATIVE_COMPATIBILITY_PROBE`
 - `expected_branch_prefix`: `mvo/p3-pr02-`
-- `write_execution_allowed`: `no product write before PR #11 merge; after merge, scoped only to P3-PR02 in a dedicated branch`
+- `write_execution_allowed`: `yes, scoped only to P3-PR02 in a dedicated branch`
 - `next_authorized_action`: `START_P3_PR02`
-- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer after integration`
+- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer`
 
 ## Próxima ação exata
 
-Integrar a PR #11 já provada. Depois, iniciar somente `P3-PR02` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e implementar/provar o backend ConPTY conforme o gate de `ADR_WINDOWS_TERMINAL_BACKEND.md`: PowerShell persistente, output inicial, UTF-8/VT, input, resize, interrupts, exit, drainage e cleanup. Nenhum trabalho P3-PR02 pode começar antes do merge.
+Executar somente `P3-PR02` na branch `mvo/p3-pr02-conpty-backend`, nascida da base integrada `6168ade`. Primeiro provar instalação/import e compatibilidade real de `node-pty` `1.1.0` exato com Windows/Node atuais; somente se o probe passar, implementar o backend ConPTY atrás da interface aprovada e medir PowerShell persistente, output inicial, UTF-8/VT, input, resize, interrupts, exit, drainage e cleanup.
 
-P3-PR01 passou testes focados `16/16`, suíte completa `141/141`, diff check e revisão adversarial final `GREEN`. O head remoto `8817f03` foi revalidado com mergeable `true`, state `clean`, 11 arquivos previstos e nenhum check remoto configurado. Mantenha `GPT-5.6 Sol / xhigh` para a integração e o início do probe nativo P3-PR02. Enova e qualquer target externo continuam proibidos.
+A PR #11 foi integrada em `6168ade`; o local terminou sincronizado e a suíte pós-merge passou `141/141`. O reconciliador retornou `READY_FOR_EXECUTION` para P3-PR02 na branch correta. Mantenha `GPT-5.6 Sol / xhigh`, pois dependência nativa, processo, sinais e cleanup exigem revisão de segurança. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P3-INTEGRATION-01` | `integration` | P3-PR01 está provada na PR #11, ainda aberta | integrar PR #11 antes de criar a branch P3-PR02 |
+| `none` | `none` | nenhum bloqueio ativo antes do probe | executar somente o probe P3-PR02; falha retorna ao ADR |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ P3-PR01 passou testes focados `16/16`, suíte completa `141/141`, diff check e r
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `READY` | P3-PR01 provada; P3-PR02 aguarda integração da PR #11 |
+| P3 | `RUNNING` | P3-PR02 em branch dedicada sobre `6168ade`; probe nativo primeiro |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |

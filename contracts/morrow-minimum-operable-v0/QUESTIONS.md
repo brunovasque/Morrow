@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: integração da PR #11 já provada; P3-PR02 não inicia antes do merge
+- bloqueio atual: nenhum; P3-PR02 iniciou na base integrada `6168ade` e precisa passar o probe nativo antes da implementação
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 
