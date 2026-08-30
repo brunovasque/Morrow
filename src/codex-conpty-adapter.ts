@@ -142,10 +142,11 @@ export class CodexQuotaConptyAdapter {
     });
     const authSnapshot = this.terminals.snapshot(authTerminalSessionId);
     assertFullConpty(authSnapshot);
+    const authText = normalizeCodexTerminalText(`${auth.stdout}\n${auth.stderr}`);
     if (
       auth.exitCode !== 0
       || auth.timedOut
-      || !/Logged in using ChatGPT/i.test(normalizeCodexTerminalText(`${auth.stdout}\n${auth.stderr}`))
+      || !hasExactChatGptLoginStatus(authText)
     ) {
       throw new Error("codex_quota_auth_not_confirmed");
     }
@@ -192,6 +193,10 @@ function detachCodexConptyInvocation(input: CodexConptyInvocation): CodexConptyI
     ...input,
     workspace: { ...input.workspace },
   };
+}
+
+function hasExactChatGptLoginStatus(text: string): boolean {
+  return text.split("\n").some((line) => line.trim().toLowerCase() === "logged in using chatgpt");
 }
 
 function assertFullConpty(snapshot: ReturnType<TerminalSessionManager["snapshot"]>): void {

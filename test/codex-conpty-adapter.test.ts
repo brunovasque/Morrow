@@ -13,7 +13,11 @@ import { TerminalSessionManager, type TerminalSessionEvent } from "../src/termin
 import { WindowsConptyTerminalBackend } from "../src/windows-conpty-backend.ts";
 import { LocalWorkspaceManager } from "../src/workspace-manager.ts";
 
-async function fixture(authenticated = true) {
+async function fixture(
+  authenticated = true,
+  authenticationText = authenticated ? "Logged in using ChatGPT\n" : "Not logged in\n",
+  authenticationExitCode = authenticated ? 0 : 1,
+) {
   const root = await mkdtemp(join(tmpdir(), "morrow-codex-conpty-fixture-"));
   const managedRoot = join(root, "managed-workspaces");
   const shimRoot = join(root, "shim");
@@ -23,8 +27,8 @@ async function fixture(authenticated = true) {
   await writeFile(script, `
 const args = process.argv.slice(2);
 if (args[0] === "login" && args[1] === "status") {
-  process.stdout.write(${JSON.stringify(authenticated ? "Logged in using ChatGPT\n" : "Not logged in\n")});
-  process.exit(${authenticated ? 0 : 1});
+  process.stdout.write(${JSON.stringify(authenticationText)});
+  process.exit(${authenticationExitCode});
 }
 if (args[0] !== "exec") process.exit(9);
 const prompt = args.at(-1);
@@ -206,8 +210,12 @@ test("refuses API environment before opening a terminal", async () => {
   }
 });
 
-test("refuses missing ChatGPT authentication before the agent invocation", async () => {
-  const { root, managedRoot, workspace, environment } = await fixture(false);
+test("refuses missing or negatively worded ChatGPT authentication before the agent invocation", async () => {
+  const { root, managedRoot, workspace, environment } = await fixture(
+    false,
+    "Not logged in using ChatGPT\n",
+    0,
+  );
   try {
     const terminals = new TerminalSessionManager(managedRoot, {
       backend: new WindowsConptyTerminalBackend(),
