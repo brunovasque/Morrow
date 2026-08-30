@@ -1,6 +1,6 @@
 # ADR — backend de terminal real no Windows
 
-- status: `ACCEPTED_FOR_P3_PR02_PROBE`
+- status: `IMPLEMENTED_AND_PROVEN_P3_PR02`
 - contract: `MORROW-MVO-001`
 - decision owner: técnica de rota; não muda o destino aprovado
 - decision date: `2026-08-29`
@@ -133,4 +133,19 @@ Se `node-pty` `1.1.0` falhar em Node 24/build suportado e não houver correção
 - o core fica substituível: trocar o adapter não muda `TerminalSessionManager` nem o contrato da UI;
 - P3-PR02 fica pequena e verificável: implementar um backend já cercado, sem refatorar toda a sessão junto;
 - o Morrow aceita custo de uma dependência nativa fixada, mas não aceita prerelease regressiva nem fallback não rotulado;
-- nenhuma capacidade ConPTY é declarada `PROVEN` nesta ADR. O estado continua “decisão pronta para probe”.
+- P3-PR01 não declarou capacidade ConPTY provada; a medição posterior da P3-PR02 fica registrada abaixo e ainda depende da revisão do candidate.
+
+## Resultado medido pela P3-PR02
+
+Em 2026-08-30, o probe da P3-PR02 instalou `node-pty` `1.1.0` exato pelos prebuilds `win32-x64` e importou o addon no Node `24.14.1`. A execução real provou Windows PowerShell persistente em perfil temporário controlado, estado entre escritas, output inicial observado, UTF-8, VT, resize `101x37`, `Ctrl+C`, `Ctrl+Break`, exit code não zero, 512 KiB de tail drenado e encerramento do processo de prova.
+
+Quatro limites reais do adapter e da integração foram encontrados e cercados sem mudar a versão aprovada:
+
+1. a API pública escreve ETX para `Ctrl+C`, mas não expõe `Ctrl+Break`; o backend usa um auxiliar interno absoluto que se conecta apenas ao pseudoconsole da sessão e emite `CTRL_BREAK_EVENT`;
+2. após saída natural, a versão fixa pode manter seu worker de drenagem vivo; o backend valida o hook interno exato antes de liberar o comando e aguarda sua terminação somente depois do evento pós-flush;
+3. o exit público podia anteceder o fechamento de Job Controller/helpers e a liberação do cwd; o backend agora publica exit apenas depois desses handles e a prova remove a raiz temporária imediatamente;
+4. ambiente herdado e busca em PATH podiam cruzar estado do operador; o target recebe somente `env` governado, helpers usam Windows PowerShell absoluto do sistema e as provas redirecionam o perfil à fixture.
+
+Para limitar stop e falhas ao processo correto, o comando não nasce solto: um launcher inerte é atribuído primeiro a um Job Object próprio com `KILL_ON_JOB_CLOSE`, e somente então cria o comando governado. A prova cria um descendente de longa duração e confirma que ele desaparece junto da sessão. Nenhum processo do console do operador é enumerado ou adotado.
+
+O candidate P3-PR02 mantém `useConpty: true`, `useConptyDll: false` e não introduz fallback. O diff remoto inicial recebeu revisão adversarial, as correções passaram probe `5/5` e suíte `149/149`, e o head remoto corrigido `c32fcb1` foi revalidado `MERGEABLE/CLEAN`. Esta ADR está provada para P3-PR02; qualquer upgrade da versão fixa reabre o gate. Os detalhes estão em `WINDOWS_CONPTY_BACKEND.md`.

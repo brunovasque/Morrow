@@ -247,7 +247,10 @@ export class TerminalSessionManager {
       command: request.command,
       args: [...request.args],
       cwd: workspaceRoot,
-      env: request.env ? { ...process.env, ...request.env } : process.env,
+      // A managed terminal must not inherit the operator process environment
+      // implicitly. Runtimes receive only the environment resolved by the
+      // governed dispatch; an omitted environment is intentionally empty.
+      env: request.env ? { ...request.env } : {},
     });
     let actualDescriptor: TerminalBackendDescriptor;
     try {
@@ -306,12 +309,7 @@ export class TerminalSessionManager {
       this.attach(record);
       backendSession.start();
     } catch {
-      this.fail(record, "terminal_backend_start_failed");
-      try {
-        backendSession.stop(true);
-      } catch {
-        // The startup failure remains the authoritative refusal.
-      }
+      this.failAndStop(record, "terminal_backend_start_failed");
     }
 
     return { terminalSessionId: request.terminalSessionId, completion };
@@ -435,20 +433,22 @@ export class TerminalSessionManager {
 
     backendSession.onExit(({ exitCode, signal }) => {
       if (record.settled) return;
-      if (record.status === "starting") {
+      if (record.status === "starting" && !record.stopped && !record.timedOut) {
         this.fail(record, "terminal_backend_exit_before_start");
         return;
       }
       record.exitCode = exitCode;
       record.signal = signal;
       record.endedAt = new Date().toISOString();
-      record.status = record.timedOut
-        ? "timed_out"
-        : record.stopped
-          ? "stopped"
-          : exitCode === 0
-            ? "completed"
-            : "failed";
+      record.status = record.error
+        ? "failed"
+        : record.timedOut
+          ? "timed_out"
+          : record.stopped
+            ? "stopped"
+            : exitCode === 0
+              ? "completed"
+              : "failed";
       this.emit(record, "TERMINAL_SESSION_EXITED", {
         exitCode,
         signal,
@@ -573,6 +573,12 @@ export class TerminalSessionManager {
 
   private fail(record: SessionRecord, error: string): void {
     if (record.settled) return;
+    this.markFailed(record, error);
+    this.settle(record);
+  }
+
+  private markFailed(record: SessionRecord, error: string): void {
+    if (record.settled || record.error) return;
     record.error = error;
     record.status = "failed";
     record.endedAt = new Date().toISOString();
@@ -580,16 +586,17 @@ export class TerminalSessionManager {
       error,
       durationMs: this.duration(record),
     });
-    this.settle(record);
   }
 
   private failAndStop(record: SessionRecord, error: string): void {
-    this.fail(record, error);
+    this.markFailed(record, error);
+    let stopAccepted = false;
     try {
-      record.backendSession.stop(true);
+      stopAccepted = record.backendSession.stop(true);
     } catch {
       // The protocol violation remains the authoritative failure.
     }
+    if (!stopAccepted && !record.settled) this.settle(record);
   }
 
   private snapshotRecord(record: SessionRecord): TerminalSessionSnapshot {

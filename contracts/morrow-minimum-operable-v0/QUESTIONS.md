@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: integração da PR #11 já provada; P3-PR02 não inicia antes do merge
+- bloqueio atual: nenhum do dono; P3-PR02 está `PROVEN` e P3-PR03 aguarda somente a integração sequencial da PR #12
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 
@@ -24,7 +24,7 @@ As respostas abaixo consolidam decisões já dadas pelo dono e evidência do rep
 | `Q-06` | Owner | notification | Como o Morrow pede decisão fora do PC? | Requisito de autonomia prática | owner | `RESOLVED` | Notification Gateway próprio + pelo menos um canal externo autenticado; resposta entra no Decision Gateway/Cérebro. |
 | `Q-07` | Architect | offline | O que acontece com PowerShell se o PC dormir/desligar? | Limite físico precisa ser visível | deployment topology | `RESOLVED` | Não executa. Worker fica offline; trabalho espera/bloqueia e retoma governadamente quando voltar. |
 | `Q-08` | Architect | platform | Qual plataforma fecha o MVO? | ConPTY é específico | owner/environment | `RESOLVED` | Windows primeiro; arquitetura mantém backend portável, mas outras plataformas estão fora do aceite. |
-| `Q-09` | Architect | terminal | Qual biblioteca/estratégia ConPTY será usada? | Dependência nativa e segurança | state-of-art required | `RESOLVED` | Windows ConPTY do sistema; primeiro probe usa `node-pty` `1.1.0` exato atrás da interface Morrow, sem winpty/DLL fallback. P3-PR02 precisa provar compatibilidade antes de aceitar o adapter. |
+| `Q-09` | Architect | terminal | Qual biblioteca/estratégia ConPTY será usada? | Dependência nativa e segurança | state-of-art required | `RESOLVED` | Windows ConPTY do sistema com `node-pty` `1.1.0` exato atrás da interface Morrow, sem winpty/DLL fallback; P3-PR02 provou compatibilidade, recebeu hardening adversarial e está autorizada para integração. |
 | `Q-10` | Architect | UI | Desktop nativo, web local ou outra stack? | Afeta terminal rendering e distribuição | state-of-art required | `ROUTE_DECISION` | P5-PR01 decide por spike/ADR, mantendo todos os critérios de UX. |
 | `Q-11` | Security Reviewer | network | Worker precisa aceitar conexão de entrada? | Aumenta superfície de ataque | owner architecture | `RESOLVED` | Não por padrão; conexão outbound autenticada. |
 | `Q-12` | Security Reviewer | secrets | Transcript pode persistir prompts/entrada? | Pode vazar segredo | operator experience | `RESOLVED` | Entrada sensível não é persistida por padrão; redaction e política explícita precedem storage/UI. |

@@ -191,6 +191,35 @@ test("keeps interactive input addressed to one agent terminal", async () => {
   assert.equal(JSON.stringify(inputEvent).includes("evidence-only"), false);
 });
 
+test("passes only the governed environment into a managed terminal", async () => {
+  const { workspaces, terminals } = await harness();
+  const workspace = await workspaces.create({
+    workspaceId: "W-env",
+    contractId: "C1",
+    roleId: "executor",
+  });
+  const operatorCanary = "MORROW_OPERATOR_ENV_MUST_NOT_CROSS_TERMINAL";
+  const previous = process.env[operatorCanary];
+  process.env[operatorCanary] = "operator-only";
+  try {
+    const handle = await terminals.start(request(workspace, {
+      terminalSessionId: "terminal-env",
+      agentInstanceId: "agent-env",
+      env: { MORROW_GOVERNED_ENV: "allowed" },
+      args: [
+        "-e",
+        `process.stdout.write(JSON.stringify({governed:process.env.MORROW_GOVERNED_ENV,operator:process.env.${operatorCanary}??null}))`,
+      ],
+    }));
+    const result = await handle.completion;
+    assert.equal(result.status, "completed");
+    assert.deepEqual(JSON.parse(result.stdout), { governed: "allowed", operator: null });
+  } finally {
+    if (previous === undefined) delete process.env[operatorCanary];
+    else process.env[operatorCanary] = previous;
+  }
+});
+
 test("refuses resize, interrupt and full-terminal presentation on process pipes", async () => {
   const { workspaces, terminals } = await harness();
   const workspace = await workspaces.create({
@@ -368,6 +397,7 @@ test("fails closed when a backend emits a stream forbidden by its protocol", asy
   };
   let startedListener: (() => void) | undefined;
   let outputListener: ((stream: "terminal", data: string) => void) | undefined;
+  let exitListener: ((result: { exitCode: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
   let stoppedWithForce = false;
   const backend: TerminalBackend = {
     descriptor,
@@ -384,7 +414,7 @@ test("fails closed when a backend emits a stream forbidden by its protocol", asy
         outputListener = listener as (stream: "terminal", data: string) => void;
       },
       onError: () => {},
-      onExit: () => {},
+      onExit: (listener) => { exitListener = listener; },
       write: () => true,
       waitForDrain: async () => {},
       endInput: () => {},
@@ -392,6 +422,7 @@ test("fails closed when a backend emits a stream forbidden by its protocol", asy
       interrupt: () => {},
       stop: (force) => {
         stoppedWithForce = force;
+        exitListener?.({ exitCode: 1, signal: null });
         return true;
       },
     }),
@@ -434,6 +465,7 @@ test("force-stops a session when its backend reports a fatal error", async () =>
   };
   let startedListener: (() => void) | undefined;
   let errorListener: ((error: Error) => void) | undefined;
+  let exitListener: ((result: { exitCode: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
   let stoppedWithForce = false;
   const backend: TerminalBackend = {
     descriptor,
@@ -448,7 +480,7 @@ test("force-stops a session when its backend reports a fatal error", async () =>
       onStarted: (listener) => { startedListener = listener; },
       onOutput: () => {},
       onError: (listener) => { errorListener = listener; },
-      onExit: () => {},
+      onExit: (listener) => { exitListener = listener; },
       write: () => true,
       waitForDrain: async () => {},
       endInput: () => {},
@@ -456,6 +488,7 @@ test("force-stops a session when its backend reports a fatal error", async () =>
       interrupt: () => {},
       stop: (force) => {
         stoppedWithForce = force;
+        exitListener?.({ exitCode: 1, signal: null });
         return true;
       },
     }),
@@ -472,6 +505,128 @@ test("force-stops a session when its backend reports a fatal error", async () =>
   assert.equal(result.status, "failed");
   assert.equal(result.error, "controlled_backend_failure");
   assert.equal(stoppedWithForce, true);
+});
+
+test("keeps a failed session workspace reserved until backend exit is confirmed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-terminal-delayed-exit-"));
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  const descriptor: TerminalBackendDescriptor = {
+    kind: "process-pipes",
+    implementationId: "delayed-exit-test-pipes-v1",
+    protocol: "separate-pipes",
+    capabilities: {
+      tty: false,
+      interactive: true,
+      resize: false,
+      signals: false,
+      utf8: true,
+      exitStatus: true,
+    },
+  };
+  let startedListener: (() => void) | undefined;
+  let errorListener: ((error: Error) => void) | undefined;
+  let exitListener: ((result: { exitCode: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
+  const backend: TerminalBackend = {
+    descriptor,
+    create: (): TerminalBackendSession => ({
+      descriptor,
+      pid: 45,
+      inputClosed: false,
+      start: () => {
+        startedListener?.();
+        errorListener?.(new Error("controlled_delayed_failure"));
+      },
+      onStarted: (listener) => { startedListener = listener; },
+      onOutput: () => {},
+      onError: (listener) => { errorListener = listener; },
+      onExit: (listener) => { exitListener = listener; },
+      write: () => true,
+      waitForDrain: async () => {},
+      endInput: () => {},
+      resize: () => {},
+      interrupt: () => {},
+      stop: () => {
+        setTimeout(() => exitListener?.({ exitCode: 1, signal: null }), 50);
+        return true;
+      },
+    }),
+  };
+  const terminals = new TerminalSessionManager(workspaceRoot, { backend });
+  const workspace = await workspaces.create({ workspaceId: "W1", contractId: "C1", roleId: "executor" });
+  const first = await terminals.start(request(workspace));
+
+  await assert.rejects(
+    terminals.start(request(workspace, {
+      terminalSessionId: "T-delayed-collision",
+      agentInstanceId: "A-delayed-collision",
+    })),
+    /workspace_already_in_use/,
+  );
+  const result = await first.completion;
+  assert.equal(result.status, "failed");
+  assert.equal(result.error, "controlled_delayed_failure");
+});
+
+test("keeps a partially started session reserved until its delayed physical exit", async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-terminal-partial-start-"));
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  const descriptor: TerminalBackendDescriptor = {
+    kind: "process-pipes",
+    implementationId: "partial-start-test-pipes-v1",
+    protocol: "separate-pipes",
+    capabilities: {
+      tty: false,
+      interactive: true,
+      resize: false,
+      signals: false,
+      utf8: true,
+      exitStatus: true,
+    },
+  };
+  let exitListener: ((result: { exitCode: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
+  let forcedStop = false;
+  const backend: TerminalBackend = {
+    descriptor,
+    create: (): TerminalBackendSession => ({
+      descriptor,
+      pid: 46,
+      inputClosed: false,
+      start: () => {
+        setTimeout(() => exitListener?.({ exitCode: 1, signal: null }), 50);
+        throw new Error("controlled_partial_start_failure");
+      },
+      onStarted: () => {},
+      onOutput: () => {},
+      onError: () => {},
+      onExit: (listener) => { exitListener = listener; },
+      write: () => true,
+      waitForDrain: async () => {},
+      endInput: () => {},
+      resize: () => {},
+      interrupt: () => {},
+      stop: (force) => {
+        forcedStop = force;
+        return true;
+      },
+    }),
+  };
+  const terminals = new TerminalSessionManager(workspaceRoot, { backend });
+  const workspace = await workspaces.create({ workspaceId: "W1", contractId: "C1", roleId: "executor" });
+  const first = await terminals.start(request(workspace));
+
+  await assert.rejects(
+    terminals.start(request(workspace, {
+      terminalSessionId: "T-partial-collision",
+      agentInstanceId: "A-partial-collision",
+    })),
+    /workspace_already_in_use/,
+  );
+  const result = await first.completion;
+  assert.equal(forcedStop, true);
+  assert.equal(result.status, "failed");
+  assert.equal(result.error, "terminal_backend_start_failed");
 });
 
 test("refuses workspace sharing, binding mismatch and operator-owned directories", async () => {

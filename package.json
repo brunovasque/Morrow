@@ -8,9 +8,13 @@
     "demo:v0": "node --experimental-strip-types src/demo.ts",
     "contract:reconcile": "node --experimental-strip-types src/contract-reconciler.ts",
     "worker:host": "node --experimental-strip-types src/local-worker-host.ts",
-    "probe:codex-quota": "node --experimental-strip-types src/probes/codex-quota.ts"
+    "probe:codex-quota": "node --experimental-strip-types src/probes/codex-quota.ts",
+    "probe:conpty": "node --experimental-strip-types --test test/windows-conpty-backend.test.ts"
   },
   "engines": {
     "node": ">=22.6"
+  },
+  "dependencies": {
+    "node-pty": "1.1.0"
   }
 }
