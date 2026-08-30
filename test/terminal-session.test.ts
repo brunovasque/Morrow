@@ -6,6 +6,9 @@ import test from "node:test";
 import {
   TerminalSessionManager,
   ManagedTerminalRuntimeAdapter,
+  type TerminalBackend,
+  type TerminalBackendDescriptor,
+  type TerminalBackendSession,
   type TerminalSessionEvent,
   type TerminalSessionRequest,
 } from "../src/terminal-session.ts";
@@ -69,7 +72,27 @@ test("streams agent output before its real OS process exits", async () => {
   assert.equal(result.stdout, "EARLY:LATE");
   assert.equal(result.workspaceRoot, workspace.root);
   assert.equal(result.backend, "process-pipes");
-  assert.deepEqual(result.capabilities, { tty: false, interactive: true, resize: false });
+  assert.deepEqual(result.capabilities, {
+    tty: false,
+    interactive: true,
+    resize: false,
+    signals: false,
+    utf8: true,
+    exitStatus: true,
+  });
+  assert.equal(result.backendImplementationId, "node-child-process-pipes-v1");
+  assert.equal(result.terminalProtocol, "separate-pipes");
+  assert.deepEqual(result.presentation, {
+    mode: "process-output",
+    fullTerminal: false,
+    missing: [
+      "backend:windows-conpty",
+      "protocol:conpty-vt",
+      "capability:tty",
+      "capability:resize",
+      "capability:signals",
+    ],
+  });
   assert.ok(events.some((event) => event.type === "TERMINAL_SESSION_STARTED"));
   assert.ok(events.some((event) => event.type === "TERMINAL_SESSION_EXITED"));
 });
@@ -166,6 +189,289 @@ test("keeps interactive input addressed to one agent terminal", async () => {
     .find((event) => event.type === "TERMINAL_INPUT_WRITTEN");
   assert.deepEqual(inputEvent?.payload, { bytes: 13 });
   assert.equal(JSON.stringify(inputEvent).includes("evidence-only"), false);
+});
+
+test("refuses resize, interrupt and full-terminal presentation on process pipes", async () => {
+  const { workspaces, terminals } = await harness();
+  const workspace = await workspaces.create({
+    workspaceId: "W1",
+    contractId: "C1",
+    roleId: "executor",
+  });
+  const handle = await terminals.start(request(workspace, {
+    args: ["-e", "setTimeout(()=>{}, 5_000)"],
+  }));
+
+  assert.throws(() => terminals.resize(handle.terminalSessionId, 100, 40), /terminal_resize_not_supported/);
+  assert.throws(() => terminals.resize(handle.terminalSessionId, 32_768, 40), /terminal_dimensions_invalid/);
+  assert.throws(
+    () => terminals.interrupt(handle.terminalSessionId, "sigterm" as "ctrl-c"),
+    /terminal_interrupt_kind_invalid/,
+  );
+  assert.throws(() => terminals.interrupt(handle.terminalSessionId, "ctrl-c"), /terminal_interrupt_not_supported/);
+  assert.equal(terminals.snapshot(handle.terminalSessionId).presentation.mode, "process-output");
+
+  assert.equal(terminals.stop(handle.terminalSessionId), true);
+  await handle.completion;
+});
+
+test("refuses a backend session that changes capabilities before start", async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-terminal-backend-mismatch-"));
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  let forcedStop = false;
+  const backend: TerminalBackend = {
+    descriptor: {
+      kind: "process-pipes",
+      implementationId: "controlled-test-pipes-v1",
+      protocol: "separate-pipes",
+      capabilities: {
+        tty: false,
+        interactive: true,
+        resize: false,
+        signals: false,
+        utf8: true,
+        exitStatus: true,
+      },
+    },
+    create: (): TerminalBackendSession => ({
+      descriptor: {
+        kind: "windows-conpty",
+        implementationId: "forged-conpty-v1",
+        protocol: "conpty-vt",
+        capabilities: {
+          tty: true,
+          interactive: true,
+          resize: true,
+          signals: true,
+          utf8: true,
+          exitStatus: true,
+        },
+      },
+      pid: null,
+      inputClosed: false,
+      start: () => {},
+      onStarted: () => {},
+      onOutput: () => {},
+      onError: () => {},
+      onExit: () => {},
+      write: () => true,
+      waitForDrain: async () => {},
+      endInput: () => {},
+      resize: () => {},
+      interrupt: () => {},
+      stop: (force) => {
+        forcedStop = force;
+        return true;
+      },
+    }),
+  };
+  const terminals = new TerminalSessionManager(workspaceRoot, { backend });
+  const workspace = await workspaces.create({
+    workspaceId: "W1",
+    contractId: "C1",
+    roleId: "executor",
+  });
+
+  await assert.rejects(
+    terminals.start(request(workspace)),
+    /terminal_backend_descriptor_changed_for_session/,
+  );
+  assert.equal(forcedStop, true);
+  assert.equal(terminals.list().length, 0);
+});
+
+test("attaches every observer before a backend can emit its first output", async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-terminal-early-output-"));
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  const descriptor: TerminalBackendDescriptor = {
+    kind: "process-pipes",
+    implementationId: "synchronous-test-pipes-v1",
+    protocol: "separate-pipes",
+    capabilities: {
+      tty: false,
+      interactive: true,
+      resize: false,
+      signals: false,
+      utf8: true,
+      exitStatus: true,
+    },
+  };
+  let startedListener: (() => void) | undefined;
+  let outputListener: ((stream: "stdout", data: string) => void) | undefined;
+  let errorListener: ((error: Error) => void) | undefined;
+  let exitListener: ((result: { exitCode: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
+  const backend: TerminalBackend = {
+    descriptor,
+    create: (): TerminalBackendSession => ({
+      descriptor,
+      pid: 42,
+      inputClosed: false,
+      start: () => {
+        assert.ok(startedListener);
+        assert.ok(outputListener);
+        assert.ok(errorListener);
+        assert.ok(exitListener);
+        outputListener("stdout", "EARLY");
+        startedListener();
+        exitListener({ exitCode: 0, signal: null });
+      },
+      onStarted: (listener) => { startedListener = listener; },
+      onOutput: (listener) => {
+        outputListener = listener as (stream: "stdout", data: string) => void;
+      },
+      onError: (listener) => { errorListener = listener; },
+      onExit: (listener) => { exitListener = listener; },
+      write: () => true,
+      waitForDrain: async () => {},
+      endInput: () => {},
+      resize: () => {},
+      interrupt: () => {},
+      stop: () => true,
+    }),
+  };
+  const terminals = new TerminalSessionManager(workspaceRoot, { backend });
+  const workspace = await workspaces.create({
+    workspaceId: "W1",
+    contractId: "C1",
+    roleId: "executor",
+  });
+
+  const handle = await terminals.start(request(workspace));
+  const result = await handle.completion;
+  assert.equal(result.status, "completed");
+  assert.equal(result.stdout, "EARLY");
+  assert.equal(
+    terminals.history(handle.terminalSessionId)
+      .filter((event) => event.type === "TERMINAL_OUTPUT").length,
+    1,
+  );
+});
+
+test("fails closed when a backend emits a stream forbidden by its protocol", async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-terminal-stream-violation-"));
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  const descriptor: TerminalBackendDescriptor = {
+    kind: "process-pipes",
+    implementationId: "invalid-stream-test-pipes-v1",
+    protocol: "separate-pipes",
+    capabilities: {
+      tty: false,
+      interactive: true,
+      resize: false,
+      signals: false,
+      utf8: true,
+      exitStatus: true,
+    },
+  };
+  let startedListener: (() => void) | undefined;
+  let outputListener: ((stream: "terminal", data: string) => void) | undefined;
+  let stoppedWithForce = false;
+  const backend: TerminalBackend = {
+    descriptor,
+    create: (): TerminalBackendSession => ({
+      descriptor,
+      pid: 43,
+      inputClosed: false,
+      start: () => {
+        startedListener?.();
+        outputListener?.("terminal", "forged-terminal-stream");
+      },
+      onStarted: (listener) => { startedListener = listener; },
+      onOutput: (listener) => {
+        outputListener = listener as (stream: "terminal", data: string) => void;
+      },
+      onError: () => {},
+      onExit: () => {},
+      write: () => true,
+      waitForDrain: async () => {},
+      endInput: () => {},
+      resize: () => {},
+      interrupt: () => {},
+      stop: (force) => {
+        stoppedWithForce = force;
+        return true;
+      },
+    }),
+  };
+  const terminals = new TerminalSessionManager(workspaceRoot, { backend });
+  const workspace = await workspaces.create({
+    workspaceId: "W1",
+    contractId: "C1",
+    roleId: "executor",
+  });
+
+  const handle = await terminals.start(request(workspace));
+  const result = await handle.completion;
+  assert.equal(result.status, "failed");
+  assert.equal(result.error, "terminal_backend_output_protocol_violation");
+  assert.equal(stoppedWithForce, true);
+  assert.equal(
+    terminals.history(handle.terminalSessionId)
+      .some((event) => event.type === "TERMINAL_OUTPUT"),
+    false,
+  );
+});
+
+test("force-stops a session when its backend reports a fatal error", async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-terminal-backend-error-"));
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  const descriptor: TerminalBackendDescriptor = {
+    kind: "process-pipes",
+    implementationId: "fatal-error-test-pipes-v1",
+    protocol: "separate-pipes",
+    capabilities: {
+      tty: false,
+      interactive: true,
+      resize: false,
+      signals: false,
+      utf8: true,
+      exitStatus: true,
+    },
+  };
+  let startedListener: (() => void) | undefined;
+  let errorListener: ((error: Error) => void) | undefined;
+  let stoppedWithForce = false;
+  const backend: TerminalBackend = {
+    descriptor,
+    create: (): TerminalBackendSession => ({
+      descriptor,
+      pid: 44,
+      inputClosed: false,
+      start: () => {
+        startedListener?.();
+        errorListener?.(new Error("controlled_backend_failure"));
+      },
+      onStarted: (listener) => { startedListener = listener; },
+      onOutput: () => {},
+      onError: (listener) => { errorListener = listener; },
+      onExit: () => {},
+      write: () => true,
+      waitForDrain: async () => {},
+      endInput: () => {},
+      resize: () => {},
+      interrupt: () => {},
+      stop: (force) => {
+        stoppedWithForce = force;
+        return true;
+      },
+    }),
+  };
+  const terminals = new TerminalSessionManager(workspaceRoot, { backend });
+  const workspace = await workspaces.create({
+    workspaceId: "W1",
+    contractId: "C1",
+    roleId: "executor",
+  });
+
+  const handle = await terminals.start(request(workspace));
+  const result = await handle.completion;
+  assert.equal(result.status, "failed");
+  assert.equal(result.error, "controlled_backend_failure");
+  assert.equal(stoppedWithForce, true);
 });
 
 test("refuses workspace sharing, binding mismatch and operator-owned directories", async () => {

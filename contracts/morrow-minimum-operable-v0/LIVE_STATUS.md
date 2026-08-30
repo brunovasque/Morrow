@@ -10,25 +10,25 @@
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
 - `active_phase`: `P3`
-- `active_pr_id`: `P3-PR01`
-- `active_route_node`: `CONPTY_SPIKE_AND_ADR`
-- `active_subaction`: `MERGE_PR_10_THEN_START_P3_PR01`
-- `expected_branch_prefix`: `mvo/p3-pr01-`
-- `write_execution_allowed`: `no product write before PR #10 merge; after merge, scoped only to P3-PR01 in a dedicated branch`
-- `next_authorized_action`: `START_P3_PR01`
-- `next_authorized_actor`: `Architect after integration`
+- `active_pr_id`: `P3-PR02`
+- `active_route_node`: `CONPTY_BACKEND_IMPLEMENTATION`
+- `active_subaction`: `MERGE_PR_11_THEN_START_P3_PR02`
+- `expected_branch_prefix`: `mvo/p3-pr02-`
+- `write_execution_allowed`: `no product write before PR #11 merge; after merge, scoped only to P3-PR02 in a dedicated branch`
+- `next_authorized_action`: `START_P3_PR02`
+- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer after integration`
 
 ## Próxima ação exata
 
-Integrar a PR #10 já provada. Depois, iniciar `P3-PR01` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e fazer somente o spike/ADR de PTY/ConPTY mais a interface de backend com capability gate. A PR não implementa ConPTY ainda: ela mede opções, registra a decisão de estado da arte, preserva o backend process-pipes e impede que a interface o apresente como terminal completo.
+Integrar a PR #11 já provada. Depois, iniciar somente `P3-PR02` em nova branch dedicada nascida da `phase-2/runtime-v0` atualizada e implementar/provar o backend ConPTY conforme o gate de `ADR_WINDOWS_TERMINAL_BACKEND.md`: PowerShell persistente, output inicial, UTF-8/VT, input, resize, interrupts, exit, drainage e cleanup. Nenhum trabalho P3-PR02 pode começar antes do merge.
 
-P2-PR06 foi revisada no head remoto `8a6bd6e`, com testes focados `21/21`, suíte completa `130/130`, 14 arquivos previstos, merge state `CLEAN`, nenhum check remoto configurado e parecer `GREEN`. Mantenha `GPT-5.6 Sol / xhigh` para P3-PR01, porque a escolha de ConPTY e da fronteira de terminal é uma decisão arquitetural e de segurança. Nenhuma escrita de P3-PR01 está autorizada antes da integração da PR #10; Enova e qualquer target externo continuam proibidos.
+P3-PR01 passou testes focados `16/16`, suíte completa `141/141`, diff check e revisão adversarial final `GREEN`. O head remoto `8817f03` foi revalidado com mergeable `true`, state `clean`, 11 arquivos previstos e nenhum check remoto configurado. Mantenha `GPT-5.6 Sol / xhigh` para a integração e o início do probe nativo P3-PR02. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P2-INTEGRATION-06` | `integration` | P2-PR06 está provada na PR #10, ainda aberta | integrar PR #10 antes de criar a branch P3-PR01 |
+| `P3-INTEGRATION-01` | `integration` | P3-PR01 está provada na PR #11, ainda aberta | integrar PR #11 antes de criar a branch P3-PR02 |
 
 ## Status por fase
 
@@ -36,8 +36,8 @@ P2-PR06 foi revisada no head remoto `8a6bd6e`, com testes focados `21/21`, suít
 |---|---|---|
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
-| P2 | `READY` | P2-PR06 provada; fechamento da fase aguarda integração da PR #10 |
-| P3 | `BLOCKED` | P3-PR01 aguarda integração da PR #10 |
+| P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
+| P3 | `READY` | P3-PR01 provada; P3-PR02 aguarda integração da PR #11 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
@@ -52,7 +52,8 @@ P2-PR06 foi revisada no head remoto `8a6bd6e`, com testes focados `21/21`, suít
 - Codex quota-session e shims Windows;
 - sessões processuais ao vivo, múltiplas e isoladas;
 - separação canônica dos terminais do operador;
-- 130/130 testes passando após hardening e revisão remota P2-PR06.
+- 130/130 testes passando após hardening e revisão remota P2-PR06;
+- 141/141 testes passando no hardening local P3-PR01.
 
 Isso não autoriza declarar o produto operacional. `PRS.md` define o restante.
 
