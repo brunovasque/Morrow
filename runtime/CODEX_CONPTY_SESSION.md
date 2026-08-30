@@ -2,11 +2,12 @@
 
 - contract: `MORROW-MVO-001`
 - PR-ID: `P3-PR03`
-- estado: `PROVEN`
+- estado: `GREEN_CANDIDATE`
 - base: `1d40eb717bf4f66cf1d532c498279877ae0ec299`
 - candidate de código/teste: `31d2104ed509710431f8486e1f132808e6530dd5`
 - hardening de snapshot da invocação: `e4243ba9a04f5440e1eae8815ea4f4038a8ca413`
 - hardening de status auth exato: `4b197b0df3367c8ecedcf65b8cab0e01dcbf075f`
+- hardening de transporte/limite do prompt: `1864852283da25591dc61742fc61ef4d8631c30e`
 - ambiente medido: Windows build `19045` x64, Node `24.14.1`, Codex CLI `0.147.0`
 
 ## Resultado
@@ -51,7 +52,9 @@ O ambiente do runtime é capturado no construtor do adapter, antes de qualquer i
 
 ## Prompt e eventos
 
-O teste real mostrou que `codex exec -` não recebe EOF confiável ao fechar input sob ConPTY. Por isso P3-PR03 preserva o transporte não interativo medido pelo CLI: o prompt é o último argumento real de `codex exec`.
+O teste real mostrou que `codex exec -` não recebe EOF confiável ao fechar input sob ConPTY. Por isso P3-PR03 preserva o transporte não interativo medido pelo CLI: o prompt é o último argumento real de `codex exec`, sempre depois do terminador de opções `--`. Um prompt iniciado por hífen permanece dado e não pode habilitar flag da CLI.
+
+O mesmo encoder usado pelo backend valida o envelope completo antes do preflight de auth. Se comando, prefixo e prompt excederem o limite ConPTY, a invocação falha explicitamente com `terminal_launch_spec_too_large` sem abrir nenhuma sessão.
 
 Antes do processo iniciar, `TerminalSessionManager` valida e destaca `sensitiveArgIndexes`. No evento `TERMINAL_SESSION_STARTED`, o índice do prompt aparece somente como `[REDACTED]`; mutações posteriores do request não conseguem trocar o argumento nem remover a redaction. Nenhum evento de input persiste o texto.
 

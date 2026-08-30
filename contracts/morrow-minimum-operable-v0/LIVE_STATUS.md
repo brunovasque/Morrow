@@ -10,25 +10,25 @@
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
 - `active_phase`: `P3`
-- `active_pr_id`: `P3-PR04`
-- `active_route_node`: `CONPTY_MULTIPLEXING_AND_CLEANUP`
-- `active_subaction`: `MERGE_PR_13_THEN_START_P3_PR04`
+- `active_pr_id`: `P3-PR03`
+- `active_route_node`: `CODEX_QUOTA_SESSION_IN_CONPTY`
+- `active_subaction`: `P3_PR03_REMOTE_P1_P2_CORRECTIONS_LOCAL_GREEN`
 - `expected_branch_prefix`: `mvo/p3-pr03-`
-- `write_execution_allowed`: `no product write before PR #13 merge; after merge, scoped only to P3-PR04 in a new dedicated branch`
-- `next_authorized_action`: `START_P3_PR04`
-- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer after integration`
+- `write_execution_allowed`: `yes, scoped only to P3-PR03 corrections in the existing dedicated branch`
+- `next_authorized_action`: `START_P3_PR03`
+- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer`
 
 ## Próxima ação exata
 
-Integrar a PR #13 já provada. Depois, sincronizar `phase-2/runtime-v0`, executar regressão pós-merge e iniciar somente `P3-PR04` em nova branch dedicada para provar multiplexing, cleanup, timeout/cancel e colisões sob múltiplas sessões. Nenhum trabalho P3-PR04 pode começar antes do merge.
+Executar a suíte completa e o reconciliador sobre o hardening `1864852`; publicar a correção na PR #13, responder aos comentários P1/P2 e revalidar mecanicamente base/branch/SHA/diff/checks antes de qualquer novo fechamento `GREEN/PROVEN`.
 
-P3-PR03 passou probe Codex/ConPTY real, baseline quota, probe ConPTY `5/5`, testes focados `22/22`, suíte completa `155/155`, diff check e revisão adversarial final `GREEN`. O head remoto final `39faeaf` foi revalidado com mergeable `true`, state `clean`, 15 arquivos previstos e nenhum check remoto configurado. Dez achados foram corrigidos, incluindo snapshot pré-await e status auth positivo exato. Enova e qualquer target externo continuam proibidos.
+Os comentários remotos tardios P1 `3890154247` e P2 `3890154252` invalidaram o fechamento anterior: um prompt iniciado por opção podia habilitar flag da CLI, e um prompt longo podia estourar o envelope do launcher com erro mascarado. `1864852` adiciona terminador `--`, encoder compartilhado e recusa antes de auth; probe real verde e focados com backend `28/28`. A unidade está novamente `RUNNING/GREEN_CANDIDATE` até suíte completa, publicação e revalidação remota. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P3-INTEGRATION-03` | `integration` | P3-PR03 está provada na PR #13, ainda aberta | integrar PR #13 antes de criar a branch P3-PR04 |
+| `none` | `none` | nenhum bloqueio ativo; correções P1/P2 estão verdes localmente | publicar e revalidar o head exato da P3-PR03 antes do merge |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ P3-PR03 passou probe Codex/ConPTY real, baseline quota, probe ConPTY `5/5`, test
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `READY` | P3-PR03 provada; P3-PR04 aguarda integração da PR #13 |
+| P3 | `RUNNING` | P3-PR03 reaberta por comentários remotos P1/P2; correção local `1864852` aguarda gates/publicação |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |

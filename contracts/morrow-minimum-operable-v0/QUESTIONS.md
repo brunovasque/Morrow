@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhum do dono; P3-PR03 está `PROVEN` e P3-PR04 aguarda somente a integração sequencial da PR #13
+- bloqueio atual: nenhum do dono; P3-PR03 foi reaberta por comentários remotos P1/P2, corrigidos localmente em `1864852`, e aguarda suíte/publicação/revalidação
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 
