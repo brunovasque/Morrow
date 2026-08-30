@@ -5,6 +5,7 @@
 - estado: `GREEN_CANDIDATE`
 - base: `1d40eb717bf4f66cf1d532c498279877ae0ec299`
 - candidate de código/teste: `31d2104ed509710431f8486e1f132808e6530dd5`
+- hardening de snapshot da invocação: `e4243ba9a04f5440e1eae8815ea4f4038a8ca413`
 - ambiente medido: Windows build `19045` x64, Node `24.14.1`, Codex CLI `0.147.0`
 
 ## Resultado
@@ -43,7 +44,7 @@ Não existe busca de outro provider, runtime, modo de acesso ou backend. Falha d
 
 ## Ambiente e autenticação
 
-O ambiente do runtime é capturado no construtor do adapter, antes de qualquer invocação, e reduzido a uma allowlist de caminhos do sistema, diretórios de perfil necessários à sessão Codex, `CODEX_HOME` quando configurado e PATH para a resolução segura do shim instalado. Valores arbitrários do dispatch não atravessam a fronteira; mutar o objeto de configuração depois da construção não rebinda a sessão.
+O ambiente do runtime é capturado no construtor do adapter, antes de qualquer invocação, e reduzido a uma allowlist de caminhos do sistema, diretórios de perfil necessários à sessão Codex, `CODEX_HOME` quando configurado e PATH para a resolução segura do shim instalado. Valores arbitrários do dispatch não atravessam a fronteira; mutar o objeto de configuração depois da construção não rebinda a sessão. Cada invocação também é destacada antes do primeiro `await`, impedindo troca tardia de prompt, identidades ou workspace durante o preflight.
 
 `OPENAI_API_KEY`, `CODEX_API_KEY` e `OPENAI_BASE_URL` são recusados sem depender de caixa. A prova não lê arquivo de autenticação, não imprime token e não entrega material de credencial ao prompt. A própria CLI usa sua sessão local e só o status público “Logged in using ChatGPT” é interpretado.
 
