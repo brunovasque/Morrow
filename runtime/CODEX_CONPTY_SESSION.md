@@ -18,7 +18,7 @@ A execução real mediu:
 - modelo efetivo `gpt-5.6-sol`;
 - `approval: never`, `sandbox: read-only` e reasoning effort efetivo `none`;
 - backend `windows-conpty`, protocolo `conpty-vt` e apresentação `full-terminal`;
-- seis eventos de output da sessão principal antes da conclusão;
+- eventos de output da sessão principal antes da conclusão;
 - cwd exatamente igual ao workspace gerenciado;
 - resposta esperada, exit `0` e nenhuma mutação da fixture.
 
