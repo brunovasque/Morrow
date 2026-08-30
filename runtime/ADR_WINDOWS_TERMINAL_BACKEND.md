@@ -1,6 +1,6 @@
 # ADR — backend de terminal real no Windows
 
-- status: `IMPLEMENTED_FOR_P3_PR02_REVIEW`
+- status: `IMPLEMENTED_AND_PROVEN_P3_PR02`
 - contract: `MORROW-MVO-001`
 - decision owner: técnica de rota; não muda o destino aprovado
 - decision date: `2026-08-29`
@@ -148,4 +148,4 @@ Quatro limites reais do adapter e da integração foram encontrados e cercados s
 
 Para limitar stop e falhas ao processo correto, o comando não nasce solto: um launcher inerte é atribuído primeiro a um Job Object próprio com `KILL_ON_JOB_CLOSE`, e somente então cria o comando governado. A prova cria um descendente de longa duração e confirma que ele desaparece junto da sessão. Nenhum processo do console do operador é enumerado ou adotado.
 
-O candidate P3-PR02 mantém `useConpty: true`, `useConptyDll: false` e não introduz fallback. O diff remoto inicial recebeu revisão adversarial e correções locais com probe `5/5` e suíte `149/149`; o estado desta ADR permanece “em revisão” até o novo head ser publicado e revalidado. Os detalhes estão em `WINDOWS_CONPTY_BACKEND.md`.
+O candidate P3-PR02 mantém `useConpty: true`, `useConptyDll: false` e não introduz fallback. O diff remoto inicial recebeu revisão adversarial, as correções passaram probe `5/5` e suíte `149/149`, e o head remoto corrigido `c32fcb1` foi revalidado `MERGEABLE/CLEAN`. Esta ADR está provada para P3-PR02; qualquer upgrade da versão fixa reabre o gate. Os detalhes estão em `WINDOWS_CONPTY_BACKEND.md`.

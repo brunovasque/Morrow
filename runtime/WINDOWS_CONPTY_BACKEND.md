@@ -2,7 +2,7 @@
 
 - contract: `MORROW-MVO-001`
 - PR-ID: `P3-PR02`
-- estado: `GREEN_CANDIDATE`
+- estado: `GREEN`
 - base: `6168adebeac7fdeb1620e22785eee99b51b17b25`
 - ambiente host medido: Windows build `19045` x64, Node `24.14.1`, PowerShell `7.6.4`
 

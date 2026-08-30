@@ -10,25 +10,25 @@
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
 - `active_phase`: `P3`
-- `active_pr_id`: `P3-PR02`
-- `active_route_node`: `CONPTY_BACKEND_IMPLEMENTATION`
-- `active_subaction`: `P3_PR02_REMOTE_REVIEW_CORRECTIONS_LOCAL_GREEN`
+- `active_pr_id`: `P3-PR03`
+- `active_route_node`: `CODEX_QUOTA_SESSION_IN_CONPTY`
+- `active_subaction`: `MERGE_PR_12_THEN_START_P3_PR03`
 - `expected_branch_prefix`: `mvo/p3-pr02-`
-- `write_execution_allowed`: `yes, scoped only to P3-PR02 in a dedicated branch`
-- `next_authorized_action`: `START_P3_PR02`
-- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer`
+- `write_execution_allowed`: `no product write before PR #12 merge; after merge, scoped only to P3-PR03 in a new dedicated branch`
+- `next_authorized_action`: `START_P3_PR03`
+- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer after integration`
 
 ## Próxima ação exata
 
-Publicar as correções adversariais da `P3-PR02` na PR [`#12`](https://github.com/brunovasque/Morrow/pull/12), confirmar base `phase-2/runtime-v0`, branch `mvo/p3-pr02-conpty-backend` e novo head exato, e reexecutar os gates contra esse head remoto. Não iniciar P3-PR03 e não marcar P3-PR02 como `PROVEN` antes da revalidação e integração.
+Integrar a PR #12 já provada. Depois, sincronizar `phase-2/runtime-v0`, executar regressão pós-merge e iniciar somente `P3-PR03` em nova branch dedicada: executar Codex quota-session pelo terminal ConPTY gerenciado sem extrair credencial/API, com stream, cwd isolado e metadata do runtime. Nenhum trabalho P3-PR03 pode começar antes do merge.
 
-O head remoto inicial `85b755c` foi revisado integralmente. A primeira suíte reproduziu um cruzamento de ambiente/histórico do operador (`146/147`) e a revisão encontrou também falha pós-spawn sem observer, liberação antecipada de handles/cwd e fallback de helper por PATH. O commit local `29974cf` corrige essas superfícies; probe Windows real `5/5`, suíte completa `149/149` e contraprovas de 512 KiB/removibilidade do workspace estão verdes. A revisão em `reviews/P3-PR02.md` permanece `GREEN_CANDIDATE` somente até publicação e revalidação remota. Enova e qualquer target externo continuam proibidos.
+P3-PR02 passou probe Windows real `5/5`, suíte completa `149/149`, diff check e revisão adversarial final `GREEN`. O head remoto corrigido `c32fcb1` foi revalidado com mergeable `true`, state `clean`, 20 arquivos previstos e nenhum check remoto configurado. O comentário remoto P1 sobre espera do Job Controller foi corrigido por `29974cf` e coberto por drainage/removibilidade do workspace. Enova e qualquer target externo continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `none` | `none` | nenhum bloqueio ativo; correções da revisão remota estão verdes localmente | publicar somente P3-PR02 e revalidar o head remoto exato antes do merge |
+| `P3-INTEGRATION-02` | `integration` | P3-PR02 está provada na PR #12, ainda aberta | integrar PR #12 antes de criar a branch P3-PR03 |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ O head remoto inicial `85b755c` foi revisado integralmente. A primeira suíte re
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `RUNNING` | PR #12 sobre `6168ade`; correções adversariais `29974cf` com probe 5/5 e suíte 149/149 aguardam publicação/revalidação remota |
+| P3 | `READY` | P3-PR02 provada; P3-PR03 aguarda integração da PR #12 |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
