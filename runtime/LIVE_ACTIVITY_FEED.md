@@ -2,6 +2,7 @@
 
 - contract: `MORROW-MVO-001`
 - PR-ID: `P4-PR01`
+- estado: `GREEN_CANDIDATE`
 - schema: `morrow.live-activity` `1.0`
 - artefato: `schema/live-activity.v1.schema.json`
 
