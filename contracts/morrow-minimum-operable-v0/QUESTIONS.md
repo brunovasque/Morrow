@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhum; P3-PR04 está `PROVEN` após merge/regressão e P4-PR01 aguarda apenas integração sequencial deste fechamento documental
+- bloqueio atual: nenhum; P3-PR04 está `PROVEN` e P4-PR01 está `RUNNING` na branch dedicada autorizada pelo mapa
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 
