@@ -12,17 +12,17 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR02`
 - `active_route_node`: `STREAM_REDACTION_RETENTION_TRANSCRIPT`
-- `active_subaction`: `MERGE_P4_PR01_POST_MERGE_PROOF_THEN_START_P4_PR02`
-- `expected_branch_prefix`: `mvo/p4-pr01-`
-- `write_execution_allowed`: `no product write until the P4-PR01 post-merge proof is integrated; then yes, scoped only to P4-PR02 in a new dedicated branch`
+- `active_subaction`: `P4_PR02_REDACT_BEFORE_PERSISTENCE_AND_APPLY_RETENTION`
+- `expected_branch_prefix`: `mvo/p4-pr02-`
+- `write_execution_allowed`: `yes, scoped only to P4-PR02 in a dedicated branch`
 - `next_authorized_action`: `START_P4_PR02`
 - `next_authorized_actor`: `Architect/Executor/Test Designer/Security Reviewer`
 
 ## Próxima ação exata
 
-Publicar e integrar esta prova pós-merge estritamente documental da P4-PR01. Depois de sincronizar a integração, iniciar P4-PR02 em nova branch dedicada para Stream Redactor, retenção e transcript persistente.
+Implementar e provar em P4-PR02 um Stream Redactor fail-closed, política explícita de retenção e transcript persistente que nunca grave nem devolva segredos/entrada sensível antes de storage ou futura UI.
 
-Base integrada e sincronizada: `312bd90016931f7be76810a89e79d32043253dde`. P4-PR01 está `PROVEN`: PR #16 integrada, `npm ci`, focados 8/8 e suíte 172/172 verdes pós-merge. Replay/API/UI continuam fora da P4-PR02 e pertencem às PRs P4/P5 subsequentes.
+Base integrada e sincronizada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. P4-PR01 permanece `PROVEN`; P4-PR02 está `RUNNING` somente na branch `mvo/p4-pr02-stream-redaction-transcript`. Replay/cursores/liveness/API/UI continuam fora desta unidade.
 
 ## Bloqueios atuais
 
@@ -38,7 +38,7 @@ Base integrada e sincronizada: `312bd90016931f7be76810a89e79d32043253dde`. P4-PR
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR01 `PROVEN` em `312bd90`; P4-PR02 é a próxima unidade determinística |
+| P4 | `RUNNING` | P4-PR01 `PROVEN`; P4-PR02 implementa redaction, retenção e transcript persistente |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |
