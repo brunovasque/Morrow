@@ -22,7 +22,7 @@
 
 Publicar as três correções materiais da revisão remota, responder os comentários e revalidar o head exato da PR #18 antes de restaurar `GREEN`; `PROVEN` continua condicionado ao merge e à regressão pós-merge.
 
-Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. Após dois passes remotos e hardenings de redaction/lease/root/load, o terceiro passe sobre `80bd394` encontrou recovery guard órfão após crash e writer reidratado fora da allowlist. `20044db` troca o guard por named-pipe mutex do Windows e reaplica autorização no load, com contraprovas. Focused 11/11 e suíte 183/183 estão verdes localmente. `D-013` preserva o falso vermelho intermitente de PID host/descendant sem alterar P3 nesta unidade.
+Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. O quarto passe remoto sobre `8d5f49f` encontrou propriedades quoted e credencial após Authorization scheme. `35079ab` aceita chaves quoted e redige authorization não quoted até CR/LF, com contraprovas de retorno e disco. Focused 11/11 e suíte 183/183 estão verdes localmente. `D-013` preserva o falso vermelho intermitente de PID host/descendant sem alterar P3 nesta unidade.
 
 ## Bloqueios atuais
 
