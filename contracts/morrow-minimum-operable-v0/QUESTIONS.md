@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhum do dono; P3-PR03 está `PROVEN` após corrigir/revalidar os comentários P1/P2, e P3-PR04 aguarda somente a integração sequencial da PR #13
+- bloqueio atual: nenhum; P3-PR04 está `GREEN_CANDIDATE` local e segue para publicação/revisão remota sem decisão do dono pendente
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 

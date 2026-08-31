@@ -14,11 +14,11 @@ import {
 } from "../src/terminal-session.ts";
 import { LocalWorkspaceManager, type WorkspaceDescriptor } from "../src/workspace-manager.ts";
 
-async function harness() {
+async function harness(options: { maxConcurrentSessions?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "morrow-terminal-sessions-"));
   const workspaceRoot = join(root, "managed-workspaces");
   const workspaces = new LocalWorkspaceManager(workspaceRoot);
-  const terminals = new TerminalSessionManager(workspaceRoot);
+  const terminals = new TerminalSessionManager(workspaceRoot, options);
   return { root, workspaceRoot, workspaces, terminals };
 }
 
@@ -147,23 +147,94 @@ test("runs multiple agent sessions simultaneously in distinct workspaces", async
     contractId: "C1",
     roleId: "reviewer",
   });
-
+  const diagnosticianWorkspace = await workspaces.create({
+    workspaceId: "diagnostician-W1",
+    contractId: "C1",
+    roleId: "diagnostician",
+  });
   const executor = await terminals.start(request(executorWorkspace, {
     args: ["-e", "setTimeout(()=>process.stdout.write(process.cwd()), 150)"],
   }));
   const reviewer = await terminals.start(request(reviewerWorkspace, {
     args: ["-e", "setTimeout(()=>process.stdout.write(process.cwd()), 150)"],
   }));
+  const diagnostician = await terminals.start(request(diagnosticianWorkspace, {
+    args: ["-e", "setTimeout(()=>process.stdout.write(process.cwd()), 150)"],
+  }));
 
-  assert.equal(terminals.list().filter((session) => session.status === "running" || session.status === "starting").length, 2);
-
-  const [executorResult, reviewerResult] = await Promise.all([
+  assert.equal(terminals.list().filter((session) => session.status === "running" || session.status === "starting").length, 3);
+  const [executorResult, reviewerResult, diagnosticianResult] = await Promise.all([
     executor.completion,
     reviewer.completion,
+    diagnostician.completion,
   ]);
   assert.equal(executorResult.stdout, executorWorkspace.root);
   assert.equal(reviewerResult.stdout, reviewerWorkspace.root);
+  assert.equal(diagnosticianResult.stdout, diagnosticianWorkspace.root);
   assert.notEqual(executorResult.pid, reviewerResult.pid);
+  assert.notEqual(reviewerResult.pid, diagnosticianResult.pid);
+});
+
+test("reserves terminal, agent and workspace identities across concurrent start races", async () => {
+  const runRace = async (
+    collision: "terminal" | "agent" | "workspace",
+    expected: RegExp,
+  ) => {
+    const { workspaces, terminals } = await harness();
+    const firstWorkspace = await workspaces.create({
+      workspaceId: `W-${collision}-1`,
+      contractId: "C1",
+      roleId: "executor",
+    });
+    const secondWorkspace = await workspaces.create({
+      workspaceId: `W-${collision}-2`,
+      contractId: "C1",
+      roleId: "reviewer",
+    });
+    const attempts = await Promise.allSettled([
+      terminals.start(request(firstWorkspace, {
+        terminalSessionId: `T-${collision}-shared`,
+        agentInstanceId: `A-${collision}-shared`,
+        timeoutMs: 300,
+        args: ["-e", "setTimeout(()=>{},5000)"],
+      })),
+      terminals.start(request(collision === "workspace" ? firstWorkspace : secondWorkspace, {
+        terminalSessionId: collision === "terminal" ? `T-${collision}-shared` : `T-${collision}-other`,
+        agentInstanceId: collision === "agent" ? `A-${collision}-shared` : `A-${collision}-other`,
+        timeoutMs: 300,
+        args: ["-e", "setTimeout(()=>{},5000)"],
+      })),
+    ]);
+    const fulfilled = attempts.filter((attempt) => attempt.status === "fulfilled");
+    await Promise.all(fulfilled.map((attempt) => attempt.value.completion));
+    const rejected = attempts.filter((attempt) => attempt.status === "rejected");
+    assert.equal(fulfilled.length, 1);
+    assert.equal(rejected.length, 1);
+    assert.match(String(rejected[0].reason), expected);
+  };
+
+  await runRace("terminal", /terminal_session_id_already_exists/);
+  await runRace("agent", /agent_instance_already_has_active_terminal/);
+  await runRace("workspace", /workspace_already_in_use/);
+
+  const { workspaces, terminals } = await harness({ maxConcurrentSessions: 2 });
+  const capacityWorkspaces = await Promise.all(["one", "two", "three"].map((suffix) => (
+    workspaces.create({ workspaceId: `W-capacity-${suffix}`, contractId: "C1", roleId: "executor" })
+  )));
+  const capacityAttempts = await Promise.allSettled(capacityWorkspaces.map((workspace, index) => (
+    terminals.start(request(workspace, {
+      terminalSessionId: `T-capacity-${index}`,
+      agentInstanceId: `A-capacity-${index}`,
+      timeoutMs: 300,
+      args: ["-e", "setTimeout(()=>{},5000)"],
+    }))
+  )));
+  const capacityAccepted = capacityAttempts.filter((attempt) => attempt.status === "fulfilled");
+  await Promise.all(capacityAccepted.map((attempt) => attempt.value.completion));
+  const capacityRejected = capacityAttempts.filter((attempt) => attempt.status === "rejected");
+  assert.equal(capacityAccepted.length, 2);
+  assert.equal(capacityRejected.length, 1);
+  assert.match(String(capacityRejected[0].reason), /terminal_session_capacity_exhausted/);
 });
 
 test("keeps interactive input addressed to one agent terminal", async () => {
@@ -538,6 +609,65 @@ test("force-stops a session when its backend reports a fatal error", async () =>
   assert.equal(result.status, "failed");
   assert.equal(result.error, "controlled_backend_failure");
   assert.equal(stoppedWithForce, true);
+});
+
+test("stops only once when fatal cleanup synchronously reports another error", async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-terminal-reentrant-error-"));
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  const descriptor: TerminalBackendDescriptor = {
+    kind: "process-pipes",
+    implementationId: "reentrant-error-test-pipes-v1",
+    protocol: "separate-pipes",
+    capabilities: {
+      tty: false,
+      interactive: true,
+      resize: false,
+      signals: false,
+      utf8: true,
+      exitStatus: true,
+    },
+  };
+  let startedListener: (() => void) | undefined;
+  let errorListener: ((error: Error) => void) | undefined;
+  let stopCalls = 0;
+  const backend: TerminalBackend = {
+    descriptor,
+    create: (): TerminalBackendSession => ({
+      descriptor,
+      pid: 45,
+      inputClosed: false,
+      start: () => {
+        startedListener?.();
+        errorListener?.(new Error("primary_backend_failure"));
+      },
+      onStarted: (listener) => { startedListener = listener; },
+      onOutput: () => {},
+      onError: (listener) => { errorListener = listener; },
+      onExit: () => {},
+      write: () => true,
+      waitForDrain: async () => {},
+      endInput: () => {},
+      resize: () => {},
+      interrupt: () => {},
+      stop: () => {
+        stopCalls += 1;
+        errorListener?.(new Error("cleanup_backend_failure"));
+        return false;
+      },
+    }),
+  };
+  const terminals = new TerminalSessionManager(workspaceRoot, { backend });
+  const workspace = await workspaces.create({
+    workspaceId: "W1",
+    contractId: "C1",
+    roleId: "executor",
+  });
+
+  const result = await (await terminals.start(request(workspace))).completion;
+  assert.equal(result.status, "failed");
+  assert.equal(result.error, "primary_backend_failure");
+  assert.equal(stopCalls, 1);
 });
 
 test("keeps a failed session workspace reserved until backend exit is confirmed", async () => {

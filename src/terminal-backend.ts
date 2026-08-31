@@ -43,6 +43,8 @@ export interface TerminalBackendExit {
 export interface TerminalBackendSession {
   readonly descriptor: TerminalBackendDescriptor;
   readonly pid: number | null;
+  /** Process that owns native terminal state when isolation requires one. */
+  readonly isolationProcessId?: number | null;
   readonly inputClosed: boolean;
   /** Starts execution only after every observer below has been registered. */
   start(): void;

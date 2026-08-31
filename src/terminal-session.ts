@@ -14,6 +14,8 @@ import {
   type TerminalProtocol,
 } from "./terminal-backend.ts";
 
+const PROVEN_WINDOWS_CONPTY_MAX_CONCURRENT_SESSIONS = 2;
+
 export type {
   TerminalBackend,
   TerminalBackendDescriptor,
@@ -72,6 +74,7 @@ export type TerminalSessionEvent =
       type: "TERMINAL_SESSION_STARTED";
       payload: {
         pid: number | null;
+        backendHostPid: number | null;
         cwd: string;
         command: string;
         args: string[];
@@ -187,6 +190,7 @@ interface SessionRecord {
   timedOut: boolean;
   stopped: boolean;
   settled: boolean;
+  failureStopRequested: boolean;
   historyTruncated: boolean;
   events: TerminalSessionEvent[];
   stdout: string;
@@ -200,6 +204,7 @@ interface SessionRecord {
 export class TerminalSessionManager {
   private readonly managedWorkspaceRoot: string;
   private readonly maxEventsPerSession: number;
+  private readonly maxConcurrentSessions: number;
   private readonly backend: TerminalBackend;
   private readonly backendDescriptor: TerminalBackendDescriptor;
   private readonly sessions = new Map<string, SessionRecord>();
@@ -210,14 +215,31 @@ export class TerminalSessionManager {
 
   constructor(
     managedWorkspaceRoot: string,
-    options: { maxEventsPerSession?: number; backend?: TerminalBackend } = {},
+    options: {
+      maxEventsPerSession?: number;
+      maxConcurrentSessions?: number;
+      backend?: TerminalBackend;
+    } = {},
   ) {
     this.managedWorkspaceRoot = resolve(managedWorkspaceRoot);
-    this.maxEventsPerSession = options.maxEventsPerSession ?? 5_000;
     this.backend = options.backend ?? new ProcessPipesTerminalBackend();
     this.backendDescriptor = validateTerminalBackendDescriptor(this.backend.descriptor);
+    this.maxEventsPerSession = options.maxEventsPerSession ?? 5_000;
+    this.maxConcurrentSessions = options.maxConcurrentSessions
+      ?? (this.backendDescriptor.kind === "windows-conpty"
+        ? PROVEN_WINDOWS_CONPTY_MAX_CONCURRENT_SESSIONS
+        : Number.MAX_SAFE_INTEGER);
     if (!Number.isInteger(this.maxEventsPerSession) || this.maxEventsPerSession <= 0) {
       throw new Error("max_events_per_session_must_be_positive");
+    }
+    if (!Number.isInteger(this.maxConcurrentSessions) || this.maxConcurrentSessions <= 0) {
+      throw new Error("max_concurrent_sessions_must_be_positive");
+    }
+    if (
+      this.backendDescriptor.kind === "windows-conpty"
+      && this.maxConcurrentSessions > PROVEN_WINDOWS_CONPTY_MAX_CONCURRENT_SESSIONS
+    ) {
+      throw new Error("windows_conpty_max_concurrent_sessions_exceeded");
     }
   }
 
@@ -241,8 +263,19 @@ export class TerminalSessionManager {
     }
 
     const workspaceRoot = await this.resolveManagedWorkspace(request);
+    // Filesystem validation yields. Recheck logical identities after it so two
+    // concurrent starts cannot both cross the pre-await collision gate.
+    if (this.sessions.has(request.terminalSessionId)) {
+      throw new Error("terminal_session_id_already_exists");
+    }
+    if (this.activeAgentInstances.has(request.agentInstanceId)) {
+      throw new Error("agent_instance_already_has_active_terminal");
+    }
     if (this.activeWorkspaceRoots.has(workspaceRoot)) {
       throw new Error("workspace_already_in_use");
+    }
+    if (this.activeAgentInstances.size >= this.maxConcurrentSessions) {
+      throw new Error("terminal_session_capacity_exhausted");
     }
 
     let resolveCompletion!: (result: TerminalSessionResult) => void;
@@ -300,6 +333,7 @@ export class TerminalSessionManager {
       timedOut: false,
       stopped: false,
       settled: false,
+      failureStopRequested: false,
       historyTruncated: false,
       events: [],
       stdout: "",
@@ -403,6 +437,7 @@ export class TerminalSessionManager {
       record.startedAt = new Date().toISOString();
       this.emit(record, "TERMINAL_SESSION_STARTED", {
         pid: backendSession.pid,
+        backendHostPid: backendSession.isolationProcessId ?? null,
         cwd: record.workspaceRoot,
         command: request.command,
         args: redactSensitiveArgs(request.args, request.sensitiveArgIndexes),
@@ -598,6 +633,8 @@ export class TerminalSessionManager {
 
   private failAndStop(record: SessionRecord, error: string): void {
     this.markFailed(record, error);
+    if (record.failureStopRequested) return;
+    record.failureStopRequested = true;
     let stopAccepted = false;
     try {
       stopAccepted = record.backendSession.stop(true);

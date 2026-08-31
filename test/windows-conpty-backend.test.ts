@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, fork } from "node:child_process";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { resolveTerminalPresentation } from "../src/terminal-backend.ts";
 import { TerminalSessionManager, type TerminalSessionEvent } from "../src/terminal-session.ts";
 import {
+  createNativeWindowsConptyTerminalSession,
   inspectWindowsConptySupport,
   resolveWindowsPowerShellPath,
   WindowsConptyTerminalBackend,
@@ -15,6 +16,56 @@ import {
 import { LocalWorkspaceManager } from "../src/workspace-manager.ts";
 
 const windowsConptyAvailable = inspectWindowsConptySupport().available;
+
+test("native ConPTY session refuses use outside its isolated host entrypoint", () => {
+  assert.throws(() => createNativeWindowsConptyTerminalSession({
+    command: process.execPath,
+    args: [],
+    cwd: process.cwd(),
+    env: {},
+  }), /windows_conpty_native_session_requires_isolated_host/);
+});
+
+test("native ConPTY host stays failed after an invalid IPC command", async () => {
+  const hostPath = fileURLToPath(new URL("../src/windows-conpty-native-host.ts", import.meta.url));
+  const child = fork(hostPath, [], {
+    cwd: process.cwd(),
+    env: {},
+    execArgv: ["--experimental-strip-types"],
+    serialization: "json",
+    stdio: ["ignore", "ignore", "pipe", "ipc"],
+    windowsHide: true,
+  });
+  const events: unknown[] = [];
+  child.on("message", (event) => events.push(event));
+  const processError = new Promise<Error | null>((resolvePromise) => {
+    child.once("error", resolvePromise);
+    child.once("close", () => resolvePromise(null));
+  });
+  child.send({ type: "end-input", unexpected: true }, () => {});
+  child.send({
+    type: "initialize",
+    request: { command: process.execPath, args: [], cwd: process.cwd(), env: {} },
+  }, () => {});
+  const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolvePromise) => {
+    child.once("close", (code, signal) => resolvePromise({ code, signal }));
+  });
+
+  assert.equal(await processError, null);
+  assert.deepEqual(exit, { code: 1, signal: null });
+  assert.equal(events.some((event) => (
+    event !== null
+    && typeof event === "object"
+    && "type" in event
+    && event.type === "started"
+  )), false);
+  assert.equal(events.some((event) => (
+    event !== null
+    && typeof event === "object"
+    && "type" in event
+    && event.type === "error"
+  )), true);
+});
 
 async function controlledWindowsEnvironment(workspaceRoot: string): Promise<Record<string, string>> {
   const profileRoot = join(workspaceRoot, ".morrow-test-profile");
@@ -57,6 +108,136 @@ test("ConPTY support gate refuses platform, architecture, build and package drif
   ]);
   assert.equal(Object.isFrozen(support), true);
   assert.equal(Object.isFrozen(support.reasons), true);
+});
+
+test("Windows ConPTY refuses concurrency above the measured MVO capacity", {
+  skip: !windowsConptyAvailable,
+}, () => {
+  assert.throws(() => new TerminalSessionManager(join(tmpdir(), "morrow-unproven-conpty-capacity"), {
+    backend: new WindowsConptyTerminalBackend(),
+    maxConcurrentSessions: 3,
+  }), /windows_conpty_max_concurrent_sessions_exceeded/);
+});
+
+test("simultaneous ConPTY exits use distinct native host processes", {
+  skip: !windowsConptyAvailable,
+  timeout: 20_000,
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-conpty-host-isolation-"));
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  const firstWorkspace = await workspaces.create({ workspaceId: "W1", contractId: "C1", roleId: "executor" });
+  const secondWorkspace = await workspaces.create({ workspaceId: "W2", contractId: "C1", roleId: "reviewer" });
+  const terminals = new TerminalSessionManager(workspaceRoot, { backend: new WindowsConptyTerminalBackend() });
+  const startEvents: Array<Extract<TerminalSessionEvent, { type: "TERMINAL_SESSION_STARTED" }>> = [];
+  terminals.subscribe((event) => {
+    if (event.type === "TERMINAL_SESSION_STARTED") startEvents.push(event);
+  });
+  const childScript = [
+    "process.stdin.setEncoding('utf8')",
+    "process.stdout.write('__MORROW_HOST_READY__\\n')",
+    "process.stdin.once('data',()=>{process.stdout.write('__MORROW_HOST_EXIT__\\n');process.exit(0)})",
+  ].join(";");
+  const start = async (suffix: string, workspace: typeof firstWorkspace) => terminals.start({
+    terminalSessionId: `T-${suffix}`,
+    agentInstanceId: `A-${suffix}`,
+    contractId: "C1",
+    roleId: suffix === "one" ? "executor" : "reviewer",
+    runtimeId: "native-host-isolation",
+    accessMode: "local",
+    workspaceId: workspace.workspaceId,
+    workspace,
+    command: process.execPath,
+    args: ["-e", childScript],
+    env: await controlledWindowsEnvironment(workspace.root),
+    timeoutMs: 10_000,
+  });
+  const [first, second] = await Promise.all([
+    start("one", firstWorkspace),
+    start("two", secondWorkspace),
+  ]);
+
+  await Promise.all([
+    terminals.write(first.terminalSessionId, "exit-now\r"),
+    terminals.write(second.terminalSessionId, "exit-now\r"),
+  ]);
+  const results = await Promise.all([first.completion, second.completion]);
+
+  assert.deepEqual(results.map((result) => result.status), ["completed", "completed"]);
+  assert.equal(results.every((result) => result.stdout.includes("__MORROW_HOST_EXIT__")), true);
+  assert.equal(startEvents.length, 2);
+  const terminalPids = startEvents.map((event) => event.payload.pid);
+  const hostPids = startEvents.map((event) => event.payload.backendHostPid);
+  assert.equal(new Set(terminalPids).size, 2);
+  assert.equal(new Set(hostPids).size, 2);
+  assert.equal(hostPids.every((pid) => pid !== null && pid !== process.pid && !terminalPids.includes(pid)), true);
+  assert.equal([...terminalPids, ...hostPids].every((pid) => pid !== null && !processIsAlive(pid)), true);
+});
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("native host termination is contained to its managed ConPTY tree", {
+  skip: !windowsConptyAvailable,
+  timeout: 20_000,
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-conpty-host-crash-"));
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  const workspace = await workspaces.create({ workspaceId: "W1", contractId: "C1", roleId: "executor" });
+  const terminals = new TerminalSessionManager(workspaceRoot, { backend: new WindowsConptyTerminalBackend() });
+  let output = "";
+  let startEvent: Extract<TerminalSessionEvent, { type: "TERMINAL_SESSION_STARTED" }> | null = null;
+  terminals.subscribe((event) => {
+    if (event.type === "TERMINAL_OUTPUT") output += event.payload.data;
+    if (event.type === "TERMINAL_SESSION_STARTED") startEvent = event;
+  });
+  const childScript = [
+    "const {spawn}=require('node:child_process')",
+    "const child=spawn(process.execPath,['-e','setTimeout(()=>{},60000)'],{stdio:'ignore',windowsHide:true})",
+    "process.stdout.write('__MORROW_CRASH_TREE_'+child.pid+'__\\n')",
+    "setInterval(()=>{},60000)",
+  ].join(";");
+  const handle = await terminals.start({
+    terminalSessionId: "T-crash",
+    agentInstanceId: "A-crash",
+    contractId: "C1",
+    roleId: "executor",
+    runtimeId: "native-host-crash-containment",
+    accessMode: "local",
+    workspaceId: workspace.workspaceId,
+    workspace,
+    command: process.execPath,
+    args: ["-e", childScript],
+    env: await controlledWindowsEnvironment(workspace.root),
+    timeoutMs: 15_000,
+  });
+  const markerDeadline = Date.now() + 8_000;
+  while (!/__MORROW_CRASH_TREE_(\d+)__/.test(output)) {
+    if (Date.now() >= markerDeadline) throw new Error(`host_crash_marker_timeout:${JSON.stringify(output)}`);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  const descendantPid = Number.parseInt(output.match(/__MORROW_CRASH_TREE_(\d+)__/)![1], 10);
+  assert.ok(startEvent);
+  const terminalPid = startEvent.payload.pid;
+  const hostPid = startEvent.payload.backendHostPid;
+  assert.ok(terminalPid && hostPid);
+  process.kill(hostPid);
+
+  const result = await handle.completion;
+  assert.equal(result.status, "failed");
+  assert.match(result.error ?? "", /terminal_conpty_host_exited/);
+  const cleanupDeadline = Date.now() + 5_000;
+  while ([terminalPid, hostPid, descendantPid].some(processIsAlive) && Date.now() < cleanupDeadline) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  assert.equal([terminalPid, hostPid, descendantPid].every((pid) => !processIsAlive(pid)), true);
 });
 
 test("real Windows ConPTY preserves state, terminal bytes, resize and both interrupts", {
@@ -119,6 +300,10 @@ public static class MorrowSignalProbe
     fullTerminal: true,
     missing: [],
   });
+  assert.equal(
+    backend.descriptor.implementationId,
+    "node-pty-1.1.0-system-conpty-job-process-host-v3",
+  );
 
   const terminals = new TerminalSessionManager(workspaceRoot, { backend });
   const events: TerminalSessionEvent[] = [];
@@ -225,6 +410,14 @@ public static class MorrowSignalProbe
         .map((event) => event.type === "TERMINAL_INTERRUPT_REQUESTED" && event.payload.kind),
       ["ctrl-c", "ctrl-break"],
     );
+    const startEvents = events.filter((event) => event.type === "TERMINAL_SESSION_STARTED");
+    assert.equal(startEvents.length, 3);
+    assert.equal(startEvents.every((event) => (
+      event.type === "TERMINAL_SESSION_STARTED"
+      && Number.isInteger(event.payload.backendHostPid)
+      && (event.payload.backendHostPid ?? 0) > 0
+      && event.payload.backendHostPid !== event.payload.pid
+    )), true);
   } finally {
     terminals.stop(handle.terminalSessionId);
   }
@@ -323,4 +516,55 @@ test("an immediate stop cannot release the governed command during startup", {
   const result = await handle.completion;
   assert.equal(result.status, "stopped");
   assert.equal(result.stdout.includes("__COMMAND_MUST_NOT_RUN__"), false);
+});
+
+test("real Windows ConPTY multiplexes sessions and cleans timeout, cancel and descendants", {
+  skip: !windowsConptyAvailable,
+  timeout: 45_000,
+}, async () => {
+  const probePath = fileURLToPath(new URL("../src/probes/conpty-multiplex.ts", import.meta.url));
+  const result = await new Promise<{ stdout: string; stderr: string }>((resolvePromise, reject) => {
+    execFile(
+      process.execPath,
+      ["--experimental-strip-types", probePath],
+      { cwd: process.cwd(), timeout: 40_000, windowsHide: true },
+      (error, stdout, stderr) => error
+        ? reject(new Error(`conpty_multiplex_probe_failed:${stderr}`, { cause: error }))
+        : resolvePromise({ stdout, stderr }),
+    );
+  });
+  assert.equal(result.stderr, "");
+  const proof = JSON.parse(result.stdout.trim()) as {
+    ok: boolean;
+    rounds: number;
+    sessions: number;
+    completed: number;
+    timedOut: number;
+    stopped: number;
+    collisionRefusals: number;
+    distinctRootPids: number;
+    distinctDescendantPids: number;
+    distinctNativeHostPids: number;
+    identityBoundEvents: number;
+    inputIsolation: boolean;
+    noOrphans: boolean;
+    fixtureRemoved: boolean;
+  };
+  assert.deepEqual(proof, {
+    ok: true,
+    rounds: 3,
+    sessions: 12,
+    completed: 6,
+    timedOut: 3,
+    stopped: 3,
+    collisionRefusals: 12,
+    distinctRootPids: 12,
+    distinctDescendantPids: 12,
+    distinctNativeHostPids: 12,
+    identityBoundEvents: proof.identityBoundEvents,
+    inputIsolation: true,
+    noOrphans: true,
+    fixtureRemoved: true,
+  });
+  assert.ok(proof.identityBoundEvents >= 48);
 });

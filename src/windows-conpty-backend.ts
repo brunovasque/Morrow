@@ -1,4 +1,4 @@
-import { spawn as spawnProcess, type ChildProcess } from "node:child_process";
+import { fork as forkProcess, spawn as spawnProcess, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { release } from "node:os";
@@ -10,6 +10,7 @@ import type {
   TerminalBackendDescriptor,
   TerminalBackendExit,
   TerminalBackendSession,
+  TerminalBackendSpawnRequest,
   TerminalInterrupt,
   TerminalOutputStream,
 } from "./terminal-backend.ts";
@@ -20,6 +21,7 @@ const SCRIPT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../scripts
 const DEFAULT_CONTROL_HELPER = resolve(SCRIPT_ROOT, "windows-console-control.ps1");
 const DEFAULT_JOB_CONTROLLER = resolve(SCRIPT_ROOT, "windows-job-controller.ps1");
 const DEFAULT_LAUNCHER = resolve(SCRIPT_ROOT, "windows-conpty-launcher.mjs");
+const DEFAULT_SESSION_HOST = resolve(dirname(fileURLToPath(import.meta.url)), "windows-conpty-native-host.ts");
 const SYSTEM_POWERSHELL = resolveWindowsPowerShellPath();
 const MAX_WINDOWS_CONPTY_LAUNCH_SPEC_LENGTH = 24_000;
 
@@ -33,7 +35,7 @@ export function encodeWindowsConptyLaunchSpec(command: string, args: readonly st
 
 const WINDOWS_CONPTY_DESCRIPTOR: TerminalBackendDescriptor = Object.freeze({
   kind: "windows-conpty",
-  implementationId: "node-pty-1.1.0-system-conpty-job-v2",
+  implementationId: "node-pty-1.1.0-system-conpty-job-process-host-v3",
   protocol: "conpty-vt",
   capabilities: Object.freeze({
     tty: true,
@@ -112,31 +114,257 @@ export class WindowsConptyTerminalBackend implements TerminalBackend {
   readonly descriptor = WINDOWS_CONPTY_DESCRIPTOR;
 
   constructor() {
-    const support = inspectWindowsConptySupport();
-    if (!support.available) {
-      throw new Error(`windows_conpty_backend_unavailable:${support.reasons.join(",")}`);
-    }
-    for (const [label, path] of [
-      ["control_helper", DEFAULT_CONTROL_HELPER],
-      ["job_controller", DEFAULT_JOB_CONTROLLER],
-      ["launcher", DEFAULT_LAUNCHER],
-      ["system_powershell", SYSTEM_POWERSHELL],
-    ] as const) {
-      if (!existsSync(path)) throw new Error(`windows_conpty_${label}_missing`);
-    }
+    assertWindowsConptyRuntime();
   }
 
   create(request: Parameters<TerminalBackend["create"]>[0]): TerminalBackendSession {
-    return new WindowsConptyTerminalSession(request, this.descriptor, {
-      controlHelperPath: DEFAULT_CONTROL_HELPER,
-      jobControllerPath: DEFAULT_JOB_CONTROLLER,
-      launcherPath: DEFAULT_LAUNCHER,
-      powershellCommand: SYSTEM_POWERSHELL,
-    });
+    return new WindowsConptyHostSession(request, this.descriptor, DEFAULT_SESSION_HOST);
   }
 }
 
-class WindowsConptyTerminalSession implements TerminalBackendSession {
+function assertWindowsConptyRuntime(): void {
+  const support = inspectWindowsConptySupport();
+  if (!support.available) {
+    throw new Error(`windows_conpty_backend_unavailable:${support.reasons.join(",")}`);
+  }
+  for (const [label, path] of [
+    ["control_helper", DEFAULT_CONTROL_HELPER],
+    ["job_controller", DEFAULT_JOB_CONTROLLER],
+    ["launcher", DEFAULT_LAUNCHER],
+    ["session_host", DEFAULT_SESSION_HOST],
+    ["system_powershell", SYSTEM_POWERSHELL],
+  ] as const) {
+    if (!existsSync(path)) throw new Error(`windows_conpty_${label}_missing`);
+  }
+}
+
+export function createNativeWindowsConptyTerminalSession(
+  request: TerminalBackendSpawnRequest,
+): TerminalBackendSession {
+  if (
+    !process.connected
+    || resolve(process.argv[1] ?? "") !== DEFAULT_SESSION_HOST
+  ) {
+    throw new Error("windows_conpty_native_session_requires_isolated_host");
+  }
+  assertWindowsConptyRuntime();
+  return new NativeWindowsConptyTerminalSession(request, WINDOWS_CONPTY_DESCRIPTOR, {
+    controlHelperPath: DEFAULT_CONTROL_HELPER,
+    jobControllerPath: DEFAULT_JOB_CONTROLLER,
+    launcherPath: DEFAULT_LAUNCHER,
+    powershellCommand: SYSTEM_POWERSHELL,
+  });
+}
+
+export type WindowsConptyHostCommand =
+  | { type: "initialize"; request: TerminalBackendSpawnRequest }
+  | { type: "write"; writeId: number; data: string }
+  | { type: "end-input" }
+  | { type: "resize"; columns: number; rows: number }
+  | { type: "interrupt"; kind: TerminalInterrupt }
+  | { type: "stop"; force: boolean };
+
+export type WindowsConptyHostEvent =
+  | { type: "started"; pid: number; hostPid: number }
+  | { type: "output"; stream: TerminalOutputStream; data: string }
+  | { type: "write-complete"; writeId: number }
+  | { type: "error"; error: string }
+  | { type: "exit"; exitCode: number | null; signal: NodeJS.Signals | null };
+
+class WindowsConptyHostSession implements TerminalBackendSession {
+  readonly descriptor: TerminalBackendDescriptor;
+  private readonly request: TerminalBackendSpawnRequest;
+  private readonly hostPath: string;
+  private host: ChildProcess | null = null;
+  private terminalPid: number | null = null;
+  private nativeHostPid: number | null = null;
+  private started = false;
+  private closedInput = false;
+  private exited = false;
+  private pendingExit: TerminalBackendExit | null = null;
+  private hostStderr = "";
+  private nextWriteId = 0;
+  private lastDrain: Promise<void> = Promise.resolve();
+  private readonly writeAcks = new Map<number, {
+    resolve: () => void;
+    reject: (error: Error) => void;
+  }>();
+  private readonly startedListeners: Array<() => void> = [];
+  private readonly outputListeners: Array<(stream: TerminalOutputStream, data: string) => void> = [];
+  private readonly errorListeners: Array<(error: Error) => void> = [];
+  private readonly exitListeners: Array<(result: TerminalBackendExit) => void> = [];
+
+  constructor(
+    request: TerminalBackendSpawnRequest,
+    descriptor: TerminalBackendDescriptor,
+    hostPath: string,
+  ) {
+    this.request = {
+      command: request.command,
+      args: [...request.args],
+      cwd: request.cwd,
+      env: { ...request.env },
+    };
+    this.descriptor = descriptor;
+    this.hostPath = hostPath;
+  }
+
+  get pid(): number | null { return this.terminalPid; }
+  get isolationProcessId(): number | null { return this.nativeHostPid; }
+  get inputClosed(): boolean { return this.closedInput || this.exited; }
+
+  start(): void {
+    if (this.started) throw new Error("terminal_backend_session_already_started");
+    this.started = true;
+    const host = forkProcess(this.hostPath, [], {
+      cwd: this.request.cwd,
+      env: helperEnvironment(),
+      execArgv: ["--experimental-strip-types"],
+      serialization: "json",
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+      windowsHide: true,
+    });
+    this.host = host;
+    host.stderr?.setEncoding("utf8");
+    host.stderr?.on("data", (chunk: string) => {
+      this.hostStderr = (this.hostStderr + chunk).slice(-4_096);
+    });
+    host.on("message", (message) => this.handleHostMessage(message));
+    host.once("error", (error) => this.emitError(new Error("terminal_conpty_host_process_error", { cause: error })));
+    host.once("close", (exitCode, signal) => this.handleHostClose(exitCode, signal));
+    if (!this.sendHost({ type: "initialize", request: this.request })) {
+      this.emitError(new Error("terminal_conpty_host_initialize_backpressure"));
+    }
+  }
+
+  onStarted(listener: () => void): void { this.assertRegistrationOpen(); this.startedListeners.push(listener); }
+  onOutput(listener: (stream: TerminalOutputStream, data: string) => void): void { this.assertRegistrationOpen(); this.outputListeners.push(listener); }
+  onError(listener: (error: Error) => void): void { this.assertRegistrationOpen(); this.errorListeners.push(listener); }
+  onExit(listener: (result: TerminalBackendExit) => void): void { this.assertRegistrationOpen(); this.exitListeners.push(listener); }
+
+  write(data: string): boolean {
+    if (this.inputClosed) throw new Error("terminal_input_closed");
+    const writeId = ++this.nextWriteId;
+    this.lastDrain = new Promise<void>((resolvePromise, reject) => {
+      this.writeAcks.set(writeId, { resolve: resolvePromise, reject });
+    });
+    if (!this.sendHost({ type: "write", writeId, data })) {
+      const ack = this.writeAcks.get(writeId);
+      this.writeAcks.delete(writeId);
+      ack?.reject(new Error("terminal_conpty_host_write_backpressure"));
+    }
+    // The manager waits until the native host confirms its own input drain.
+    return false;
+  }
+
+  waitForDrain(): Promise<void> { return this.lastDrain; }
+
+  endInput(): void {
+    if (this.inputClosed) return;
+    this.closedInput = true;
+    this.sendHostOrThrow({ type: "end-input" });
+  }
+
+  resize(columns: number, rows: number): void {
+    this.sendHostOrThrow({ type: "resize", columns, rows });
+  }
+
+  interrupt(kind: TerminalInterrupt): void {
+    this.sendHostOrThrow({ type: "interrupt", kind });
+  }
+
+  stop(force: boolean): boolean {
+    if (!this.host || this.exited) return false;
+    this.closedInput = true;
+    if (this.pendingExit) return true;
+    return this.sendHost({ type: "stop", force });
+  }
+
+  private handleHostMessage(value: unknown): void {
+    const message = parseWindowsConptyHostEvent(value);
+    if (!message) {
+      this.emitError(new Error("terminal_conpty_host_protocol_invalid"));
+      this.stop(true);
+      return;
+    }
+    if (message.type === "started") {
+      if (this.terminalPid !== null || this.nativeHostPid !== null) {
+        this.emitError(new Error("terminal_conpty_host_duplicate_start"));
+        this.stop(true);
+        return;
+      }
+      if (message.hostPid !== this.host?.pid || message.pid === message.hostPid) {
+        this.emitError(new Error("terminal_conpty_host_pid_mismatch"));
+        this.stop(true);
+        return;
+      }
+      this.terminalPid = message.pid;
+      this.nativeHostPid = message.hostPid;
+      for (const listener of this.startedListeners) listener();
+      return;
+    }
+    if (message.type === "output") {
+      for (const listener of this.outputListeners) listener(message.stream, message.data);
+      return;
+    }
+    if (message.type === "write-complete") {
+      const ack = this.writeAcks.get(message.writeId);
+      if (!ack) {
+        this.emitError(new Error("terminal_conpty_host_write_ack_unknown"));
+        this.stop(true);
+        return;
+      }
+      this.writeAcks.delete(message.writeId);
+      ack.resolve();
+      return;
+    }
+    if (message.type === "error") {
+      this.emitError(new Error(message.error));
+      return;
+    }
+    this.pendingExit = { exitCode: message.exitCode, signal: message.signal };
+    this.closedInput = true;
+  }
+
+  private handleHostClose(exitCode: number | null, signal: NodeJS.Signals | null): void {
+    if (this.exited) return;
+    this.exited = true;
+    this.closedInput = true;
+    const pendingError = new Error("terminal_conpty_host_closed_before_write_ack");
+    for (const ack of this.writeAcks.values()) ack.reject(pendingError);
+    this.writeAcks.clear();
+    const terminalExit = this.pendingExit;
+    if (!terminalExit) {
+      const stderr = this.hostStderr.trim().replaceAll(/\s+/g, " ").slice(-1_024);
+      this.emitError(new Error(`terminal_conpty_host_exited:${exitCode ?? "null"}:${signal ?? "null"}${stderr ? `:${stderr}` : ""}`));
+    }
+    const result = terminalExit ?? { exitCode: exitCode ?? 1, signal };
+    for (const listener of this.exitListeners) listener(result);
+  }
+
+  private sendHost(command: WindowsConptyHostCommand): boolean {
+    const host = this.host;
+    if (!host?.connected) return false;
+    try {
+      host.send(command, (error) => {
+        if (error) this.emitError(new Error("terminal_conpty_host_send_failed", { cause: error }));
+      });
+      return true;
+    } catch (error) {
+      this.emitError(new Error("terminal_conpty_host_send_failed", { cause: asError(error) }));
+      return false;
+    }
+  }
+
+  private sendHostOrThrow(command: WindowsConptyHostCommand): void {
+    if (!this.sendHost(command)) throw new Error("terminal_conpty_host_not_writable");
+  }
+
+  private emitError(error: Error): void { for (const listener of this.errorListeners) listener(error); }
+  private assertRegistrationOpen(): void { if (this.started) throw new Error("terminal_backend_listener_registration_closed"); }
+}
+
+class NativeWindowsConptyTerminalSession implements TerminalBackendSession {
   readonly descriptor: TerminalBackendDescriptor;
   private readonly request: Parameters<TerminalBackend["create"]>[0];
   private readonly options: {
@@ -417,6 +645,67 @@ function asError(value: unknown): Error { return value instanceof Error ? value 
 function waitForChildExit(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
   return new Promise<void>((resolvePromise) => child.once("close", () => resolvePromise()));
+}
+
+function parseWindowsConptyHostEvent(value: unknown): WindowsConptyHostEvent | null {
+  if (!isPlainDataRecord(value)) return null;
+  const event = value;
+  if (event.type === "started") {
+    return hasExactOwnDataKeys(event, ["type", "pid", "hostPid"])
+      && Number.isSafeInteger(event.pid) && (event.pid as number) > 0
+      && Number.isSafeInteger(event.hostPid) && (event.hostPid as number) > 0
+      ? { type: "started", pid: event.pid as number, hostPid: event.hostPid as number }
+      : null;
+  }
+  if (event.type === "output") {
+    return hasExactOwnDataKeys(event, ["type", "stream", "data"])
+      && (event.stream === "terminal" || event.stream === "stdout" || event.stream === "stderr")
+      && typeof event.data === "string"
+      ? { type: "output", stream: event.stream, data: event.data }
+      : null;
+  }
+  if (event.type === "write-complete") {
+    return hasExactOwnDataKeys(event, ["type", "writeId"])
+      && Number.isSafeInteger(event.writeId) && (event.writeId as number) > 0
+      ? { type: "write-complete", writeId: event.writeId as number }
+      : null;
+  }
+  if (event.type === "error") {
+    return hasExactOwnDataKeys(event, ["type", "error"])
+      && typeof event.error === "string" && event.error.length > 0 && event.error.length <= 4_096
+      ? { type: "error", error: event.error }
+      : null;
+  }
+  if (event.type === "exit") {
+    if (!hasExactOwnDataKeys(event, ["type", "exitCode", "signal"])) return null;
+    const validExitCode = event.exitCode === null || Number.isInteger(event.exitCode);
+    const validSignal = event.signal === null || (typeof event.signal === "string" && /^SIG[A-Z0-9]+$/.test(event.signal));
+    return validExitCode && validSignal
+      ? {
+          type: "exit",
+          exitCode: event.exitCode as number | null,
+          signal: event.signal as NodeJS.Signals | null,
+        }
+      : null;
+  }
+  return null;
+}
+
+function isPlainDataRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function hasExactOwnDataKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== expected.length || keys.some((key) => typeof key !== "string" || !expected.includes(key))) {
+    return false;
+  }
+  return expected.every((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && "value" in descriptor;
+  });
 }
 
 export function resolveWindowsPowerShellPath(
