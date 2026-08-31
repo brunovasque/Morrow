@@ -133,7 +133,11 @@ const genericPatternHoldback = 4_096;
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const canonicalTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const unicodeFormatControlPattern = /^\p{Cf}$/u;
-const assignmentPattern = /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;\r\n]+)/giu;
+const assignmentPatterns = [
+  /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*"[^"\r\n]*(?:"|$)/giu,
+  /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*'[^'\r\n]*(?:'|$)/giu,
+  /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*(?!["'])[^\s,;\r\n]+/giu,
+] as const;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/giu;
 const commonTokenPatterns = [
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/gu,
@@ -169,8 +173,8 @@ export class StreamRedactor {
           typeof literal !== "string"
           || literal.length < 4
           || literal.length > maximumLiteralLength
-          || literal === TRANSCRIPT_REDACTION_PLACEHOLDER
-          || literal === SENSITIVE_INPUT_PLACEHOLDER
+          || markerConflictsWithLiteral(TRANSCRIPT_REDACTION_PLACEHOLDER, literal)
+          || markerConflictsWithLiteral(SENSITIVE_INPUT_PLACEHOLDER, literal)
         ) throw transcriptError("redaction_literal_invalid");
         if (!literals.includes(literal)) literals.push(literal);
       }
@@ -228,11 +232,11 @@ export class StreamRedactor {
       collectLiteralRanges(text, literal, ranges);
       collectMappedLiteralRanges(terminal, literal, ranges);
     }
-    collectPatternRanges(text, assignmentPattern, ranges);
+    for (const pattern of assignmentPatterns) collectPatternRanges(text, pattern, ranges);
     collectPatternRanges(text, bearerPattern, ranges);
     for (const pattern of commonTokenPatterns) collectPatternRanges(text, pattern, ranges);
     collectPatternRanges(text, privateKeyPattern, ranges);
-    collectMappedPatternRanges(terminal, assignmentPattern, ranges);
+    for (const pattern of assignmentPatterns) collectMappedPatternRanges(terminal, pattern, ranges);
     collectMappedPatternRanges(terminal, bearerPattern, ranges);
     for (const pattern of commonTokenPatterns) collectMappedPatternRanges(terminal, pattern, ranges);
     collectMappedPatternRanges(terminal, privateKeyPattern, ranges);
@@ -913,7 +917,12 @@ function validatePersistedState(
   let previousOrdinal = 0;
   for (let index = 0; index < input.records.length; index += 1) {
     const record = parsePersistedRecord(readDataArrayElement(input.records, index));
-    if (record.ordinal <= previousOrdinal || ids.has(record.recordId) || redactor.redact(record.content).text !== record.content) {
+    if (
+      record.ordinal <= previousOrdinal
+      || ids.has(record.recordId)
+      || Buffer.byteLength(record.content, "utf8") > retention.maxRecordBytes
+      || redactor.redact(record.content).text !== record.content
+    ) {
       throw transcriptError("transcript_snapshot_invalid");
     }
     previousOrdinal = record.ordinal;
@@ -1265,6 +1274,10 @@ function isTranscriptStream(value: unknown): value is TranscriptStream {
 
 function isIdentifier(value: unknown): value is string {
   return typeof value === "string" && identifierPattern.test(value);
+}
+
+function markerConflictsWithLiteral(marker: string, literal: string): boolean {
+  return marker.includes(literal) || literal.includes(marker);
 }
 
 function isCanonicalTimestamp(value: unknown): value is string {

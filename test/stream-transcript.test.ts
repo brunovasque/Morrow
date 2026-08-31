@@ -113,6 +113,27 @@ test("redacts exact literals and token shapes split across stream chunks before 
   assert.equal(invisible.text, "hidden=[REDACTED]");
 });
 
+test("holds an incomplete quoted assignment beyond the stream lookbehind until it can be redacted", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const quotedSecret = `QUOTE_CANARY_${"q".repeat(5_000)}_END`;
+  const writer = store.beginRecord(request("record-long-quoted-assignment"));
+  const fragments = [
+    writer.write(`prefix password="A ${quotedSecret}`),
+    writer.write('" suffix'),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const mirrored = fragments.map((fragment) => fragment.text).join("");
+  assert.equal(mirrored, `prefix ${TRANSCRIPT_REDACTION_PLACEHOLDER} suffix`);
+  assert.doesNotMatch(mirrored, /QUOTE_CANARY/);
+  assert.doesNotMatch(mirrored, /q{256}/);
+  assert.equal(store.inspect("auditor").records[0]?.content, mirrored);
+  await store.close();
+  assert.doesNotMatch(await allFileText(root), /QUOTE_CANARY|q{256}/);
+});
+
 test("persists and returns only redacted output while dropping terminal input by default", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(configuration(root));
@@ -235,6 +256,28 @@ test("rehydrates sanitized records but refuses policy drift and corrupted snapsh
   await assert.rejects(PersistentTranscriptStore.open(configuration(root)), /transcript_snapshot_invalid/);
 });
 
+test("refuses a checksummed snapshot whose individual record exceeds maxRecordBytes", async (t) => {
+  const root = await makeRoot(t);
+  const strictConfiguration = configuration(root, () => baseTime, {
+    retention: { maxAgeMs: 60_000, maxRecords: 4, maxTotalBytes: 128, maxRecordBytes: 32 },
+  });
+  const store = await PersistentTranscriptStore.open(strictConfiguration);
+  await append(store, "record-before-oversized-restart", "safe");
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const parsed = JSON.parse(await readFile(snapshot, "utf8"));
+  parsed.records[0].content = "x".repeat(33);
+  const { checksum: _checksum, ...tamperedState } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(tamperedState)).digest("hex");
+  await writeFile(snapshot, JSON.stringify(parsed), "utf8");
+
+  await assert.rejects(
+    PersistentTranscriptStore.open(strictConfiguration),
+    /transcript_snapshot_invalid/,
+  );
+});
+
 test("allows only one active owner of a transcript root and releases it on orderly close", async (t) => {
   const root = await makeRoot(t);
   const first = await PersistentTranscriptStore.open(configuration(root));
@@ -264,6 +307,16 @@ test("allows only one active owner of a transcript root and releases it on order
 });
 
 test("fails closed on hostile policy collections without invoking accessors", () => {
+  for (const conflictingLiteral of ["REDACT", "SENSITIVE_INPUT", "prefix-[REDACTED]-suffix"]) {
+    assert.throws(
+      () => new StreamRedactor({
+        policyId: "placeholder-conflict-policy",
+        sensitiveLiterals: [conflictingLiteral],
+      }),
+      /redaction_literal_invalid/,
+    );
+  }
+
   let getterCalls = 0;
   const literals: string[] = [];
   Object.defineProperty(literals, "0", {
