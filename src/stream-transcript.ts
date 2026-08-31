@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   lstat,
+  link,
   mkdir,
-  open,
   readFile,
+  readdir,
   realpath,
   rename,
-  stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -112,16 +112,27 @@ interface NormalizedAccessPolicy {
 interface RedactionRange {
   start: number;
   end: number;
+  replacement: "redact" | "drop";
+}
+
+interface NormalizedTerminalText {
+  visible: string;
+  rawStarts: number[];
+  rawEnds: number[];
+  controlRanges: RedactionRange[];
 }
 
 const transcriptFileName = "transcript-v1.json";
 const leaseFileName = ".transcript-v1.lock";
+const rootMarkerFileName = ".morrow-transcript-root.json";
+const rootMarkerFormat = "morrow.transcript-root/1" as const;
 const maximumSnapshotBytes = 16_777_216;
 const maximumLiteralCount = 64;
 const maximumLiteralLength = 4_096;
 const genericPatternHoldback = 4_096;
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const canonicalTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const unicodeFormatControlPattern = /^\p{Cf}$/u;
 const assignmentPattern = /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;\r\n]+)/giu;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/giu;
 const commonTokenPatterns = [
@@ -130,11 +141,13 @@ const commonTokenPatterns = [
   /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/gu,
 ] as const;
 const privateKeyPattern = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/gu;
+const transcriptCommitAuthority = Object.freeze({ kind: "morrow.transcript.commit" });
+const transcriptWriterAuthority = Object.freeze({ kind: "morrow.transcript.writer" });
 
 export class StreamRedactor {
   readonly policyId: string;
-  private readonly literals: readonly string[];
-  private readonly holdback: number;
+  #literals: readonly string[];
+  #holdback: number;
 
   constructor(policy: StreamRedactionPolicy) {
     try {
@@ -162,8 +175,8 @@ export class StreamRedactor {
         if (!literals.includes(literal)) literals.push(literal);
       }
       this.policyId = policyId;
-      this.literals = Object.freeze([...literals]);
-      this.holdback = Math.max(genericPatternHoldback, ...literals.map((literal) => literal.length - 1));
+      this.#literals = Object.freeze([...literals]);
+      this.#holdback = Math.max(genericPatternHoldback, ...literals.map((literal) => literal.length - 1));
     } catch (error) {
       if (isTranscriptError(error)) throw error;
       throw transcriptError("redaction_policy_inspection_failed");
@@ -180,103 +193,110 @@ export class StreamRedactor {
   redact(text: string): RedactedStreamFragment {
     if (typeof text !== "string") throw transcriptError("redaction_text_invalid");
     const ranges = this.ranges(text);
-    return deepFreeze({ text: renderRedacted(text, ranges), redactionCount: ranges.length });
+    return deepFreeze({ text: renderRedacted(text, ranges), redactionCount: countRedactions(ranges) });
   }
 
   release(pending: string, final: boolean): { released: RedactedStreamFragment; remainder: string } {
     const ranges = this.ranges(pending);
     if (final) {
-      return { released: deepFreeze({ text: renderRedacted(pending, ranges), redactionCount: ranges.length }), remainder: "" };
+      return {
+        released: deepFreeze({ text: renderRedacted(pending, ranges), redactionCount: countRedactions(ranges) }),
+        remainder: "",
+      };
     }
-    if (pending.length <= this.holdback) {
+    if (pending.length <= this.#holdback) {
       return { released: deepFreeze({ text: "", redactionCount: 0 }), remainder: pending };
     }
-    let cut = pending.length - this.holdback;
+    let cut = pending.length - this.#holdback;
     for (const range of ranges) {
       if (range.start < cut && range.end > cut) cut = range.start;
     }
     const prefixRanges = ranges.filter((range) => range.end <= cut);
     return {
-      released: deepFreeze({ text: renderRedacted(pending.slice(0, cut), prefixRanges), redactionCount: prefixRanges.length }),
+      released: deepFreeze({
+        text: renderRedacted(pending.slice(0, cut), prefixRanges),
+        redactionCount: countRedactions(prefixRanges),
+      }),
       remainder: pending.slice(cut),
     };
   }
 
   private ranges(text: string): RedactionRange[] {
-    const ranges: RedactionRange[] = [];
-    for (const literal of this.literals) {
-      let offset = 0;
-      while (offset <= text.length - literal.length) {
-        const index = text.indexOf(literal, offset);
-        if (index < 0) break;
-        ranges.push({ start: index, end: index + literal.length });
-        offset = index + Math.max(1, literal.length);
-      }
+    const terminal = normalizeTerminalText(text);
+    const ranges: RedactionRange[] = [...terminal.controlRanges];
+    for (const literal of this.#literals) {
+      collectLiteralRanges(text, literal, ranges);
+      collectMappedLiteralRanges(terminal, literal, ranges);
     }
     collectPatternRanges(text, assignmentPattern, ranges);
     collectPatternRanges(text, bearerPattern, ranges);
     for (const pattern of commonTokenPatterns) collectPatternRanges(text, pattern, ranges);
     collectPatternRanges(text, privateKeyPattern, ranges);
+    collectMappedPatternRanges(terminal, assignmentPattern, ranges);
+    collectMappedPatternRanges(terminal, bearerPattern, ranges);
+    for (const pattern of commonTokenPatterns) collectMappedPatternRanges(terminal, pattern, ranges);
+    collectMappedPatternRanges(terminal, privateKeyPattern, ranges);
     return mergeRanges(ranges);
   }
 }
 
 export class StreamRedactorSession {
-  private readonly redactor: StreamRedactor;
-  private readonly maxPendingBytes: number;
-  private pending = "";
-  private pendingBytes = 0;
-  private finished = false;
+  #redactor: StreamRedactor;
+  #maxPendingBytes: number;
+  #pending = "";
+  #pendingBytes = 0;
+  #finished = false;
 
   constructor(redactor: StreamRedactor, maxPendingBytes: number) {
-    this.redactor = redactor;
-    this.maxPendingBytes = maxPendingBytes;
+    this.#redactor = redactor;
+    this.#maxPendingBytes = maxPendingBytes;
   }
 
   push(chunk: string): RedactedStreamFragment {
-    if (this.finished) throw transcriptError("redaction_session_finished");
+    if (this.#finished) throw transcriptError("redaction_session_finished");
     if (typeof chunk !== "string") throw transcriptError("redaction_chunk_invalid");
     const chunkBytes = Buffer.byteLength(chunk, "utf8");
-    if (this.pendingBytes + chunkBytes > this.maxPendingBytes) {
-      this.finished = true;
-      this.pending = "";
-      this.pendingBytes = 0;
+    if (this.#pendingBytes + chunkBytes > this.#maxPendingBytes) {
+      this.#finished = true;
+      this.#pending = "";
+      this.#pendingBytes = 0;
       throw transcriptError("redaction_pending_capacity_exceeded");
     }
-    this.pending += chunk;
-    this.pendingBytes += chunkBytes;
-    const result = this.redactor.release(this.pending, false);
-    this.pending = result.remainder;
-    this.pendingBytes = Buffer.byteLength(this.pending, "utf8");
+    this.#pending += chunk;
+    this.#pendingBytes += chunkBytes;
+    const result = this.#redactor.release(this.#pending, false);
+    this.#pending = result.remainder;
+    this.#pendingBytes = Buffer.byteLength(this.#pending, "utf8");
     return result.released;
   }
 
   finish(): RedactedStreamFragment {
-    if (this.finished) throw transcriptError("redaction_session_finished");
-    this.finished = true;
-    const result = this.redactor.release(this.pending, true).released;
-    this.pending = "";
-    this.pendingBytes = 0;
+    if (this.#finished) throw transcriptError("redaction_session_finished");
+    this.#finished = true;
+    const result = this.#redactor.release(this.#pending, true).released;
+    this.#pending = "";
+    this.#pendingBytes = 0;
     return result;
   }
 
   abort(): void {
-    this.finished = true;
-    this.pending = "";
-    this.pendingBytes = 0;
+    this.#finished = true;
+    this.#pending = "";
+    this.#pendingBytes = 0;
   }
 }
 
 export class PersistentTranscriptStore {
-  private readonly filePath: string;
-  private readonly retention: TranscriptRetentionPolicy;
-  private readonly access: NormalizedAccessPolicy;
-  private readonly redactor: StreamRedactor;
-  private readonly clock?: () => string | number | Date;
-  private readonly lease: TranscriptLease;
-  private state: TranscriptState;
-  private mutationTail: Promise<void> = Promise.resolve();
-  private closed = false;
+  #filePath: string;
+  #retention: TranscriptRetentionPolicy;
+  #access: NormalizedAccessPolicy;
+  #redactor: StreamRedactor;
+  #clock: (() => string | number | Date) | undefined;
+  #lease: TranscriptLease;
+  #state: TranscriptState;
+  #mutationTail: Promise<void> = Promise.resolve();
+  #closed = false;
+  #closeOperation: Promise<void> | null = null;
 
   private constructor(
     root: string,
@@ -287,13 +307,13 @@ export class PersistentTranscriptStore {
     lease: TranscriptLease,
     state: TranscriptState,
   ) {
-    this.filePath = join(root, transcriptFileName);
-    this.retention = retention;
-    this.access = access;
-    this.redactor = redactor;
-    this.clock = clock;
-    this.lease = lease;
-    this.state = state;
+    this.#filePath = join(root, transcriptFileName);
+    this.#retention = retention;
+    this.#access = access;
+    this.#redactor = redactor;
+    this.#clock = clock;
+    this.#lease = lease;
+    this.#state = state;
   }
 
   static async open(configuration: PersistentTranscriptConfiguration): Promise<PersistentTranscriptStore> {
@@ -307,6 +327,7 @@ export class PersistentTranscriptStore {
     const root = await prepareStateRoot(normalized.stateRoot);
     const lease = await TranscriptLease.acquire(root);
     try {
+      await cleanupOwnedTemps(root);
       const filePath = join(root, transcriptFileName);
       const loaded = await loadState(filePath, normalized.retention, normalized.access, normalized.redactor);
       const now = trustedNow(normalized.clock);
@@ -321,7 +342,7 @@ export class PersistentTranscriptStore {
         lease,
         state,
       );
-      if (loaded) await store.sweepRetentionInternal(now);
+      if (loaded) await store.#sweepRetentionInternal(now);
       return store;
     } catch (error) {
       await lease.release().catch(() => undefined);
@@ -337,58 +358,75 @@ export class PersistentTranscriptStore {
     } catch {
       throw transcriptError("transcript_record_request_invalid");
     }
-    if (!this.access.writerIds.includes(request.writerId)) throw transcriptError("transcript_write_not_authorized");
-    return new TranscriptRecordWriter(this, request, this.redactor.start(this.retention.maxRecordBytes));
+    if (!this.#access.writerIds.includes(request.writerId)) throw transcriptError("transcript_write_not_authorized");
+    return new TranscriptRecordWriter(
+      transcriptWriterAuthority,
+      this,
+      request,
+      this.#redactor.start(this.#retention.maxRecordBytes),
+    );
   }
 
   recordByteLimit(): number {
-    return this.retention.maxRecordBytes;
+    return this.#retention.maxRecordBytes;
   }
 
   inspect(readerId: string): TranscriptView {
     this.assertOpen();
-    if (!isIdentifier(readerId) || !this.access.readerIds.includes(readerId)) {
+    if (!isIdentifier(readerId) || !this.#access.readerIds.includes(readerId)) {
       throw transcriptError("transcript_read_not_authorized");
     }
-    return viewState(this.state);
+    return viewState(this.#state);
   }
 
   async sweepRetention(actorId: string): Promise<readonly string[]> {
     this.assertOpen();
-    if (!isIdentifier(actorId) || !this.access.writerIds.includes(actorId)) {
+    if (!isIdentifier(actorId) || !this.#access.writerIds.includes(actorId)) {
       throw transcriptError("transcript_write_not_authorized");
     }
-    return await this.serialize(async () => await this.sweepRetentionInternal(trustedNow(this.clock)));
+    return await this.#serialize(async () => await this.#sweepRetentionInternal(trustedNow(this.#clock)));
   }
 
   async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    await this.mutationTail.catch(() => undefined);
-    await this.lease.release();
+    if (this.#closeOperation) return await this.#closeOperation;
+    this.#closed = true;
+    this.#closeOperation = (async () => {
+      await this.#mutationTail.catch(() => undefined);
+      await this.#lease.release();
+    })();
+    return await this.#closeOperation;
   }
 
   async commit(
+    authority: object,
     request: TranscriptRecordRequest,
     content: string,
     redactionCount: number,
     sensitiveInput: boolean,
   ): Promise<{ record: TranscriptRecord; evictedRecordIds: readonly string[] }> {
+    if (authority !== transcriptCommitAuthority) throw transcriptError("transcript_commit_not_authorized");
     this.assertOpen();
-    return await this.serialize(async () => {
-      if (Buffer.byteLength(content, "utf8") > this.retention.maxRecordBytes) {
+    return await this.#serialize(async () => {
+      if (!this.#access.writerIds.includes(request.writerId)) {
+        throw transcriptError("transcript_write_not_authorized");
+      }
+      if (Buffer.byteLength(content, "utf8") > this.#retention.maxRecordBytes) {
         throw transcriptError("transcript_record_too_large");
       }
-      if (this.redactor.redact(content).text !== content) {
+      if (
+        this.#redactor.redact(content).text !== content
+        || (request.stream === "input") !== sensitiveInput
+        || (sensitiveInput && content !== SENSITIVE_INPUT_PLACEHOLDER && content !== "")
+      ) {
         throw transcriptError("transcript_content_not_redacted");
       }
-      if (this.state.records.some((record) => record.recordId === request.recordId)) {
+      if (this.#state.records.some((record) => record.recordId === request.recordId)) {
         throw transcriptError("transcript_record_id_conflict");
       }
-      const now = trustedNow(this.clock);
-      if (Date.parse(now) < Date.parse(this.state.updatedAt)) throw transcriptError("transcript_clock_moved_backwards");
+      const now = trustedNow(this.#clock);
+      if (Date.parse(now) < Date.parse(this.#state.updatedAt)) throw transcriptError("transcript_clock_moved_backwards");
       const record: TranscriptRecord = {
-        ordinal: this.state.nextOrdinal,
+        ordinal: this.#state.nextOrdinal,
         recordId: request.recordId,
         contractId: request.contractId,
         stepId: request.stepId,
@@ -401,33 +439,33 @@ export class PersistentTranscriptStore {
         redactionCount,
         sensitiveInput,
       };
-      const draft = cloneState(this.state);
+      const draft = cloneState(this.#state);
       draft.records.push(record);
       draft.nextOrdinal += 1;
       draft.revision += 1;
       draft.updatedAt = now;
       const evictedRecordIds = applyRetention(draft, now);
-      await persistState(this.filePath, draft);
-      this.state = draft;
+      await persistState(this.#filePath, draft);
+      this.#state = draft;
       return deepFreeze({ record: cloneRecord(record), evictedRecordIds: [...evictedRecordIds] });
     });
   }
 
-  private async sweepRetentionInternal(now: string): Promise<readonly string[]> {
-    const draft = cloneState(this.state);
+  async #sweepRetentionInternal(now: string): Promise<readonly string[]> {
+    const draft = cloneState(this.#state);
     const evicted = applyRetention(draft, now);
     if (evicted.length === 0) return Object.freeze([]);
     draft.revision += 1;
     draft.updatedAt = now;
-    await persistState(this.filePath, draft);
-    this.state = draft;
+    await persistState(this.#filePath, draft);
+    this.#state = draft;
     return Object.freeze([...evicted]);
   }
 
-  private async serialize<T>(operation: () => Promise<T>): Promise<T> {
-    const previous = this.mutationTail;
+  async #serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.#mutationTail;
     let release: () => void = () => undefined;
-    this.mutationTail = new Promise<void>((resolvePromise) => { release = resolvePromise; });
+    this.#mutationTail = new Promise<void>((resolvePromise) => { release = resolvePromise; });
     await previous;
     try {
       return await operation();
@@ -437,66 +475,69 @@ export class PersistentTranscriptStore {
   }
 
   private assertOpen(): void {
-    if (this.closed) throw transcriptError("transcript_store_closed");
+    if (this.#closed) throw transcriptError("transcript_store_closed");
   }
 }
 
-export class TranscriptRecordWriter {
-  private readonly store: PersistentTranscriptStore;
-  private readonly request: TranscriptRecordRequest;
-  private readonly session: StreamRedactorSession;
-  private readonly parts: string[] = [];
-  private redactionCount = 0;
-  private rawBytes = 0;
-  private finished = false;
-  private sensitiveMarkerWritten = false;
+class TranscriptRecordWriter {
+  #store: PersistentTranscriptStore;
+  #request: TranscriptRecordRequest;
+  #session: StreamRedactorSession;
+  #parts: string[] = [];
+  #redactionCount = 0;
+  #rawBytes = 0;
+  #finished = false;
+  #sensitiveMarkerWritten = false;
 
   constructor(
+    authority: object,
     store: PersistentTranscriptStore,
     request: TranscriptRecordRequest,
     session: StreamRedactorSession,
   ) {
-    this.store = store;
-    this.request = request;
-    this.session = session;
+    if (authority !== transcriptWriterAuthority) throw transcriptError("transcript_writer_not_authorized");
+    this.#store = store;
+    this.#request = request;
+    this.#session = session;
   }
 
   write(chunk: string): RedactedStreamFragment {
-    if (this.finished) throw transcriptError("transcript_writer_finished");
+    if (this.#finished) throw transcriptError("transcript_writer_finished");
     if (typeof chunk !== "string") throw transcriptError("transcript_chunk_invalid");
-    this.rawBytes += Buffer.byteLength(chunk, "utf8");
-    if (this.rawBytes > this.maximumRecordBytes()) {
+    this.#rawBytes += Buffer.byteLength(chunk, "utf8");
+    if (this.#rawBytes > this.maximumRecordBytes()) {
       this.abort();
       throw transcriptError("transcript_record_too_large");
     }
-    if (this.request.stream === "input") {
-      this.session.abort();
-      const text = this.sensitiveMarkerWritten ? "" : SENSITIVE_INPUT_PLACEHOLDER;
-      this.sensitiveMarkerWritten = true;
-      if (text) this.parts.push(text);
+    if (this.#request.stream === "input") {
+      this.#session.abort();
+      const text = this.#sensitiveMarkerWritten ? "" : SENSITIVE_INPUT_PLACEHOLDER;
+      this.#sensitiveMarkerWritten = true;
+      if (text) this.#parts.push(text);
       return deepFreeze({ text, redactionCount: text ? 1 : 0 });
     }
-    const fragment = this.session.push(chunk);
-    if (fragment.text) this.parts.push(fragment.text);
-    this.redactionCount += fragment.redactionCount;
+    const fragment = this.#session.push(chunk);
+    if (fragment.text) this.#parts.push(fragment.text);
+    this.#redactionCount += fragment.redactionCount;
     return fragment;
   }
 
   async commit(): Promise<TranscriptCommitResult> {
-    if (this.finished) throw transcriptError("transcript_writer_finished");
-    this.finished = true;
-    const finalFragment = this.request.stream === "input"
+    if (this.#finished) throw transcriptError("transcript_writer_finished");
+    this.#finished = true;
+    const finalFragment = this.#request.stream === "input"
       ? deepFreeze({ text: "", redactionCount: 0 })
-      : this.session.finish();
-    if (finalFragment.text) this.parts.push(finalFragment.text);
-    this.redactionCount += finalFragment.redactionCount;
-    const committed = await this.store.commit(
-      this.request,
-      this.parts.join(""),
-      this.request.stream === "input" ? (this.sensitiveMarkerWritten ? 1 : 0) : this.redactionCount,
-      this.request.stream === "input",
+      : this.#session.finish();
+    if (finalFragment.text) this.#parts.push(finalFragment.text);
+    this.#redactionCount += finalFragment.redactionCount;
+    const committed = await this.#store.commit(
+      transcriptCommitAuthority,
+      this.#request,
+      this.#parts.join(""),
+      this.#request.stream === "input" ? (this.#sensitiveMarkerWritten ? 1 : 0) : this.#redactionCount,
+      this.#request.stream === "input",
     );
-    this.parts.length = 0;
+    this.#parts.length = 0;
     return deepFreeze({
       record: committed.record,
       finalFragment,
@@ -505,15 +546,15 @@ export class TranscriptRecordWriter {
   }
 
   abort(): void {
-    if (this.finished) return;
-    this.finished = true;
-    this.session.abort();
-    this.parts.length = 0;
-    this.rawBytes = 0;
+    if (this.#finished) return;
+    this.#finished = true;
+    this.#session.abort();
+    this.#parts.length = 0;
+    this.#rawBytes = 0;
   }
 
   private maximumRecordBytes(): number {
-    return this.store.recordByteLimit();
+    return this.#store.recordByteLimit();
   }
 }
 
@@ -531,22 +572,32 @@ class TranscriptLease {
     const path = join(root, leaseFileName);
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const token = randomUUID();
+      const temp = join(root, `${leaseFileName}.${process.pid}.${token}.tmp`);
       try {
-        const handle = await open(path, "wx");
         try {
-          await handle.writeFile(JSON.stringify({ pid: process.pid, token }), "utf8");
+          await writeFile(temp, JSON.stringify({ pid: process.pid, token }), {
+            encoding: "utf8",
+            flag: "wx",
+            mode: 0o600,
+          });
+          await link(temp, path);
+          return new TranscriptLease(path, token);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+            throw transcriptError("transcript_lease_failed");
+          }
         } finally {
-          await handle.close();
+          await unlink(temp).catch(() => undefined);
         }
-        return new TranscriptLease(path, token);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw transcriptError("transcript_lease_failed");
         const existing = await readLease(path);
         if (!existing) continue;
-        if (existing && processIsAlive(existing.pid)) throw transcriptError("transcript_store_already_active");
+        if (processIsAlive(existing.pid)) throw transcriptError("transcript_store_already_active");
         await unlink(path).catch((unlinkError) => {
           if ((unlinkError as NodeJS.ErrnoException).code !== "ENOENT") throw unlinkError;
         });
+      } catch (error) {
+        if (isTranscriptError(error)) throw error;
+        throw transcriptError("transcript_lease_failed");
       }
     }
     throw transcriptError("transcript_lease_failed");
@@ -688,7 +739,108 @@ async function prepareStateRoot(root: string): Promise<string> {
   if (canonical.toLocaleLowerCase("en-US") !== resolve(root).toLocaleLowerCase("en-US")) {
     throw transcriptError("transcript_state_root_unsafe");
   }
+  await ensureOwnedRoot(canonical);
   return canonical;
+}
+
+async function ensureOwnedRoot(root: string): Promise<void> {
+  const markerPath = join(root, rootMarkerFileName);
+  let names = await readdir(root);
+  if (!names.includes(rootMarkerFileName)) {
+    const markerTemps = names.filter((name) => rootMarkerTempPattern().test(name));
+    for (const name of markerTemps) {
+      const match = rootMarkerTempPattern().exec(name);
+      const ownerPid = match?.[1] ? Number(match[1]) : Number.NaN;
+      if (Number.isSafeInteger(ownerPid) && processIsAlive(ownerPid)) {
+        throw transcriptError("transcript_root_initialization_active");
+      }
+      const path = join(root, name);
+      const metadata = await lstat(path);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) {
+        throw transcriptError("transcript_state_root_unowned");
+      }
+      await unlink(path);
+    }
+    names = await readdir(root);
+    if (names.length !== 0) throw transcriptError("transcript_state_root_unowned");
+    const token = randomUUID();
+    const temp = join(root, `${rootMarkerFileName}.${process.pid}.${token}.tmp`);
+    const marker = `${JSON.stringify({ format: rootMarkerFormat, owner: "morrow-core" })}\n`;
+    try {
+      await writeFile(temp, marker, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      await link(temp, markerPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw transcriptError("transcript_root_marker_failed");
+      }
+    } finally {
+      await unlink(temp).catch(() => undefined);
+    }
+  }
+  await validateRootMarker(markerPath);
+  await validateOwnedRootEntries(root);
+}
+
+async function validateRootMarker(path: string): Promise<void> {
+  let value: unknown;
+  try {
+    const metadata = await lstat(path);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 256) {
+      throw transcriptError("transcript_root_marker_invalid");
+    }
+    value = JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    if (isTranscriptError(error)) throw error;
+    throw transcriptError("transcript_root_marker_invalid");
+  }
+  if (!isPlainDataRecord(value) || !hasExactDataKeys(value, ["format", "owner"])) {
+    throw transcriptError("transcript_root_marker_invalid");
+  }
+  if (ownDataValue(value, "format") !== rootMarkerFormat || ownDataValue(value, "owner") !== "morrow-core") {
+    throw transcriptError("transcript_root_marker_invalid");
+  }
+}
+
+async function validateOwnedRootEntries(root: string): Promise<void> {
+  const names = await readdir(root);
+  for (const name of names) {
+    if (
+      name === rootMarkerFileName
+      || name === transcriptFileName
+      || name === leaseFileName
+      || snapshotTempPattern().test(name)
+      || leaseTempPattern().test(name)
+      || rootMarkerTempPattern().test(name)
+    ) continue;
+    throw transcriptError("transcript_state_root_contains_foreign_entry");
+  }
+}
+
+function snapshotTempPattern(): RegExp {
+  return /^transcript-v1\.json\.\d+\.[0-9a-f-]{36}\.tmp$/;
+}
+
+function leaseTempPattern(): RegExp {
+  return /^\.transcript-v1\.lock\.\d+\.[0-9a-f-]{36}\.tmp$/;
+}
+
+function rootMarkerTempPattern(): RegExp {
+  return /^\.morrow-transcript-root\.json\.(\d+)\.[0-9a-f-]{36}\.tmp$/;
+}
+
+async function cleanupOwnedTemps(root: string): Promise<void> {
+  const snapshotTemp = snapshotTempPattern();
+  const leaseTemp = leaseTempPattern();
+  const entries = await readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!snapshotTemp.test(entry.name) && !leaseTemp.test(entry.name)) continue;
+    const path = join(root, entry.name);
+    const metadata = await lstat(path);
+    if (!entry.isFile() || !metadata.isFile() || metadata.isSymbolicLink()) {
+      throw transcriptError("transcript_temp_artifact_unsafe");
+    }
+    await unlink(path);
+  }
 }
 
 async function loadState(
@@ -699,12 +851,12 @@ async function loadState(
 ): Promise<TranscriptState | null> {
   let metadata;
   try {
-    metadata = await stat(path);
+    metadata = await lstat(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw transcriptError("transcript_snapshot_read_failed");
   }
-  if (!metadata.isFile() || metadata.size > maximumSnapshotBytes) {
+  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > maximumSnapshotBytes) {
     throw transcriptError("transcript_snapshot_too_large_or_invalid");
   }
   let parsed: unknown;
@@ -824,7 +976,7 @@ async function persistState(path: string, state: TranscriptState): Promise<void>
   if (Buffer.byteLength(serialized, "utf8") > maximumSnapshotBytes) throw transcriptError("transcript_snapshot_too_large");
   const temp = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temp, serialized, { encoding: "utf8", flag: "wx" });
+    await writeFile(temp, serialized, { encoding: "utf8", flag: "wx", mode: 0o600 });
     await rename(temp, path);
   } catch {
     await unlink(temp).catch(() => undefined);
@@ -898,13 +1050,131 @@ function totalRecordBytes(records: readonly TranscriptRecord[]): number {
   return records.reduce((total, record) => total + Buffer.byteLength(record.content, "utf8"), 0);
 }
 
+function collectLiteralRanges(text: string, literal: string, ranges: RedactionRange[]): void {
+  let offset = 0;
+  while (offset <= text.length - literal.length) {
+    const index = text.indexOf(literal, offset);
+    if (index < 0) break;
+    ranges.push({ start: index, end: index + literal.length, replacement: "redact" });
+    offset = index + Math.max(1, literal.length);
+  }
+}
+
+function collectMappedLiteralRanges(
+  terminal: NormalizedTerminalText,
+  literal: string,
+  ranges: RedactionRange[],
+): void {
+  const visibleRanges: RedactionRange[] = [];
+  collectLiteralRanges(terminal.visible, literal, visibleRanges);
+  mapVisibleRanges(terminal, visibleRanges, ranges);
+}
+
 function collectPatternRanges(text: string, pattern: RegExp, ranges: RedactionRange[]): void {
   pattern.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
+    ranges.push({ start: match.index, end: match.index + match[0].length, replacement: "redact" });
     if (match[0].length === 0) pattern.lastIndex += 1;
   }
+}
+
+function collectMappedPatternRanges(
+  terminal: NormalizedTerminalText,
+  pattern: RegExp,
+  ranges: RedactionRange[],
+): void {
+  const visibleRanges: RedactionRange[] = [];
+  collectPatternRanges(terminal.visible, pattern, visibleRanges);
+  mapVisibleRanges(terminal, visibleRanges, ranges);
+}
+
+function mapVisibleRanges(
+  terminal: NormalizedTerminalText,
+  visibleRanges: readonly RedactionRange[],
+  rawRanges: RedactionRange[],
+): void {
+  for (const range of visibleRanges) {
+    if (range.end <= range.start) continue;
+    const start = terminal.rawStarts[range.start];
+    const end = terminal.rawEnds[range.end - 1];
+    if (start !== undefined && end !== undefined) {
+      rawRanges.push({ start, end, replacement: "redact" });
+    }
+  }
+}
+
+function normalizeTerminalText(text: string): NormalizedTerminalText {
+  let visible = "";
+  const rawStarts: number[] = [];
+  const rawEnds: number[] = [];
+  const controlRanges: RedactionRange[] = [];
+  let index = 0;
+  while (index < text.length) {
+    const code = text.charCodeAt(index);
+    if (code === 0x1b) {
+      const end = terminalEscapeEnd(text, index);
+      controlRanges.push({ start: index, end, replacement: "drop" });
+      index = end;
+      continue;
+    }
+    if (code === 0x9b || code === 0x9d) {
+      const end = code === 0x9b
+        ? terminalCsiEnd(text, index + 1)
+        : terminalOscEnd(text, index + 1);
+      controlRanges.push({ start: index, end, replacement: "drop" });
+      index = end;
+      continue;
+    }
+    const codePoint = text.codePointAt(index)!;
+    const codePointLength = codePoint > 0xffff ? 2 : 1;
+    const character = String.fromCodePoint(codePoint);
+    const variationSelector = (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
+      || (codePoint >= 0xe0100 && codePoint <= 0xe01ef);
+    if (
+      (code < 0x20 && code !== 0x0a && code !== 0x09)
+      || (code >= 0x7f && code <= 0x9f)
+      || unicodeFormatControlPattern.test(character)
+      || variationSelector
+    ) {
+      controlRanges.push({ start: index, end: index + codePointLength, replacement: "drop" });
+      index += codePointLength;
+      continue;
+    }
+    visible += text[index];
+    rawStarts.push(index);
+    rawEnds.push(index + 1);
+    index += 1;
+  }
+  return { visible, rawStarts, rawEnds, controlRanges };
+}
+
+function terminalEscapeEnd(text: string, start: number): number {
+  if (start + 1 >= text.length) return text.length;
+  const kind = text[start + 1];
+  if (kind === "[") {
+    return terminalCsiEnd(text, start + 2);
+  }
+  if (kind === "]") {
+    return terminalOscEnd(text, start + 2);
+  }
+  return Math.min(start + 2, text.length);
+}
+
+function terminalCsiEnd(text: string, firstParameter: number): number {
+  for (let index = firstParameter; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code >= 0x40 && code <= 0x7e) return index + 1;
+  }
+  return text.length;
+}
+
+function terminalOscEnd(text: string, firstPayload: number): number {
+  for (let index = firstPayload; index < text.length; index += 1) {
+    if (text.charCodeAt(index) === 0x07) return index + 1;
+    if (text.charCodeAt(index) === 0x1b && text[index + 1] === "\\") return index + 2;
+  }
+  return text.length;
 }
 
 function mergeRanges(ranges: RedactionRange[]): RedactionRange[] {
@@ -913,7 +1183,10 @@ function mergeRanges(ranges: RedactionRange[]): RedactionRange[] {
   for (const range of ranges) {
     const previous = merged[merged.length - 1];
     if (!previous || range.start > previous.end) merged.push({ ...range });
-    else previous.end = Math.max(previous.end, range.end);
+    else {
+      previous.end = Math.max(previous.end, range.end);
+      if (range.replacement === "redact") previous.replacement = "redact";
+    }
   }
   return merged;
 }
@@ -923,10 +1196,14 @@ function renderRedacted(text: string, ranges: readonly RedactionRange[]): string
   let offset = 0;
   for (const range of ranges) {
     output += text.slice(offset, range.start);
-    output += TRANSCRIPT_REDACTION_PLACEHOLDER;
+    if (range.replacement === "redact") output += TRANSCRIPT_REDACTION_PLACEHOLDER;
     offset = range.end;
   }
   return output + text.slice(offset);
+}
+
+function countRedactions(ranges: readonly RedactionRange[]): number {
+  return ranges.filter((range) => range.replacement === "redact").length;
 }
 
 function checksumState(state: object): string {

@@ -16,6 +16,8 @@ chunk não confiável -> TranscriptRecordWriter -> StreamRedactor -> fragmento s
 
 O writer mantém lookbehind limitado para reconhecer valores divididos entre chunks. Somente fragmentos já redigidos são devolvidos para espelhamento; o restante fica apenas em memória até poder ser classificado com segurança. Exceder os limites encerra a sessão sem gravar o conteúdo pendente.
 
+Antes do matching, uma visão textual do terminal é calculada com mapeamento para os bytes/caracteres brutos. Controles C0/C1, backspace, sequências VT/ANSI/OSC, format controls Unicode, bidi/zero-width e variation selectors são removidos do transcript público; um segredo cujos caracteres foram separados por esses controles é redigido como um único intervalo bruto. Assim um renderer futuro não pode reconstruir visualmente um canário que o matcher só deixou de ver por causa de escape sequence ou caractere invisível. O transcript P4 é texto humano seguro, não um buffer de emulação de terminal.
+
 Valores sensíveis conhecidos são registrados explicitamente na política runtime e substituídos por `[REDACTED]`. A lista de valores nunca entra no snapshot, em hash, em log ou no resultado público. Reconhecedores fechados também cobrem assignments sensíveis, bearer tokens, formatos comuns de token e private keys. Eles são defesa adicional: um segredo real não registrado continua proibido na origem, não vira uma permissão implícita para persistir.
 
 O stream `input` é sempre sensível por padrão. Seu texto é descartado e o transcript guarda no máximo `[SENSITIVE_INPUT_REDACTED]`; não existe flag capaz de liberar stdin em claro.
@@ -27,7 +29,7 @@ Abrir o store exige, sem defaults silenciosos:
 - `redaction.policyId` e os valores sintéticos/secretos conhecidos somente em memória;
 - `access.writerIds` e `access.readerIds` exatos;
 - `retention.maxAgeMs`, `maxRecords`, `maxTotalBytes` e `maxRecordBytes`;
-- raiz absoluta dedicada e controlada pelo Morrow.
+- raiz absoluta dedicada, canonicalizada, inicialmente vazia e marcada pelo Morrow.
 
 Leitura e escrita recusam actor fora das listas. A política pública de acesso/retenção e o `policyId` são persistidos; restart com policy drift falha fechado. `maxTotalBytes` mede o conteúdo humano retido, enquanto o snapshot completo ainda possui teto estrutural independente de 16 MiB.
 
@@ -41,10 +43,12 @@ O único artefato durável é `transcript-v1.json`:
 - checksum sobre formato, revisão, política e registros;
 - validação exata de chaves, tipos, ordem e limites no reopen;
 - nova passada do redactor sobre cada registro carregado; texto que hoje seria redigido torna o snapshot inválido;
-- lease de dono único evita dois writers concorrentes na mesma raiz;
-- raiz simbólica/junction ou canonicalização divergente é recusada.
+- lease publicada atomicamente evita dois writers concorrentes na mesma raiz e não deixa lock vazio se o processo cair durante a aquisição;
+- reopen remove somente temporários de snapshot/lease cujo nome Morrow confere exatamente, evitando que restos de crash contornem a retenção sem apagar arquivos alheios;
+- a primeira abertura só adota raiz vazia e publica `.morrow-transcript-root.json`; reopen recusa marcador inválido ou qualquer entrada alheia;
+- raiz/snapshot simbólico, junction ancestral ou canonicalização divergente é recusada antes da leitura.
 
-O objeto retornado por `inspect()` é cópia destacada e profundamente congelada. Mensagens de erro são códigos estáveis e não propagam texto vindo de objetos hostis.
+O objeto retornado por `inspect()` é cópia destacada e profundamente congelada. Estado, valores da política, lookbehind bruto e capability de commit usam campos privados reais de JavaScript; `private` apagável do TypeScript não é tratado como cerca. O commit interno exige ainda uma capability não exportada, impedindo bypass do writer por consumidor JavaScript. Mensagens de erro são códigos estáveis e não propagam texto vindo de objetos hostis.
 
 ## Fronteiras das próximas unidades
 

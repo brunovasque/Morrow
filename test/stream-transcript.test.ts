@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import {
@@ -98,6 +98,18 @@ test("redacts exact literals and token shapes split across stream chunks before 
   assert.match(released, /\[REDACTED\]/);
   assert.ok(fragments.some((fragment) => fragment.text.length > 0));
   assert.ok(fragments.reduce((total, fragment) => total + fragment.redactionCount, 0) >= 2);
+
+  const ansiHidden = `${syntheticSecret.slice(0, 14)}\u001b[31m${syntheticSecret.slice(14)}\u001b[0m`;
+  const normalized = redactor.redact(`color=\u001b[32mgreen\u001b[0m hidden=${ansiHidden}`);
+  assert.equal(normalized.text.includes("\u001b"), false);
+  assert.match(normalized.text, /color=green/);
+  assert.doesNotMatch(normalized.text, new RegExp(syntheticSecret));
+  assert.doesNotMatch(normalized.text, /MORROW_SYNTHETIC_SECRET/);
+  assert.match(normalized.text, /hidden=\[REDACTED\]/);
+
+  const invisibleHidden = `${syntheticSecret.slice(0, 9)}\u200b${syntheticSecret.slice(9)}`;
+  const invisible = redactor.redact(`hidden=${invisibleHidden}`);
+  assert.equal(invisible.text, "hidden=[REDACTED]");
 });
 
 test("persists and returns only redacted output while dropping terminal input by default", async (t) => {
@@ -142,6 +154,19 @@ test("enforces writer access, strict data-only requests and record limits before
     () => store.beginRecord(request("unauthorized", "stdout", "intruder")),
     /transcript_write_not_authorized/,
   );
+  await assert.rejects(
+    store.commit({}, request("direct-input", "input"), syntheticSecret, 0, false),
+    /transcript_commit_not_authorized/,
+  );
+  assert.equal(Object.hasOwn(store, "state"), false);
+  assert.equal(Object.hasOwn(store, "redactor"), false);
+  const legitimateWriter = store.beginRecord(request("legitimate-writer"));
+  const WriterConstructor = legitimateWriter.constructor as new (...args: unknown[]) => unknown;
+  assert.throws(
+    () => new WriterConstructor({}, store, request("forged-writer", "stdout", "intruder"), {}),
+    /transcript_writer_not_authorized/,
+  );
+  legitimateWriter.abort();
 
   let getterCalls = 0;
   const hostile = { ...request("hostile") } as Record<string, unknown>;
@@ -211,9 +236,28 @@ test("allows only one active owner of a transcript root and releases it on order
   const root = await makeRoot(t);
   const first = await PersistentTranscriptStore.open(configuration(root));
   await assert.rejects(PersistentTranscriptStore.open(configuration(root)), /transcript_store_already_active/);
-  await first.close();
+  const writer = first.beginRecord(request("record-before-close"));
+  writer.write("safe-before-close");
+  const committing = writer.commit();
+  const closing = first.close();
+  const closingAgain = first.close();
+  assert.equal((await committing).record.content, "safe-before-close");
+  await Promise.all([closing, closingAgain]);
+  assert.throws(() => first.beginRecord(request("record-after-close")), /transcript_store_closed/);
+  const staleTemp = "transcript-v1.json.123.00000000-0000-4000-8000-000000000000.tmp";
+  const unrelated = "transcript-v1.json.keep.tmp";
+  await writeFile(join(root, staleTemp), "sanitized-stale-temp", "utf8");
   const replacement = await PersistentTranscriptStore.open(configuration(root));
+  assert.equal(replacement.inspect("operator").records[0]?.recordId, "record-before-close");
   await replacement.close();
+  assert.deepEqual((await readdir(root)).sort(), [".morrow-transcript-root.json", "transcript-v1.json"]);
+
+  await writeFile(join(root, unrelated), "operator-owned-name", "utf8");
+  await assert.rejects(
+    PersistentTranscriptStore.open(configuration(root)),
+    /transcript_state_root_contains_foreign_entry/,
+  );
+  assert.equal(await readFile(join(root, unrelated), "utf8"), "operator-owned-name");
 });
 
 test("fails closed on hostile policy collections without invoking accessors", () => {
@@ -240,5 +284,50 @@ test("fails closed on hostile policy collections without invoking accessors", ()
   assert.throws(
     () => new StreamRedactor(proxy as never),
     /redaction_policy_inspection_failed/,
+  );
+
+  const redactor = new StreamRedactor({
+    policyId: "encapsulation-policy",
+    sensitiveLiterals: [syntheticSecret],
+  });
+  const session = redactor.start(16_384);
+  session.push(syntheticSecret.slice(0, 8));
+  assert.deepEqual(Object.getOwnPropertyNames(redactor), ["policyId"]);
+  assert.deepEqual(Object.getOwnPropertyNames(session), []);
+  session.abort();
+});
+
+test("refuses a symbolic snapshot and a junction ancestor without reading outside its canonical root", async (t) => {
+  const container = await makeRoot(t);
+  const root = join(container, "owned-state");
+  const initialized = await PersistentTranscriptStore.open(configuration(root));
+  await append(initialized, "record-before-symlink", "safe");
+  await initialized.close();
+  const controlledTarget = join(container, "controlled-target.json");
+  await writeFile(controlledTarget, "controlled-outside-snapshot", "utf8");
+  const snapshotLink = join(root, "transcript-v1.json");
+  await rm(snapshotLink);
+  try {
+    await symlink(controlledTarget, snapshotLink, "file");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EPERM") {
+      t.skip("symbolic links unavailable in this Windows environment");
+      return;
+    }
+    throw error;
+  }
+  await assert.rejects(
+    PersistentTranscriptStore.open(configuration(root)),
+    /transcript_snapshot_too_large_or_invalid/,
+  );
+  await rm(snapshotLink);
+
+  const actualParent = join(container, "actual-parent");
+  const junctionParent = join(container, "junction-parent");
+  await mkdir(actualParent);
+  await symlink(actualParent, junctionParent, "junction");
+  await assert.rejects(
+    PersistentTranscriptStore.open(configuration(join(junctionParent, "state"))),
+    /transcript_state_root_unsafe/,
   );
 });
