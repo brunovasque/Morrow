@@ -41,9 +41,9 @@ O único artefato durável é `transcript-v1.json`:
 
 - gravação temporária e rename atômico, ambos contendo somente dados já redigidos;
 - checksum sobre formato, revisão, política e registros;
-- validação exata de chaves, tipos, ordinal, tempo não decrescente até `updatedAt` e limites total/individual por registro no reopen;
+- validação exata de chaves, tipos, writer autorizado, ordinal, tempo não decrescente até `updatedAt` e limites total/individual por registro no reopen;
 - nova passada do redactor sobre cada registro carregado; texto que hoje seria redigido torna o snapshot inválido;
-- lease publicada atomicamente evita dois writers concorrentes; remoção stale exige recovery guard por hard link, releitura do mesmo PID/token e deixa apenas uma abertura vencer;
+- lease publicada atomicamente evita dois writers concorrentes; no Windows MVO, remoção stale exige mutex de named pipe derivado da raiz, releitura do mesmo PID/token e deixa apenas uma abertura vencer; o SO libera o mutex se o recuperador cair;
 - reopen remove somente temporários de snapshot/lease cujo nome Morrow confere exatamente, evitando que restos de crash contornem a retenção sem apagar arquivos alheios;
 - a primeira abertura só adota raiz vazia e publica `.morrow-transcript-root.json`; reopen recusa marcador inválido ou qualquer entrada alheia;
 - cada ancestral existente é validado antes de criar componentes ausentes; raiz/snapshot simbólico, junction ancestral ou canonicalização divergente é recusada antes de leitura ou escrita, com comparação case-insensitive somente no Windows.

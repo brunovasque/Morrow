@@ -59,7 +59,7 @@ Os IDs abaixo são unidades contratuais, não números antecipados do GitHub. Ca
 | PR-ID | status | dependências | objetivo único | saída/prova de conclusão |
 |---|---|---|---|---|
 | `P4-PR01` | `PROVEN` | P2-PR06, P3-PR02 | Definir eventos canônicos e projector do Live Activity Feed | PR #16 integrada em `312bd90`; schema `morrow.live-activity/1.0`, dez estados AC-21, ordem/identidade/causalidade/coleção fail-closed, input hostil sanitizado; pós-merge focados 8/8 e suíte 172/172 |
-| `P4-PR02` | `RUNNING` | P4-PR01 | Implementar Stream Redactor, política de retenção e transcript persistente | PR #18: primeiro passe remoto e hardenings fecharam seis variantes de redaction; segundo passe sobre `dbcd790` encontrou underscore, stale-lease race, criação pré-validação, casing e tempo; `07e1c25` corrige/contrapõe todos, focused 11/11 e suíte 183/183, aguardando publicação/revalidação antes do merge |
+| `P4-PR02` | `RUNNING` | P4-PR01 | Implementar Stream Redactor, política de retenção e transcript persistente | PR #18: três passes remotos; `20044db` fecha os últimos achados de recovery guard pós-crash e writer reidratado sem autorização; focused 11/11 e suíte 183/183, aguardando nova publicação/revalidação antes do merge |
 | `P4-PR03` | `PENDING` | P4-PR02 | Implementar replay/reidratação, cursores e liveness após restart | cliente retoma sem duplicar/perder eventos e distingue esperas/falhas |
 | `P4-PR04` | `PENDING` | P4-PR03, P3-PR04 | Expor stream/API de múltiplas sessões e provar observabilidade ponta a ponta do Worker | duas sessões reais vistas ao vivo e reidratadas após restart |
 
