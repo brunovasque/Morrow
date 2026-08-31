@@ -18,7 +18,7 @@ O writer mantém lookbehind limitado para reconhecer valores divididos entre chu
 
 Antes do matching, uma visão textual do terminal é calculada com mapeamento para os bytes/caracteres brutos. Controles C0/C1, backspace, sequências VT/ANSI/OSC, format controls Unicode, bidi/zero-width e variation selectors são removidos do transcript público; um segredo cujos caracteres foram separados por esses controles é redigido como um único intervalo bruto. Assim um renderer futuro não pode reconstruir visualmente um canário que o matcher só deixou de ver por causa de escape sequence ou caractere invisível. O transcript P4 é texto humano seguro, não um buffer de emulação de terminal.
 
-Valores sensíveis conhecidos são registrados explicitamente na política runtime e substituídos por `[REDACTED]`. A lista de valores nunca entra no snapshot, em hash, em log ou no resultado público. Literais que contenham ou sejam substring de qualquer marcador gerado são recusados para preservar a idempotência da redaction. Reconhecedores fechados também cobrem assignments sensíveis, bearer tokens, formatos comuns de token e private keys. Eles são defesa adicional: um segredo real não registrado continua proibido na origem, não vira uma permissão implícita para persistir.
+Valores sensíveis conhecidos são registrados explicitamente na política runtime e substituídos por `[REDACTED]`. A lista de valores nunca entra no snapshot, em hash, em log ou no resultado público. Literais que contenham ou sejam substring de qualquer marcador gerado são recusados para preservar a idempotência da redaction. Reconhecedores fechados também cobrem assignments sensíveis, componentes underscore de environment variables como `DB_PASSWORD`/`AWS_SECRET_ACCESS_KEY`, bearer tokens, formatos comuns de token e private keys. Eles são defesa adicional: um segredo real não registrado continua proibido na origem, não vira uma permissão implícita para persistir.
 
 O stream `input` é sempre sensível por padrão. Seu texto é descartado e o transcript guarda no máximo `[SENSITIVE_INPUT_REDACTED]`; não existe flag capaz de liberar stdin em claro.
 
@@ -41,12 +41,12 @@ O único artefato durável é `transcript-v1.json`:
 
 - gravação temporária e rename atômico, ambos contendo somente dados já redigidos;
 - checksum sobre formato, revisão, política e registros;
-- validação exata de chaves, tipos, ordem e limites total e individual por registro no reopen;
+- validação exata de chaves, tipos, ordinal, tempo não decrescente até `updatedAt` e limites total/individual por registro no reopen;
 - nova passada do redactor sobre cada registro carregado; texto que hoje seria redigido torna o snapshot inválido;
-- lease publicada atomicamente evita dois writers concorrentes na mesma raiz e não deixa lock vazio se o processo cair durante a aquisição;
+- lease publicada atomicamente evita dois writers concorrentes; remoção stale exige recovery guard por hard link, releitura do mesmo PID/token e deixa apenas uma abertura vencer;
 - reopen remove somente temporários de snapshot/lease cujo nome Morrow confere exatamente, evitando que restos de crash contornem a retenção sem apagar arquivos alheios;
 - a primeira abertura só adota raiz vazia e publica `.morrow-transcript-root.json`; reopen recusa marcador inválido ou qualquer entrada alheia;
-- raiz/snapshot simbólico, junction ancestral ou canonicalização divergente é recusada antes da leitura.
+- cada ancestral existente é validado antes de criar componentes ausentes; raiz/snapshot simbólico, junction ancestral ou canonicalização divergente é recusada antes de leitura ou escrita, com comparação case-insensitive somente no Windows.
 
 O objeto retornado por `inspect()` é cópia destacada e profundamente congelada. Estado, valores da política, lookbehind bruto e capability de commit usam campos privados reais de JavaScript; `private` apagável do TypeScript não é tratado como cerca. O commit interno exige ainda uma capability não exportada, impedindo bypass do writer por consumidor JavaScript. Mensagens de erro são códigos estáveis e não propagam texto vindo de objetos hostis.
 

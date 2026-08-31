@@ -22,7 +22,7 @@
 
 Publicar as três correções materiais da revisão remota, responder os comentários e revalidar o head exato da PR #18 antes de restaurar `GREEN`; `PROVEN` continua condicionado ao merge e à regressão pós-merge.
 
-Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. O `GREEN` do head remoto `e525eb8` foi invalidado por três achados: assignment quoted incompleto além do holdback, falta de `maxRecordBytes` no load e literal colidindo com marcador. `2c781b6` corrige os três; passes adversariais seguintes fecharam newline em `3824d1a`, aspa escapada em `004b0d9` e prefixo espaçado em `778f6a5`. Focused 10/10 e suíte 182/182 estão verdes localmente. `D-013` preserva o falso vermelho intermitente de PID sem alterar P3 nesta unidade.
+Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. Após o primeiro passe remoto e três hardenings de chunking, o segundo passe sobre `dbcd790` encontrou nomes com underscore, corrida de lease stale, criação antes da validação, casing cross-platform e timestamps fora de ordem. `07e1c25` corrige e contrapõe todos. Focused 11/11, soak de controle e suíte 183/183 estão verdes localmente. `D-013` preserva o falso vermelho intermitente de PID host/descendant sem alterar P3 nesta unidade.
 
 ## Bloqueios atuais
 
