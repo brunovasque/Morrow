@@ -28,22 +28,17 @@ O backend processual preserva a concorrência anterior e só recebe teto quando 
 
 Todos os eventos são conferidos contra a identidade esperada. Ao final, PIDs de raiz e descendentes precisam ser distintos e inexistentes, e a raiz específica do probe precisa ser removível. Um deadline de 32 segundos tenta parar somente as sessões criadas pelo probe e encerra vermelho caso uma regressão nativa deixe o gate pendurado.
 
-## Evidência medida
+## Evidência invalidada e correção requerida
 
-No candidate `ff744d2`:
+O candidate `ff744d2` produziu inicialmente resultados verdes, mas eles foram invalidados durante a revisão remota. Repetições posteriores tiveram hard timeout em `input-completion`, e o dono observou a assertion nativa `remove_pty_baton(baton->id)` em `node-pty/src/win/conpty.cc:106`.
 
-- soak dedicado: 3 rodadas, 12 sessões, 6 `completed`, 3 `timed_out`, 3 `stopped`;
-- 12 colisões recusadas, 12 PIDs raiz e 12 descendentes distintos;
-- input isolado, eventos ligados à identidade, nenhum órfão e fixture removida;
-- probe completo do backend: `7/7`;
-- suíte completa: `159/159`;
-- regressões Codex quota-session/ConPTY e quota baseline: verdes, sem mutação.
+Na dependência fixada, `ptyHandles` é um vetor global do addon e cada thread de exit remove seu baton sem sincronização. Portanto duas sessões no mesmo processo compartilham estado nativo inseguro mesmo quando o manager limita corretamente a capacidade. A correção desta PR deve hospedar cada sessão ConPTY em processo Morrow próprio e manter somente o proxy/multiplexing no processo do manager. As provas anteriores não podem ser usadas para `PROVEN`.
 
 As execuções desta unidade não usaram credencial exportada, API, rede de produto, Enova, target externo, diretório de projeto do operador ou terminal do operador.
 
 ## Limites
 
-- a capacidade dois é o teto ConPTY comprovado para o MVO medido, não uma afirmação sobre futuras versões da dependência;
+- a capacidade dois continua sendo o objetivo mínimo, mas não está comprovada enquanto duas sessões compartilharem o addon no mesmo processo;
 - aumentar esse teto exige novo probe real, soak repetido e revisão da dependência nativa;
 - ConPTY/Job Object fornecem ciclo de vida e contenção da árvore, não sandbox geral do sistema;
 - persistência, redaction, replay e API de múltiplas sessões pertencem à P4;

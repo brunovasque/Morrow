@@ -12,7 +12,7 @@
 - `active_phase`: `P3`
 - `active_pr_id`: `P3-PR04`
 - `active_route_node`: `CONPTY_MULTIPLEXING_AND_CLEANUP`
-- `active_subaction`: `P3_PR04_PUBLISH_REMOTE_ADVERSARIAL_REVIEW`
+- `active_subaction`: `P3_PR04_FIX_NATIVE_CONPTY_EXIT_RACE`
 - `expected_branch_prefix`: `mvo/p3-pr04-`
 - `write_execution_allowed`: `yes, scoped only to P3-PR04 in a dedicated branch`
 - `next_authorized_action`: `START_P3_PR04`
@@ -20,15 +20,15 @@
 
 ## Próxima ação exata
 
-Publicar o candidate local `ff744d2` de `P3-PR04` na branch `mvo/p3-pr04-conpty-multiplexing`, conferir base/head remotos e revisar adversarialmente o diff exato. Corrigir qualquer achado material na mesma branch e reexecutar soak, backend, suíte, diff check e reconciliador antes de integrar.
+Corrigir a falha material da P3-PR04 na PR #14: duas sessões não podem compartilhar o vetor nativo `ptyHandles` de `node-pty 1.1.0`. Implementar host de processo isolado por sessão ConPTY, adicionar contraprova da separação e somente então reexecutar soak, backend, suíte, diff check e reconciliador.
 
-O candidate `ff744d2` passou soak final de 12 sessões, backend `7/7`, suíte `159/159` e regressões Codex quota-session. A revisão local está `GREEN_CANDIDATE`, não `PROVEN`; publicação, revisão do head remoto e pós-merge continuam obrigatórios. Fixtures ficam sob `.morrow-test-tmp`; terminais/projetos do operador, Enova e targets externos continuam proibidos.
+O candidate `ff744d2` está invalidado. Revalidações tiveram hard timeout em três estágios de `input-completion`, e o dono observou assertion nativa em `conpty.cc:106`; a fonte confirma remoção concorrente de estado global sem mutex. Não repetir probe antes da correção. Query limitada a fingerprints Morrow encontrou zero processos vivos; três fixtures falhas estão preservadas sob `.morrow-test-tmp`.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `none` | `none` | nenhum bloqueio ativo | publicar e revisar somente o candidate P3-PR04; qualquer processo órfão, colisão aceita ou identidade ambígua reabre o candidate |
+| `P3-PR04-NATIVE-EXIT-RACE` | `technical` | assertion/hang nativo ao encerrar sessões simultâneas no mesmo addon | isolar uma sessão ConPTY por processo host, contraprovar e revalidar; merge proibido até GREEN |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ O candidate `ff744d2` passou soak final de 12 sessões, backend `7/7`, suíte `1
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `RUNNING` | P3-PR04 candidate local `ff744d2` verde; publicação, review remoto e integração pendentes |
+| P3 | `RUNNING` | P3-PR04/PR #14 `RED_MATERIAL`; correção da corrida nativa em execução, integração proibida |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
