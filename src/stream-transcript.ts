@@ -10,7 +10,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export const TRANSCRIPT_FORMAT = "morrow.transcript/1.0" as const;
 export const TRANSCRIPT_REDACTION_PLACEHOLDER = "[REDACTED]" as const;
@@ -124,6 +124,7 @@ interface NormalizedTerminalText {
 
 const transcriptFileName = "transcript-v1.json";
 const leaseFileName = ".transcript-v1.lock";
+const leaseRecoveryFileName = ".transcript-v1.lock.recovery";
 const rootMarkerFileName = ".morrow-transcript-root.json";
 const rootMarkerFormat = "morrow.transcript-root/1" as const;
 const maximumSnapshotBytes = 16_777_216;
@@ -133,7 +134,7 @@ const genericPatternHoldback = 4_096;
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const canonicalTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const unicodeFormatControlPattern = /^\p{Cf}$/u;
-const assignmentKeyPattern = /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b/giu;
+const assignmentKeyPattern = /(?<![A-Za-z0-9_])(?:[A-Za-z0-9]+_)*(?:token|secret|password|credential|authorization|api[_-]?key)(?:_[A-Za-z0-9]+)*(?![A-Za-z0-9_])/giu;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/giu;
 const commonTokenPatterns = [
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/gu,
@@ -592,9 +593,18 @@ class TranscriptLease {
         const existing = await readLease(path);
         if (!existing) continue;
         if (processIsAlive(existing.pid)) throw transcriptError("transcript_store_already_active");
-        await unlink(path).catch((unlinkError) => {
-          if ((unlinkError as NodeJS.ErrnoException).code !== "ENOENT") throw unlinkError;
-        });
+        const recovery = await TranscriptLeaseRecovery.acquire(root);
+        try {
+          const current = await readLease(path);
+          if (!current) continue;
+          if (current.pid !== existing.pid || current.token !== existing.token) {
+            throw transcriptError("transcript_lease_changed_during_recovery");
+          }
+          if (processIsAlive(current.pid)) throw transcriptError("transcript_store_already_active");
+          await unlink(path);
+        } finally {
+          await recovery.release();
+        }
       } catch (error) {
         if (isTranscriptError(error)) throw error;
         throw transcriptError("transcript_lease_failed");
@@ -609,6 +619,50 @@ class TranscriptLease {
     const existing = await readLease(this.path);
     if (!existing || existing.token !== this.token || existing.pid !== process.pid) {
       throw transcriptError("transcript_lease_owner_mismatch");
+    }
+    await unlink(this.path);
+  }
+}
+
+class TranscriptLeaseRecovery {
+  private readonly path: string;
+  private readonly token: string;
+  private released = false;
+
+  private constructor(path: string, token: string) {
+    this.path = path;
+    this.token = token;
+  }
+
+  static async acquire(root: string): Promise<TranscriptLeaseRecovery> {
+    const path = join(root, leaseRecoveryFileName);
+    const token = randomUUID();
+    const temp = join(root, `${leaseRecoveryFileName}.${process.pid}.${token}.tmp`);
+    try {
+      await writeFile(temp, JSON.stringify({ pid: process.pid, token }), {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+      await link(temp, path);
+      return new TranscriptLeaseRecovery(path, token);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw transcriptError("transcript_lease_recovery_active");
+      }
+      if (isTranscriptError(error)) throw error;
+      throw transcriptError("transcript_lease_recovery_failed");
+    } finally {
+      await unlink(temp).catch(() => undefined);
+    }
+  }
+
+  async release(): Promise<void> {
+    if (this.released) return;
+    this.released = true;
+    const existing = await readLease(this.path);
+    if (!existing || existing.token !== this.token || existing.pid !== process.pid) {
+      throw transcriptError("transcript_lease_recovery_owner_mismatch");
     }
     await unlink(this.path);
   }
@@ -732,15 +786,55 @@ function parseRecordRequest(input: unknown): TranscriptRecordRequest {
 }
 
 async function prepareStateRoot(root: string): Promise<string> {
-  await mkdir(root, { recursive: true });
-  const metadata = await lstat(root);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw transcriptError("transcript_state_root_unsafe");
-  const canonical = await realpath(root);
-  if (canonical.toLocaleLowerCase("en-US") !== resolve(root).toLocaleLowerCase("en-US")) {
-    throw transcriptError("transcript_state_root_unsafe");
+  const requested = resolve(root);
+  const missing: string[] = [];
+  let existing = requested;
+  while (true) {
+    try {
+      await validateCanonicalDirectory(existing);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        if (isTranscriptError(error)) throw error;
+        throw transcriptError("transcript_state_root_unsafe");
+      }
+      missing.push(existing);
+      const parent = dirname(existing);
+      if (parent === existing) throw transcriptError("transcript_state_root_unsafe");
+      existing = parent;
+    }
   }
+  for (const path of missing.reverse()) {
+    try {
+      await mkdir(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw transcriptError("transcript_state_root_unsafe");
+      }
+    }
+    await validateCanonicalDirectory(path);
+  }
+  const canonical = await realpath(requested);
   await ensureOwnedRoot(canonical);
   return canonical;
+}
+
+async function validateCanonicalDirectory(path: string): Promise<void> {
+  const metadata = await lstat(path);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw transcriptError("transcript_state_root_unsafe");
+  }
+  const canonical = await realpath(path);
+  if (!pathsReferToSameLocation(canonical, resolve(path))) {
+    throw transcriptError("transcript_state_root_unsafe");
+  }
+}
+
+function pathsReferToSameLocation(left: string, right: string): boolean {
+  if (process.platform === "win32") {
+    return left.toLocaleLowerCase("en-US") === right.toLocaleLowerCase("en-US");
+  }
+  return left === right;
 }
 
 async function ensureOwnedRoot(root: string): Promise<void> {
@@ -808,8 +902,10 @@ async function validateOwnedRootEntries(root: string): Promise<void> {
       name === rootMarkerFileName
       || name === transcriptFileName
       || name === leaseFileName
+      || name === leaseRecoveryFileName
       || snapshotTempPattern().test(name)
       || leaseTempPattern().test(name)
+      || leaseRecoveryTempPattern().test(name)
       || rootMarkerTempPattern().test(name)
     ) continue;
     throw transcriptError("transcript_state_root_contains_foreign_entry");
@@ -824,6 +920,10 @@ function leaseTempPattern(): RegExp {
   return /^\.transcript-v1\.lock\.\d+\.[0-9a-f-]{36}\.tmp$/;
 }
 
+function leaseRecoveryTempPattern(): RegExp {
+  return /^\.transcript-v1\.lock\.recovery\.\d+\.[0-9a-f-]{36}\.tmp$/;
+}
+
 function rootMarkerTempPattern(): RegExp {
   return /^\.morrow-transcript-root\.json\.(\d+)\.[0-9a-f-]{36}\.tmp$/;
 }
@@ -831,9 +931,14 @@ function rootMarkerTempPattern(): RegExp {
 async function cleanupOwnedTemps(root: string): Promise<void> {
   const snapshotTemp = snapshotTempPattern();
   const leaseTemp = leaseTempPattern();
+  const leaseRecoveryTemp = leaseRecoveryTempPattern();
   const entries = await readdir(root, { withFileTypes: true });
   for (const entry of entries) {
-    if (!snapshotTemp.test(entry.name) && !leaseTemp.test(entry.name)) continue;
+    if (
+      !snapshotTemp.test(entry.name)
+      && !leaseTemp.test(entry.name)
+      && !leaseRecoveryTemp.test(entry.name)
+    ) continue;
     const path = join(root, entry.name);
     const metadata = await lstat(path);
     if (!entry.isFile() || !metadata.isFile() || metadata.isSymbolicLink()) {
@@ -911,17 +1016,23 @@ function validatePersistedState(
   const records: TranscriptRecord[] = [];
   const ids = new Set<string>();
   let previousOrdinal = 0;
+  let previousOccurredAt = Number.NEGATIVE_INFINITY;
+  const updatedAt = Date.parse(input.updatedAt);
   for (let index = 0; index < input.records.length; index += 1) {
     const record = parsePersistedRecord(readDataArrayElement(input.records, index));
+    const occurredAt = Date.parse(record.occurredAt);
     if (
       record.ordinal <= previousOrdinal
       || ids.has(record.recordId)
+      || occurredAt < previousOccurredAt
+      || occurredAt > updatedAt
       || Buffer.byteLength(record.content, "utf8") > retention.maxRecordBytes
       || redactor.redact(record.content).text !== record.content
     ) {
       throw transcriptError("transcript_snapshot_invalid");
     }
     previousOrdinal = record.ordinal;
+    previousOccurredAt = occurredAt;
     ids.add(record.recordId);
     records.push(record);
   }

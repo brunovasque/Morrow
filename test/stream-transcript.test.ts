@@ -111,6 +111,14 @@ test("redacts exact literals and token shapes split across stream chunks before 
   const invisibleHidden = `${syntheticSecret.slice(0, 9)}\u200b${syntheticSecret.slice(9)}`;
   const invisible = redactor.redact(`hidden=${invisibleHidden}`);
   assert.equal(invisible.text, "hidden=[REDACTED]");
+
+  const environment = redactor.redact(
+    "DB_PASSWORD=hunter2secret AWS_SECRET_ACCESS_KEY=synthetic-access-key-material",
+  );
+  assert.equal(
+    environment.text,
+    `${TRANSCRIPT_REDACTION_PLACEHOLDER} ${TRANSCRIPT_REDACTION_PLACEHOLDER}`,
+  );
 });
 
 test("holds a long quoted assignment until its quote or line boundary can be redacted", async (t) => {
@@ -291,22 +299,46 @@ test("rehydrates sanitized records but refuses policy drift and corrupted snapsh
   await assert.rejects(PersistentTranscriptStore.open(configuration(root)), /transcript_snapshot_invalid/);
 });
 
-test("refuses a checksummed snapshot whose individual record exceeds maxRecordBytes", async (t) => {
+test("refuses checksummed snapshots that violate record size or time ordering", async (t) => {
   const root = await makeRoot(t);
-  const strictConfiguration = configuration(root, () => baseTime, {
+  let current = baseTime;
+  const strictConfiguration = configuration(root, () => current, {
     retention: { maxAgeMs: 60_000, maxRecords: 4, maxTotalBytes: 128, maxRecordBytes: 32 },
   });
   const store = await PersistentTranscriptStore.open(strictConfiguration);
   await append(store, "record-before-oversized-restart", "safe");
+  current += 100;
+  await append(store, "record-after-oversized-restart", "also-safe");
   await store.close();
 
   const snapshot = join(root, "transcript-v1.json");
-  const parsed = JSON.parse(await readFile(snapshot, "utf8"));
+  const original = await readFile(snapshot, "utf8");
+  const parsed = JSON.parse(original);
   parsed.records[0].content = "x".repeat(33);
   const { checksum: _checksum, ...tamperedState } = parsed;
   parsed.checksum = createHash("sha256").update(JSON.stringify(tamperedState)).digest("hex");
   await writeFile(snapshot, JSON.stringify(parsed), "utf8");
 
+  await assert.rejects(
+    PersistentTranscriptStore.open(strictConfiguration),
+    /transcript_snapshot_invalid/,
+  );
+
+  const futureDated = JSON.parse(original);
+  futureDated.records[0].occurredAt = new Date(baseTime + 200).toISOString();
+  const { checksum: _futureChecksum, ...futureState } = futureDated;
+  futureDated.checksum = createHash("sha256").update(JSON.stringify(futureState)).digest("hex");
+  await writeFile(snapshot, JSON.stringify(futureDated), "utf8");
+  await assert.rejects(
+    PersistentTranscriptStore.open(strictConfiguration),
+    /transcript_snapshot_invalid/,
+  );
+
+  const outOfOrder = JSON.parse(original);
+  outOfOrder.records[1].occurredAt = new Date(baseTime - 100).toISOString();
+  const { checksum: _orderChecksum, ...orderedState } = outOfOrder;
+  outOfOrder.checksum = createHash("sha256").update(JSON.stringify(orderedState)).digest("hex");
+  await writeFile(snapshot, JSON.stringify(outOfOrder), "utf8");
   await assert.rejects(
     PersistentTranscriptStore.open(strictConfiguration),
     /transcript_snapshot_invalid/,
@@ -339,6 +371,30 @@ test("allows only one active owner of a transcript root and releases it on order
     /transcript_state_root_contains_foreign_entry/,
   );
   assert.equal(await readFile(join(root, unrelated), "utf8"), "operator-owned-name");
+});
+
+test("serializes concurrent stale lease recovery so only one store can acquire the root", async (t) => {
+  const root = await makeRoot(t);
+  const initialized = await PersistentTranscriptStore.open(configuration(root));
+  await initialized.close();
+  await writeFile(
+    join(root, ".transcript-v1.lock"),
+    JSON.stringify({ pid: 2_147_483_647, token: "synthetic-stale-owner" }),
+    "utf8",
+  );
+
+  const results = await Promise.allSettled([
+    PersistentTranscriptStore.open(configuration(root)),
+    PersistentTranscriptStore.open(configuration(root)),
+  ]);
+  const acquired = results.filter(
+    (result): result is PromiseFulfilledResult<PersistentTranscriptStore> => result.status === "fulfilled",
+  );
+  const refused = results.filter((result) => result.status === "rejected");
+  assert.equal(acquired.length, 1);
+  assert.equal(refused.length, 1);
+  await acquired[0]!.value.close();
+  assert.deepEqual(await readdir(root), [".morrow-transcript-root.json"]);
 });
 
 test("fails closed on hostile policy collections without invoking accessors", () => {
@@ -421,4 +477,5 @@ test("refuses a symbolic snapshot and a junction ancestor without reading outsid
     PersistentTranscriptStore.open(configuration(join(junctionParent, "state"))),
     /transcript_state_root_unsafe/,
   );
+  assert.deepEqual(await readdir(actualParent), []);
 });
