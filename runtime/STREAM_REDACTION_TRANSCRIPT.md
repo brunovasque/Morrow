@@ -1,0 +1,56 @@
+# Stream Redactor, retenção e transcript persistente — P4-PR02
+
+- contract: `MORROW-MVO-001`
+- PR-ID: `P4-PR02`
+- estado: `RUNNING`
+- formato durável: `morrow.transcript/1.0`
+- implementação: `src/stream-transcript.ts`
+
+## Fronteira obrigatória
+
+Nenhum produtor grava ou entrega texto humano diretamente ao storage ou à futura UI. O caminho permitido é:
+
+```text
+chunk não confiável -> TranscriptRecordWriter -> StreamRedactor -> fragmento seguro -> snapshot seguro
+```
+
+O writer mantém lookbehind limitado para reconhecer valores divididos entre chunks. Somente fragmentos já redigidos são devolvidos para espelhamento; o restante fica apenas em memória até poder ser classificado com segurança. Exceder os limites encerra a sessão sem gravar o conteúdo pendente.
+
+Valores sensíveis conhecidos são registrados explicitamente na política runtime e substituídos por `[REDACTED]`. A lista de valores nunca entra no snapshot, em hash, em log ou no resultado público. Reconhecedores fechados também cobrem assignments sensíveis, bearer tokens, formatos comuns de token e private keys. Eles são defesa adicional: um segredo real não registrado continua proibido na origem, não vira uma permissão implícita para persistir.
+
+O stream `input` é sempre sensível por padrão. Seu texto é descartado e o transcript guarda no máximo `[SENSITIVE_INPUT_REDACTED]`; não existe flag capaz de liberar stdin em claro.
+
+## Política explícita
+
+Abrir o store exige, sem defaults silenciosos:
+
+- `redaction.policyId` e os valores sintéticos/secretos conhecidos somente em memória;
+- `access.writerIds` e `access.readerIds` exatos;
+- `retention.maxAgeMs`, `maxRecords`, `maxTotalBytes` e `maxRecordBytes`;
+- raiz absoluta dedicada e controlada pelo Morrow.
+
+Leitura e escrita recusam actor fora das listas. A política pública de acesso/retenção e o `policyId` são persistidos; restart com policy drift falha fechado. `maxTotalBytes` mede o conteúdo humano retido, enquanto o snapshot completo ainda possui teto estrutural independente de 16 MiB.
+
+Retenção remove primeiro registros expirados e depois os mais antigos quando count/bytes ultrapassam a política. Cada commit/sweep informa os record IDs removidos; o ordinal interno não é reciclado.
+
+## Persistência
+
+O único artefato durável é `transcript-v1.json`:
+
+- gravação temporária e rename atômico, ambos contendo somente dados já redigidos;
+- checksum sobre formato, revisão, política e registros;
+- validação exata de chaves, tipos, ordem e limites no reopen;
+- nova passada do redactor sobre cada registro carregado; texto que hoje seria redigido torna o snapshot inválido;
+- lease de dono único evita dois writers concorrentes na mesma raiz;
+- raiz simbólica/junction ou canonicalização divergente é recusada.
+
+O objeto retornado por `inspect()` é cópia destacada e profundamente congelada. Mensagens de erro são códigos estáveis e não propagam texto vindo de objetos hostis.
+
+## Fronteiras das próximas unidades
+
+- replay, cursores e reidratação de cliente: P4-PR03;
+- produtores/API e observabilidade ponta a ponta de sessões reais: P4-PR04;
+- dashboard, terminal renderer e controles de UI: P5;
+- armazenamento de credencial real não pertence ao transcript; continua atrás do Secret Broker.
+
+As provas desta PR usam apenas canários sintéticos e raízes temporárias sob `.morrow-test-tmp` no próprio repositório Morrow.
