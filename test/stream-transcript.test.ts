@@ -121,6 +121,13 @@ test("redacts exact literals and token shapes split across stream chunks before 
     environment.text,
     `${TRANSCRIPT_REDACTION_PLACEHOLDER} ${TRANSCRIPT_REDACTION_PLACEHOLDER}`,
   );
+
+  const structured = redactor.redact('{"password":"json-only-secret","safe":true}');
+  assert.equal(structured.text, `{${TRANSCRIPT_REDACTION_PLACEHOLDER},"safe":true}`);
+  assert.doesNotMatch(structured.text, /json-only-secret/);
+  const basicAuthorization = redactor.redact("Authorization: Basic dXNlcjpwYXNz");
+  assert.equal(basicAuthorization.text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.doesNotMatch(basicAuthorization.text, /dXNlcjpwYXNz/);
 });
 
 test("holds a long quoted assignment until its quote or line boundary can be redacted", async (t) => {
@@ -185,12 +192,15 @@ test("persists and returns only redacted output while dropping terminal input by
   const writer = store.beginRecord(request("record-output"));
   const mirrored = [
     writer.write(`before ${syntheticSecret.slice(0, 10)}`),
-    writer.write(`${syntheticSecret.slice(10)} after`),
+    writer.write(
+      `${syntheticSecret.slice(10)} after {"password":"json-persist-canary"} Authorization: Basic cGVyc2lzdC1jYW5hcnk=`,
+    ),
   ];
   const committed = await writer.commit();
   mirrored.push(committed.finalFragment);
   const mirrorText = mirrored.map((fragment) => fragment.text).join("");
   assert.doesNotMatch(mirrorText, new RegExp(syntheticSecret));
+  assert.doesNotMatch(mirrorText, /json-persist-canary|cGVyc2lzdC1jYW5hcnk=/);
   assert.match(mirrorText, /\[REDACTED\]/);
 
   const inputWriter = store.beginRecord(request("record-input", "input"));
@@ -210,6 +220,7 @@ test("persists and returns only redacted output while dropping terminal input by
   const disk = await allFileText(root);
   assert.doesNotMatch(disk, new RegExp(syntheticSecret));
   assert.doesNotMatch(disk, /typed-MORROW_SYNTHETIC/);
+  assert.doesNotMatch(disk, /json-persist-canary|cGVyc2lzdC1jYW5hcnk=/);
 });
 
 test("enforces writer access, strict data-only requests and record limits before persistence", async (t) => {

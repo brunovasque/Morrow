@@ -1181,17 +1181,25 @@ function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
   assignmentKeyPattern.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = assignmentKeyPattern.exec(text)) !== null) {
+    let assignmentStart = match.index;
     let cursor = match.index + match[0].length;
+    const keyQuote = match.index > 0 && (text[match.index - 1] === '"' || text[match.index - 1] === "'")
+      ? text[match.index - 1]
+      : undefined;
+    if (keyQuote !== undefined && text[cursor] === keyQuote) {
+      assignmentStart -= 1;
+      cursor += 1;
+    }
     while (cursor < text.length && /[^\S\r\n]/u.test(text[cursor]!)) cursor += 1;
     if (cursor >= text.length) {
-      ranges.push({ start: match.index, end: cursor, replacement: "redact" });
+      ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
       continue;
     }
     if (text[cursor] !== ":" && text[cursor] !== "=") continue;
     cursor += 1;
     while (cursor < text.length && /[^\S\r\n]/u.test(text[cursor]!)) cursor += 1;
     if (cursor >= text.length || text[cursor] === "\r" || text[cursor] === "\n") {
-      ranges.push({ start: match.index, end: cursor, replacement: "redact" });
+      ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
       continue;
     }
     const quote = text[cursor];
@@ -1207,12 +1215,17 @@ function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
         cursor += 1;
         if (character === quote) break;
       }
-      ranges.push({ start: match.index, end: cursor, replacement: "redact" });
+      ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
       continue;
     }
     const valueStart = cursor;
+    if (/(?:^|_)authorization(?:_|$)/iu.test(match[0])) {
+      while (cursor < text.length && text[cursor] !== "\r" && text[cursor] !== "\n") cursor += 1;
+      ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
+      continue;
+    }
     while (cursor < text.length && !/[\s,;]/u.test(text[cursor]!)) cursor += 1;
-    if (cursor > valueStart) ranges.push({ start: match.index, end: cursor, replacement: "redact" });
+    if (cursor > valueStart) ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
   }
 }
 
