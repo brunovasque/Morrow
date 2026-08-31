@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhum; P4-PR02 está `GREEN_CANDIDATE` local e aguarda publicação/revisão remota da mesma branch dedicada
+- bloqueio atual: nenhum; P4-PR02 está `GREEN` na PR #18 e aguarda fechamento documental, merge e regressão pós-merge
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 
