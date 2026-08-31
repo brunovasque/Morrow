@@ -12,17 +12,17 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR01`
 - `active_route_node`: `LIVE_ACTIVITY_EVENT_SCHEMA_AND_PROJECTOR`
-- `active_subaction`: `MERGE_P3_PR04_POST_MERGE_PROOF_THEN_START_P4_PR01`
-- `expected_branch_prefix`: `mvo/p3-pr04-`
-- `write_execution_allowed`: `no product write before closure integration; after merge, scoped only to P4-PR01 in a new dedicated branch`
+- `active_subaction`: `P4_PR01_DEFINE_CANONICAL_LIVE_ACTIVITY_EVENTS_AND_PROJECTOR`
+- `expected_branch_prefix`: `mvo/p4-pr01-`
+- `write_execution_allowed`: `yes, scoped only to P4-PR01 in a dedicated branch`
 - `next_authorized_action`: `START_P4_PR01`
-- `next_authorized_actor`: `Architect/Executor/Test Designer/Security Reviewer after closure integration`
+- `next_authorized_actor`: `Architect/Executor/Test Designer/Security Reviewer`
 
 ## Próxima ação exata
 
-Integrar o fechamento documental pós-merge da P3-PR04. Depois, sincronizar `phase-2/runtime-v0`, reconciliar e iniciar somente P4-PR01 em nova branch dedicada para definir eventos canônicos e o projector do Live Activity Feed.
+Definir e provar em P4-PR01 o schema versionado de eventos canônicos e o projector do Live Activity Feed. O feed deve reconstruir estados mecânicos reais e distinguir ao menos dispatch, gate, tool/process, waiting-lock, waiting-quota, waiting-owner, blocked, failed e done, sem fabricar atividade sem evento.
 
-P3-PR04 está `PROVEN`: PR #14 integrou o head `81dfa89` no merge `d4ccc73`; no SHA integrado, `npm ci`, ConPTY `11/11` e suíte `164/164` passaram, e queries restritas a fingerprints Morrow encontraram zero hosts/probes/filhos órfãos. Os candidates `ff744d2`/`62b06ff` continuam invalidados e as três fixtures vermelhas originais permanecem preservadas sob `.morrow-test-tmp`.
+Base integrada e sincronizada: `461bb4043da86e27e1b075c2d2aef9e296ff1495`. P3-PR04 permanece `PROVEN`; P4-PR01 está `RUNNING` somente na branch `mvo/p4-pr01-live-activity-events`. Persistência/redaction/replay/API/UI continuam fora desta unidade e pertencem às PRs P4/P5 subsequentes.
 
 ## Bloqueios atuais
 
@@ -38,7 +38,7 @@ P3-PR04 está `PROVEN`: PR #14 integrou o head `81dfa89` no merge `d4ccc73`; no 
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `READY` | P4-PR01 é a próxima unidade após integração deste fechamento documental |
+| P4 | `RUNNING` | P4-PR01 define schema canônico e projector mecânico do Live Activity Feed |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |
