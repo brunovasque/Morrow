@@ -12,7 +12,7 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR02`
 - `active_route_node`: `STREAM_REDACTION_RETENTION_TRANSCRIPT`
-- `active_subaction`: `P4_PR02_REDACT_BEFORE_PERSISTENCE_AND_APPLY_RETENTION`
+- `active_subaction`: `P4_PR02_PUBLISH_AND_REVIEW_REMOTE_CANDIDATE`
 - `expected_branch_prefix`: `mvo/p4-pr02-`
 - `write_execution_allowed`: `yes, scoped only to P4-PR02 in a dedicated branch`
 - `next_authorized_action`: `START_P4_PR02`
@@ -20,9 +20,9 @@
 
 ## Próxima ação exata
 
-Implementar e provar em P4-PR02 um Stream Redactor fail-closed, política explícita de retenção e transcript persistente que nunca grave nem devolva segredos/entrada sensível antes de storage ou futura UI.
+Publicar o candidate P4-PR02, abrir a PR contra `phase-2/runtime-v0` e revisar adversarialmente o head remoto exato antes de qualquer merge.
 
-Base integrada e sincronizada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. P4-PR01 permanece `PROVEN`; P4-PR02 está `RUNNING` somente na branch `mvo/p4-pr02-stream-redaction-transcript`. Replay/cursores/liveness/API/UI continuam fora desta unidade.
+Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. O candidate local `4773a5e` passou focused 8/8, suíte 180/180, diff check, reconciliador e review adversarial `GREEN_CANDIDATE`. Replay/cursores/liveness/API/UI continuam fora desta unidade.
 
 ## Bloqueios atuais
 
@@ -38,7 +38,7 @@ Base integrada e sincronizada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. P4-PR
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR01 `PROVEN`; P4-PR02 implementa redaction, retenção e transcript persistente |
+| P4 | `RUNNING` | P4-PR02 `GREEN_CANDIDATE` local em `4773a5e`; publicação/revisão remota pendentes |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |

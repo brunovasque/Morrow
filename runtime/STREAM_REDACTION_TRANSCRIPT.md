@@ -2,7 +2,7 @@
 
 - contract: `MORROW-MVO-001`
 - PR-ID: `P4-PR02`
-- estado: `RUNNING`
+- estado: `GREEN_CANDIDATE`
 - formato durável: `morrow.transcript/1.0`
 - implementação: `src/stream-transcript.ts`
 
