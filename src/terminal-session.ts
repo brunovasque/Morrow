@@ -74,6 +74,7 @@ export type TerminalSessionEvent =
       type: "TERMINAL_SESSION_STARTED";
       payload: {
         pid: number | null;
+        backendHostPid: number | null;
         cwd: string;
         command: string;
         args: string[];
@@ -436,6 +437,7 @@ export class TerminalSessionManager {
       record.startedAt = new Date().toISOString();
       this.emit(record, "TERMINAL_SESSION_STARTED", {
         pid: backendSession.pid,
+        backendHostPid: backendSession.isolationProcessId ?? null,
         cwd: record.workspaceRoot,
         command: request.command,
         args: redactSensitiveArgs(request.args, request.sensitiveArgIndexes),

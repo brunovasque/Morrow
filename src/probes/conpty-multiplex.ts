@@ -227,8 +227,16 @@ try {
   }
 
   const rootPids = allResults.map((result) => result.pid).filter((pid): pid is number => pid !== null);
+  const nativeHostPids = events
+    .filter((event) => event.type === "TERMINAL_SESSION_STARTED")
+    .map((event) => event.type === "TERMINAL_SESSION_STARTED" ? event.payload.backendHostPid : null)
+    .filter((pid): pid is number => pid !== null);
   if (new Set(rootPids).size !== SOAK_ROUNDS * 4) throw new Error("conpty_soak_root_pid_collision");
   if (new Set(descendantPids).size !== SOAK_ROUNDS * 4) throw new Error("conpty_soak_descendant_pid_collision");
+  if (new Set(nativeHostPids).size !== SOAK_ROUNDS * 4) throw new Error("conpty_soak_native_host_pid_collision");
+  if (nativeHostPids.some((pid) => pid === process.pid || rootPids.includes(pid))) {
+    throw new Error("conpty_soak_native_host_not_isolated");
+  }
   const livePids = [...rootPids, ...descendantPids].filter(processIsAlive);
   if (livePids.length > 0) throw new Error(`conpty_soak_orphan_process:${livePids.join(",")}`);
 
@@ -246,6 +254,7 @@ try {
     collisionRefusals,
     distinctRootPids: new Set(rootPids).size,
     distinctDescendantPids: new Set(descendantPids).size,
+    distinctNativeHostPids: new Set(nativeHostPids).size,
     identityBoundEvents: events.length,
     inputIsolation: true,
     noOrphans: true,
