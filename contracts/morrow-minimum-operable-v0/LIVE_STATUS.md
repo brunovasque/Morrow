@@ -10,19 +10,19 @@
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
 - `active_phase`: `P4`
-- `active_pr_id`: `P4-PR01`
-- `active_route_node`: `LIVE_ACTIVITY_EVENT_SCHEMA_AND_PROJECTOR`
-- `active_subaction`: `P4_PR01_PUBLISH_GREEN_CLOSURE_AND_MERGE`
+- `active_pr_id`: `P4-PR02`
+- `active_route_node`: `STREAM_REDACTION_RETENTION_TRANSCRIPT`
+- `active_subaction`: `MERGE_P4_PR01_POST_MERGE_PROOF_THEN_START_P4_PR02`
 - `expected_branch_prefix`: `mvo/p4-pr01-`
-- `write_execution_allowed`: `yes, scoped only to P4-PR01 in a dedicated branch`
-- `next_authorized_action`: `START_P4_PR01`
+- `write_execution_allowed`: `no product write until the P4-PR01 post-merge proof is integrated; then yes, scoped only to P4-PR02 in a new dedicated branch`
+- `next_authorized_action`: `START_P4_PR02`
 - `next_authorized_actor`: `Architect/Executor/Test Designer/Security Reviewer`
 
 ## Próxima ação exata
 
-Publicar o fechamento `GREEN`, conferir que o delta final é somente contratual e integrar a PR #16. O head remoto `b240c7c` está mergeable/CLEAN: schema `morrow.live-activity/1.0`, dez estados AC-21, focados 8/8, suíte 172/172, diff check e reconciliador verdes.
+Publicar e integrar esta prova pós-merge estritamente documental da P4-PR01. Depois de sincronizar a integração, iniciar P4-PR02 em nova branch dedicada para Stream Redactor, retenção e transcript persistente.
 
-Base integrada e sincronizada: `461bb4043da86e27e1b075c2d2aef9e296ff1495`. P3-PR04 permanece `PROVEN`; P4-PR01 está `RUNNING` somente na branch `mvo/p4-pr01-live-activity-events`. Persistência/redaction/replay/API/UI continuam fora desta unidade e pertencem às PRs P4/P5 subsequentes.
+Base integrada e sincronizada: `312bd90016931f7be76810a89e79d32043253dde`. P4-PR01 está `PROVEN`: PR #16 integrada, `npm ci`, focados 8/8 e suíte 172/172 verdes pós-merge. Replay/API/UI continuam fora da P4-PR02 e pertencem às PRs P4/P5 subsequentes.
 
 ## Bloqueios atuais
 
@@ -38,7 +38,7 @@ Base integrada e sincronizada: `461bb4043da86e27e1b075c2d2aef9e296ff1495`. P3-PR
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR01 `GREEN` no remoto `b240c7c`; publicar fechamento/integrar, `PROVEN` somente pós-merge |
+| P4 | `RUNNING` | P4-PR01 `PROVEN` em `312bd90`; P4-PR02 é a próxima unidade determinística |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |
