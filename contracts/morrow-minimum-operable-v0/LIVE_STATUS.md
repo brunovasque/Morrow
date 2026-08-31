@@ -12,7 +12,7 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR01`
 - `active_route_node`: `LIVE_ACTIVITY_EVENT_SCHEMA_AND_PROJECTOR`
-- `active_subaction`: `P4_PR01_PUBLISH_AND_REVIEW_CANONICAL_EVENT_CANDIDATE`
+- `active_subaction`: `P4_PR01_PUBLISH_GREEN_CLOSURE_AND_MERGE`
 - `expected_branch_prefix`: `mvo/p4-pr01-`
 - `write_execution_allowed`: `yes, scoped only to P4-PR01 in a dedicated branch`
 - `next_authorized_action`: `START_P4_PR01`
@@ -20,7 +20,7 @@
 
 ## Próxima ação exata
 
-Publicar e revisar remotamente o candidate P4-PR01 com hardening `375da19`. O schema `morrow.live-activity/1.0` e o projector puro reconstruíram os dez estados AC-21; focados 8/8, suíte 172/172 e diff check estão verdes. Integração continua proibida até revisão do novo head remoto exato.
+Publicar o fechamento `GREEN`, conferir que o delta final é somente contratual e integrar a PR #16. O head remoto `b240c7c` está mergeable/CLEAN: schema `morrow.live-activity/1.0`, dez estados AC-21, focados 8/8, suíte 172/172, diff check e reconciliador verdes.
 
 Base integrada e sincronizada: `461bb4043da86e27e1b075c2d2aef9e296ff1495`. P3-PR04 permanece `PROVEN`; P4-PR01 está `RUNNING` somente na branch `mvo/p4-pr01-live-activity-events`. Persistência/redaction/replay/API/UI continuam fora desta unidade e pertencem às PRs P4/P5 subsequentes.
 
@@ -38,7 +38,7 @@ Base integrada e sincronizada: `461bb4043da86e27e1b075c2d2aef9e296ff1495`. P3-PR
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR01 `GREEN_CANDIDATE` com hardening `375da19`; publicar/revisar antes de integrar |
+| P4 | `RUNNING` | P4-PR01 `GREEN` no remoto `b240c7c`; publicar fechamento/integrar, `PROVEN` somente pós-merge |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |
