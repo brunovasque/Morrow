@@ -12,7 +12,7 @@
 - `active_phase`: `P3`
 - `active_pr_id`: `P3-PR04`
 - `active_route_node`: `CONPTY_MULTIPLEXING_AND_CLEANUP`
-- `active_subaction`: `P3_PR04_MULTIPLEXING_CLEANUP_TIMEOUT_COLLISIONS`
+- `active_subaction`: `P3_PR04_PUBLISH_REMOTE_ADVERSARIAL_REVIEW`
 - `expected_branch_prefix`: `mvo/p3-pr04-`
 - `write_execution_allowed`: `yes, scoped only to P3-PR04 in a dedicated branch`
 - `next_authorized_action`: `START_P3_PR04`
@@ -20,15 +20,15 @@
 
 ## Próxima ação exata
 
-Executar somente `P3-PR04` na branch `mvo/p3-pr04-conpty-multiplexing`, nascida da base integrada `5624e2a`: provar multiplexing simultâneo, isolamento de workspace/identidade/input, timeout e cancel distinguíveis, colisões fail-closed e cleanup sem processo órfão.
+Publicar o candidate local `ff744d2` de `P3-PR04` na branch `mvo/p3-pr04-conpty-multiplexing`, conferir base/head remotos e revisar adversarialmente o diff exato. Corrigir qualquer achado material na mesma branch e reexecutar soak, backend, suíte, diff check e reconciliador antes de integrar.
 
-A PR #13 foi integrada em `5624e2a`; o head provado `ffe0cc4` é ancestral da integração. O pós-merge passou `npm ci`, probes Codex/ConPTY e quota reais, ConPTY `5/5` e suíte `156/156`, com branch oficial sincronizada e limpa. P3-PR04 deve usar somente sessões e raízes temporárias controladas pelo Morrow; terminais/projetos do operador, Enova e targets externos continuam proibidos.
+O candidate `ff744d2` passou soak final de 12 sessões, backend `7/7`, suíte `159/159` e regressões Codex quota-session. A revisão local está `GREEN_CANDIDATE`, não `PROVEN`; publicação, revisão do head remoto e pós-merge continuam obrigatórios. Fixtures ficam sob `.morrow-test-tmp`; terminais/projetos do operador, Enova e targets externos continuam proibidos.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `none` | `none` | nenhum bloqueio ativo | executar somente P3-PR04 e parar diante de processo órfão, workspace compartilhado ou identidade ambígua |
+| `none` | `none` | nenhum bloqueio ativo | publicar e revisar somente o candidate P3-PR04; qualquer processo órfão, colisão aceita ou identidade ambígua reabre o candidate |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ A PR #13 foi integrada em `5624e2a`; o head provado `ffe0cc4` é ancestral da in
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `RUNNING` | P3-PR04 em branch dedicada sobre `5624e2a`; multiplexing/cleanup/timeout/cancel/colisões em execução |
+| P3 | `RUNNING` | P3-PR04 candidate local `ff744d2` verde; publicação, review remoto e integração pendentes |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |

@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhum; P3-PR04 iniciou na base integrada `5624e2a` para provar multiplexing, cleanup, timeout/cancel e colisões sob sessões controladas
+- bloqueio atual: nenhum; P3-PR04 possui candidate local `ff744d2` e revisão `GREEN_CANDIDATE`, com publicação/review remoto ainda pendentes
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 

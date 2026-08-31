@@ -79,6 +79,6 @@ O adapter exige `provider: openai`, `approval: never` e `sandbox: read-only`. Ca
 
 - quota restante/reset não é inventada porque a CLI medida não a expôs de forma confiável;
 - ConPTY e sandbox read-only do CLI não transformam o processo em sandbox geral do sistema;
-- timeout/cancel concorrente, colisões e múltiplas sessões pertencem à P3-PR04;
+- timeout/cancel concorrente, colisões e múltiplas sessões foram provados na P3-PR04 e estão documentados em `CONPTY_MULTIPLEXING.md`;
 - redaction/persistência/replay pertencem à P4;
 - routing multi-role e execução completa do contrato pertencem à P7.

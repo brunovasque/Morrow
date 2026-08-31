@@ -57,7 +57,7 @@ O child-probe confirma simultaneamente:
 - ambiente e perfil do operador não são herdados implicitamente; as provas usam perfil sob raiz temporária controlada;
 - UI, transcript, redaction e persistência de terminal pertencem a P4/P5;
 - Codex quota-session dentro deste backend pertence a P3-PR03;
-- soak de múltiplas sessões e colisões pertence a P3-PR04;
+- o soak de múltiplas sessões, colisões e cleanup foi fechado em P3-PR04 e está documentado em `CONPTY_MULTIPLEXING.md`;
 - este backend ainda não é o padrão global; a composição é explícita por `TerminalSessionManager`.
 
 Nenhuma credencial real, rede de produto, Enova ou target externo foi usado na prova.
