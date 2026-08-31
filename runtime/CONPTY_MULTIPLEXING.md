@@ -2,7 +2,7 @@
 
 - contract: `MORROW-MVO-001`
 - PR-ID: `P3-PR04`
-- estado: `GREEN_CANDIDATE`
+- estado: `PROVEN`
 
 ## Escopo
 
@@ -56,7 +56,7 @@ As execuções desta unidade não usaram credencial exportada, API, rede de prod
 
 ## Limites
 
-- a capacidade dois é o teto medido do MVO e está `GREEN_CANDIDATE`; integração ainda exige revisão do head remoto exato;
+- a capacidade dois é o teto medido e integrado do MVO; qualquer aumento exige nova prova;
 - aumentar esse teto exige novo probe real, soak repetido e revisão da dependência nativa;
 - ConPTY/Job Object fornecem ciclo de vida e contenção da árvore, não sandbox geral do sistema;
 - persistência, redaction, replay e API de múltiplas sessões pertencem à P4;
