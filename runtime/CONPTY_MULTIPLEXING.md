@@ -48,9 +48,9 @@ TerminalSessionManager
   → launcher + Job Object + comando e descendentes da sessão
 ```
 
-O factory nativo recusa uso fora do entrypoint conectado do host. O proxy valida mensagens plain com campos exatos, confirma que o PID anunciado é o PID real do child e não publica exit antes do fechamento físico do host. Writes possuem fila própria, de modo que drain pendente não bloqueia stop fatal. Output e exit mantêm ordem pelo canal IPC.
+O factory nativo recusa uso fora do entrypoint conectado do host. O proxy valida mensagens plain com campos exatos, confirma que o PID anunciado é o PID real do child e não publica exit antes do fechamento físico do host. No primeiro comando IPC inválido, o host entra em falha irreversível e não processa initialize/write já enfileirados. Writes possuem fila própria, de modo que drain pendente não bloqueia stop fatal. Output e exit mantêm ordem pelo canal IPC.
 
-A contraprova encerrou simultaneamente duas sessões em hosts distintos sem assertion e com todos os PIDs mortos ao concluir. Outro teste encerrou deliberadamente somente o host Morrow conhecido: o manager permaneceu vivo, recebeu falha controlada e o Job Object eliminou terminal e descendente. O backend passou `10/10`, a suíte `163/163` e o soak passou 3 rodadas/12 sessões/12 hosts distintos com `noOrphans=true` e fixture removida.
+A contraprova encerrou simultaneamente duas sessões em hosts distintos sem assertion e com todos os PIDs mortos ao concluir. Outro teste encerrou deliberadamente somente o host Morrow conhecido: o manager permaneceu vivo, recebeu falha controlada e o Job Object eliminou terminal e descendente. O ataque IPC envia comando inválido seguido de initialize válido e prova que nenhuma sessão começa. O backend passou `11/11`, a suíte `164/164` e o soak passou 3 rodadas/12 sessões/12 hosts distintos com `noOrphans=true` e fixture removida.
 
 As execuções desta unidade não usaram credencial exportada, API, rede de produto, Enova, target externo, diretório de projeto do operador ou terminal do operador.
 

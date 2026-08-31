@@ -20,7 +20,7 @@
 
 ## Próxima ação exata
 
-Publicar e revisar remotamente o candidate corrigido da P3-PR04 na PR #14. `c9ade54f` isola uma sessão/addon por processo host; contraprovas locais de saída simultânea e crash contido passaram, assim como backend `10/10`, suíte `163/163`, soak de 12 sessões/12 hosts sem órfãos e diff check.
+Publicar e revisar remotamente o candidate corrigido da P3-PR04 na PR #14. `c9ade54f` isola uma sessão/addon por processo host e `8698dd8` torna erro de protocolo irreversível; contraprovas locais de saída simultânea, crash contido e IPC inválido passaram, assim como backend `11/11`, suíte `164/164`, soak de 12 sessões/12 hosts sem órfãos e diff check.
 
 Os candidates `ff744d2`/`62b06ff` continuam invalidados. A correção local está `GREEN_CANDIDATE`, não `PROVEN`: fechar documentos, reconciliar, publicar, conferir branch/base/SHA remoto, revisar o diff exato e somente integrar após gates remotos verdes. As três fixtures vermelhas originais permanecem preservadas sob `.morrow-test-tmp`.
 
@@ -37,7 +37,7 @@ Os candidates `ff744d2`/`62b06ff` continuam invalidados. A correção local est�
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `RUNNING` | P3-PR04/PR #14 `GREEN_CANDIDATE` local em `c9ade54f`; integração proibida até revisão do head remoto exato |
+| P3 | `RUNNING` | P3-PR04/PR #14 `GREEN_CANDIDATE` local com isolamento `c9ade54f` e IPC fail-closed `8698dd8`; integração proibida até revisão do head remoto exato |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
