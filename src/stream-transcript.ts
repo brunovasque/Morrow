@@ -133,11 +133,7 @@ const genericPatternHoldback = 4_096;
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const canonicalTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const unicodeFormatControlPattern = /^\p{Cf}$/u;
-const assignmentPatterns = [
-  /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*"[^"\r\n]*(?:"|(?=[\r\n]|$))/giu,
-  /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*'[^'\r\n]*(?:'|(?=[\r\n]|$))/giu,
-  /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*(?!["'])[^\s,;\r\n]+/giu,
-] as const;
+const assignmentPrefixPattern = /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*/giu;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/giu;
 const commonTokenPatterns = [
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/gu,
@@ -232,11 +228,11 @@ export class StreamRedactor {
       collectLiteralRanges(text, literal, ranges);
       collectMappedLiteralRanges(terminal, literal, ranges);
     }
-    for (const pattern of assignmentPatterns) collectPatternRanges(text, pattern, ranges);
+    collectAssignmentRanges(text, ranges);
     collectPatternRanges(text, bearerPattern, ranges);
     for (const pattern of commonTokenPatterns) collectPatternRanges(text, pattern, ranges);
     collectPatternRanges(text, privateKeyPattern, ranges);
-    for (const pattern of assignmentPatterns) collectMappedPatternRanges(terminal, pattern, ranges);
+    collectMappedAssignmentRanges(terminal, ranges);
     collectMappedPatternRanges(terminal, bearerPattern, ranges);
     for (const pattern of commonTokenPatterns) collectMappedPatternRanges(terminal, pattern, ranges);
     collectMappedPatternRanges(terminal, privateKeyPattern, ranges);
@@ -1076,6 +1072,43 @@ function collectMappedLiteralRanges(
 ): void {
   const visibleRanges: RedactionRange[] = [];
   collectLiteralRanges(terminal.visible, literal, visibleRanges);
+  mapVisibleRanges(terminal, visibleRanges, ranges);
+}
+
+function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
+  assignmentPrefixPattern.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = assignmentPrefixPattern.exec(text)) !== null) {
+    let cursor = match.index + match[0].length;
+    if (cursor >= text.length) continue;
+    const quote = text[cursor];
+    if (quote === '"' || quote === "'") {
+      cursor += 1;
+      while (cursor < text.length) {
+        const character = text[cursor];
+        if (character === "\r" || character === "\n") break;
+        if (character === "\\") {
+          cursor += cursor + 1 < text.length && text[cursor + 1] !== "\r" && text[cursor + 1] !== "\n" ? 2 : 1;
+          continue;
+        }
+        cursor += 1;
+        if (character === quote) break;
+      }
+      ranges.push({ start: match.index, end: cursor, replacement: "redact" });
+      continue;
+    }
+    const valueStart = cursor;
+    while (cursor < text.length && !/[\s,;]/u.test(text[cursor]!)) cursor += 1;
+    if (cursor > valueStart) ranges.push({ start: match.index, end: cursor, replacement: "redact" });
+  }
+}
+
+function collectMappedAssignmentRanges(
+  terminal: NormalizedTerminalText,
+  ranges: RedactionRange[],
+): void {
+  const visibleRanges: RedactionRange[] = [];
+  collectAssignmentRanges(terminal.visible, visibleRanges);
   mapVisibleRanges(terminal, visibleRanges, ranges);
 }
 

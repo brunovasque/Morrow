@@ -142,6 +142,17 @@ test("holds a long quoted assignment until its quote or line boundary can be red
   assert.doesNotMatch(lineMirrored, /QUOTE_CANARY|q{256}/);
   assert.equal(store.inspect("auditor").records[1]?.content, lineMirrored);
 
+  const escapedQuoteWriter = store.beginRecord(request("record-escaped-quote-assignment"));
+  const escapedFragments = [
+    escapedQuoteWriter.write(`prefix password="A \\"${quotedSecret}" suffix`),
+  ];
+  const escapedCommitted = await escapedQuoteWriter.commit();
+  escapedFragments.push(escapedCommitted.finalFragment);
+  const escapedMirrored = escapedFragments.map((fragment) => fragment.text).join("");
+  assert.equal(escapedMirrored, `prefix ${TRANSCRIPT_REDACTION_PLACEHOLDER} suffix`);
+  assert.doesNotMatch(escapedMirrored, /QUOTE_CANARY|q{256}/);
+  assert.equal(store.inspect("auditor").records[2]?.content, escapedMirrored);
+
   await store.close();
   assert.doesNotMatch(await allFileText(root), /QUOTE_CANARY|q{256}/);
 });
