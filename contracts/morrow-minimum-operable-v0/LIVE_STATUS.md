@@ -12,7 +12,7 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR02`
 - `active_route_node`: `STREAM_REDACTION_RETENTION_TRANSCRIPT`
-- `active_subaction`: `P4_PR02_PUBLISH_GREEN_CLOSURE_AND_MERGE`
+- `active_subaction`: `P4_PR02_PUBLISH_REMOTE_REVIEW_FIXES`
 - `expected_branch_prefix`: `mvo/p4-pr02-`
 - `write_execution_allowed`: `yes, scoped only to P4-PR02 in a dedicated branch`
 - `next_authorized_action`: `START_P4_PR02`
@@ -20,9 +20,9 @@
 
 ## Próxima ação exata
 
-Publicar o fechamento `GREEN`, conferir que o delta final é somente contratual e integrar a PR #18; `PROVEN` continua condicionado ao merge e à regressão pós-merge.
+Publicar as três correções materiais da revisão remota, responder os comentários e revalidar o head exato da PR #18 antes de restaurar `GREEN`; `PROVEN` continua condicionado ao merge e à regressão pós-merge.
 
-Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. A PR #18 no head remoto `9ce065d` está mergeable/CLEAN e passou focused 8/8, suíte final 180/180, soak de controle, diff check, reconciliador e review adversarial `GREEN`. `D-013` preserva o falso vermelho intermitente de PID sem alterar P3 nesta unidade.
+Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. O `GREEN` do head remoto `e525eb8` foi invalidado por três achados: assignment quoted incompleto além do holdback, falta de `maxRecordBytes` no load e literal colidindo com marcador. `2c781b6` corrige e contrapõe os três; focused 10/10 e suíte 182/182 estão verdes localmente. `D-013` preserva o falso vermelho intermitente de PID sem alterar P3 nesta unidade.
 
 ## Bloqueios atuais
 
@@ -38,7 +38,7 @@ Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. A PR #18 no head rem
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR02 `GREEN` na PR #18/head `9ce065d`; fechamento/merge e regressão pós-merge pendentes |
+| P4 | `RUNNING` | P4-PR02 `GREEN_CANDIDATE` local após três correções remotas; publicação/revalidação/merge e regressão pós-merge pendentes |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |

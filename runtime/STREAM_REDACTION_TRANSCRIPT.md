@@ -2,7 +2,7 @@
 
 - contract: `MORROW-MVO-001`
 - PR-ID: `P4-PR02`
-- estado: `GREEN`
+- estado: `GREEN_CANDIDATE`
 - formato durável: `morrow.transcript/1.0`
 - implementação: `src/stream-transcript.ts`
 
@@ -14,11 +14,11 @@ Nenhum produtor grava ou entrega texto humano diretamente ao storage ou à futur
 chunk não confiável -> TranscriptRecordWriter -> StreamRedactor -> fragmento seguro -> snapshot seguro
 ```
 
-O writer mantém lookbehind limitado para reconhecer valores divididos entre chunks. Somente fragmentos já redigidos são devolvidos para espelhamento; o restante fica apenas em memória até poder ser classificado com segurança. Exceder os limites encerra a sessão sem gravar o conteúdo pendente.
+O writer mantém lookbehind limitado para reconhecer valores divididos entre chunks. Assignment quoted sem aspa final é tratado como uma faixa sensível ainda aberta, mesmo quando passa de 4.096 caracteres: nenhum sufixo é liberado antes do fechamento. Somente fragmentos já redigidos são devolvidos para espelhamento; o restante fica apenas em memória até poder ser classificado com segurança. Exceder os limites encerra a sessão sem gravar o conteúdo pendente.
 
 Antes do matching, uma visão textual do terminal é calculada com mapeamento para os bytes/caracteres brutos. Controles C0/C1, backspace, sequências VT/ANSI/OSC, format controls Unicode, bidi/zero-width e variation selectors são removidos do transcript público; um segredo cujos caracteres foram separados por esses controles é redigido como um único intervalo bruto. Assim um renderer futuro não pode reconstruir visualmente um canário que o matcher só deixou de ver por causa de escape sequence ou caractere invisível. O transcript P4 é texto humano seguro, não um buffer de emulação de terminal.
 
-Valores sensíveis conhecidos são registrados explicitamente na política runtime e substituídos por `[REDACTED]`. A lista de valores nunca entra no snapshot, em hash, em log ou no resultado público. Reconhecedores fechados também cobrem assignments sensíveis, bearer tokens, formatos comuns de token e private keys. Eles são defesa adicional: um segredo real não registrado continua proibido na origem, não vira uma permissão implícita para persistir.
+Valores sensíveis conhecidos são registrados explicitamente na política runtime e substituídos por `[REDACTED]`. A lista de valores nunca entra no snapshot, em hash, em log ou no resultado público. Literais que contenham ou sejam substring de qualquer marcador gerado são recusados para preservar a idempotência da redaction. Reconhecedores fechados também cobrem assignments sensíveis, bearer tokens, formatos comuns de token e private keys. Eles são defesa adicional: um segredo real não registrado continua proibido na origem, não vira uma permissão implícita para persistir.
 
 O stream `input` é sempre sensível por padrão. Seu texto é descartado e o transcript guarda no máximo `[SENSITIVE_INPUT_REDACTED]`; não existe flag capaz de liberar stdin em claro.
 
@@ -41,7 +41,7 @@ O único artefato durável é `transcript-v1.json`:
 
 - gravação temporária e rename atômico, ambos contendo somente dados já redigidos;
 - checksum sobre formato, revisão, política e registros;
-- validação exata de chaves, tipos, ordem e limites no reopen;
+- validação exata de chaves, tipos, ordem e limites total e individual por registro no reopen;
 - nova passada do redactor sobre cada registro carregado; texto que hoje seria redigido torna o snapshot inválido;
 - lease publicada atomicamente evita dois writers concorrentes na mesma raiz e não deixa lock vazio se o processo cair durante a aquisição;
 - reopen remove somente temporários de snapshot/lease cujo nome Morrow confere exatamente, evitando que restos de crash contornem a retenção sem apagar arquivos alheios;
