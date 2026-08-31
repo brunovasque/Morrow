@@ -133,7 +133,7 @@ const genericPatternHoldback = 4_096;
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const canonicalTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const unicodeFormatControlPattern = /^\p{Cf}$/u;
-const assignmentPrefixPattern = /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*/giu;
+const assignmentKeyPattern = /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b/giu;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/giu;
 const commonTokenPatterns = [
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/gu,
@@ -1076,11 +1076,22 @@ function collectMappedLiteralRanges(
 }
 
 function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
-  assignmentPrefixPattern.lastIndex = 0;
+  assignmentKeyPattern.lastIndex = 0;
   let match: RegExpExecArray | null;
-  while ((match = assignmentPrefixPattern.exec(text)) !== null) {
+  while ((match = assignmentKeyPattern.exec(text)) !== null) {
     let cursor = match.index + match[0].length;
-    if (cursor >= text.length) continue;
+    while (cursor < text.length && /[^\S\r\n]/u.test(text[cursor]!)) cursor += 1;
+    if (cursor >= text.length) {
+      ranges.push({ start: match.index, end: cursor, replacement: "redact" });
+      continue;
+    }
+    if (text[cursor] !== ":" && text[cursor] !== "=") continue;
+    cursor += 1;
+    while (cursor < text.length && /[^\S\r\n]/u.test(text[cursor]!)) cursor += 1;
+    if (cursor >= text.length || text[cursor] === "\r" || text[cursor] === "\n") {
+      ranges.push({ start: match.index, end: cursor, replacement: "redact" });
+      continue;
+    }
     const quote = text[cursor];
     if (quote === '"' || quote === "'") {
       cursor += 1;

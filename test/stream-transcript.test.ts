@@ -153,6 +153,18 @@ test("holds a long quoted assignment until its quote or line boundary can be red
   assert.doesNotMatch(escapedMirrored, /QUOTE_CANARY|q{256}/);
   assert.equal(store.inspect("auditor").records[2]?.content, escapedMirrored);
 
+  const delayedValueWriter = store.beginRecord(request("record-delayed-assignment-value"));
+  const delayedFragments = [
+    delayedValueWriter.write(`prefix password${" ".repeat(2_500)}=${" ".repeat(2_500)}`),
+    delayedValueWriter.write(`${quotedSecret} suffix`),
+  ];
+  const delayedCommitted = await delayedValueWriter.commit();
+  delayedFragments.push(delayedCommitted.finalFragment);
+  const delayedMirrored = delayedFragments.map((fragment) => fragment.text).join("");
+  assert.equal(delayedMirrored, `prefix ${TRANSCRIPT_REDACTION_PLACEHOLDER} suffix`);
+  assert.doesNotMatch(delayedMirrored, /QUOTE_CANARY|q{256}/);
+  assert.equal(store.inspect("auditor").records[3]?.content, delayedMirrored);
+
   await store.close();
   assert.doesNotMatch(await allFileText(root), /QUOTE_CANARY|q{256}/);
 });
