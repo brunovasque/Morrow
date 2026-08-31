@@ -12,7 +12,7 @@
 - `active_phase`: `P3`
 - `active_pr_id`: `P3-PR04`
 - `active_route_node`: `CONPTY_MULTIPLEXING_AND_CLEANUP`
-- `active_subaction`: `P3_PR04_FIX_NATIVE_CONPTY_EXIT_RACE`
+- `active_subaction`: `P3_PR04_PUBLISH_AND_REVIEW_ISOLATED_HOST_CANDIDATE`
 - `expected_branch_prefix`: `mvo/p3-pr04-`
 - `write_execution_allowed`: `yes, scoped only to P3-PR04 in a dedicated branch`
 - `next_authorized_action`: `START_P3_PR04`
@@ -20,15 +20,15 @@
 
 ## Próxima ação exata
 
-Corrigir a falha material da P3-PR04 na PR #14: duas sessões não podem compartilhar o vetor nativo `ptyHandles` de `node-pty 1.1.0`. Implementar host de processo isolado por sessão ConPTY, adicionar contraprova da separação e somente então reexecutar soak, backend, suíte, diff check e reconciliador.
+Publicar e revisar remotamente o candidate corrigido da P3-PR04 na PR #14. `c9ade54f` isola uma sessão/addon por processo host; contraprovas locais de saída simultânea e crash contido passaram, assim como backend `10/10`, suíte `163/163`, soak de 12 sessões/12 hosts sem órfãos e diff check.
 
-O candidate `ff744d2` está invalidado. Revalidações tiveram hard timeout em três estágios de `input-completion`, e o dono observou assertion nativa em `conpty.cc:106`; a fonte confirma remoção concorrente de estado global sem mutex. Não repetir probe antes da correção. Query limitada a fingerprints Morrow encontrou zero processos vivos; três fixtures falhas estão preservadas sob `.morrow-test-tmp`.
+Os candidates `ff744d2`/`62b06ff` continuam invalidados. A correção local está `GREEN_CANDIDATE`, não `PROVEN`: fechar documentos, reconciliar, publicar, conferir branch/base/SHA remoto, revisar o diff exato e somente integrar após gates remotos verdes. As três fixtures vermelhas originais permanecem preservadas sob `.morrow-test-tmp`.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P3-PR04-NATIVE-EXIT-RACE` | `technical` | assertion/hang nativo ao encerrar sessões simultâneas no mesmo addon | isolar uma sessão ConPTY por processo host, contraprovar e revalidar; merge proibido até GREEN |
+| nenhum | — | a falha nativa material foi corrigida e contraprovada localmente | publicação/revisão remota ainda é gate, não bloqueio técnico |
 
 ## Status por fase
 
@@ -37,7 +37,7 @@ O candidate `ff744d2` está invalidado. Revalidações tiveram hard timeout em t
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `RUNNING` | P3-PR04/PR #14 `RED_MATERIAL`; correção da corrida nativa em execução, integração proibida |
+| P3 | `RUNNING` | P3-PR04/PR #14 `GREEN_CANDIDATE` local em `c9ade54f`; integração proibida até revisão do head remoto exato |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |

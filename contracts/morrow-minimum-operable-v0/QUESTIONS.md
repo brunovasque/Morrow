@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: falha técnica material P3-PR04 sem decisão do dono pendente; corrigir corrida nativa por isolamento de processo antes de repetir probes ou integrar
+- bloqueio atual: nenhum; P3-PR04 está `GREEN_CANDIDATE` local e segue para publicação/revisão remota sem decisão do dono pendente
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 
