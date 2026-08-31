@@ -134,8 +134,8 @@ const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const canonicalTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const unicodeFormatControlPattern = /^\p{Cf}$/u;
 const assignmentPatterns = [
-  /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*"[^"\r\n]*(?:"|$)/giu,
-  /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*'[^'\r\n]*(?:'|$)/giu,
+  /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*"[^"\r\n]*(?:"|(?=[\r\n]|$))/giu,
+  /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*'[^'\r\n]*(?:'|(?=[\r\n]|$))/giu,
   /\b(?:token|secret|password|credential|authorization|api[_-]?key)\b\s*[:=]\s*(?!["'])[^\s,;\r\n]+/giu,
 ] as const;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/giu;

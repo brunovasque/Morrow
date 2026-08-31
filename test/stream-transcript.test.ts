@@ -113,7 +113,7 @@ test("redacts exact literals and token shapes split across stream chunks before 
   assert.equal(invisible.text, "hidden=[REDACTED]");
 });
 
-test("holds an incomplete quoted assignment beyond the stream lookbehind until it can be redacted", async (t) => {
+test("holds a long quoted assignment until its quote or line boundary can be redacted", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(configuration(root));
   const quotedSecret = `QUOTE_CANARY_${"q".repeat(5_000)}_END`;
@@ -130,6 +130,18 @@ test("holds an incomplete quoted assignment beyond the stream lookbehind until i
   assert.doesNotMatch(mirrored, /QUOTE_CANARY/);
   assert.doesNotMatch(mirrored, /q{256}/);
   assert.equal(store.inspect("auditor").records[0]?.content, mirrored);
+
+  const lineTerminatedWriter = store.beginRecord(request("record-line-terminated-quoted-assignment"));
+  const lineFragments = [
+    lineTerminatedWriter.write(`prefix password="A ${quotedSecret}\nvisible`),
+  ];
+  const lineCommitted = await lineTerminatedWriter.commit();
+  lineFragments.push(lineCommitted.finalFragment);
+  const lineMirrored = lineFragments.map((fragment) => fragment.text).join("");
+  assert.equal(lineMirrored, `prefix ${TRANSCRIPT_REDACTION_PLACEHOLDER}\nvisible`);
+  assert.doesNotMatch(lineMirrored, /QUOTE_CANARY|q{256}/);
+  assert.equal(store.inspect("auditor").records[1]?.content, lineMirrored);
+
   await store.close();
   assert.doesNotMatch(await allFileText(root), /QUOTE_CANARY|q{256}/);
 });
