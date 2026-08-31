@@ -12,7 +12,7 @@
 - `active_phase`: `P3`
 - `active_pr_id`: `P3-PR04`
 - `active_route_node`: `CONPTY_MULTIPLEXING_AND_CLEANUP`
-- `active_subaction`: `P3_PR04_PUBLISH_AND_REVIEW_ISOLATED_HOST_CANDIDATE`
+- `active_subaction`: `P3_PR04_PUBLISH_GREEN_CLOSURE_AND_MERGE`
 - `expected_branch_prefix`: `mvo/p3-pr04-`
 - `write_execution_allowed`: `yes, scoped only to P3-PR04 in a dedicated branch`
 - `next_authorized_action`: `START_P3_PR04`
@@ -20,7 +20,7 @@
 
 ## Próxima ação exata
 
-Publicar e revisar remotamente o candidate corrigido da P3-PR04 na PR #14. `c9ade54f` isola uma sessão/addon por processo host e `8698dd8` torna erro de protocolo irreversível; contraprovas locais de saída simultânea, crash contido e IPC inválido passaram, assim como backend `11/11`, suíte `164/164`, soak de 12 sessões/12 hosts sem órfãos e diff check.
+Publicar o fechamento `GREEN` da P3-PR04, conferir que o delta final é somente contratual e integrar a PR #14. O head remoto corrigido `e686882` foi revisado contra a base exata: branch/PR corretos, mergeable/CLEAN, corpo atualizado, backend `11/11`, suíte `164/164`, soak 12 sessões/12 hosts sem órfãos, diff check e reconciliador verdes.
 
 Os candidates `ff744d2`/`62b06ff` continuam invalidados. A correção local está `GREEN_CANDIDATE`, não `PROVEN`: fechar documentos, reconciliar, publicar, conferir branch/base/SHA remoto, revisar o diff exato e somente integrar após gates remotos verdes. As três fixtures vermelhas originais permanecem preservadas sob `.morrow-test-tmp`.
 
@@ -37,7 +37,7 @@ Os candidates `ff744d2`/`62b06ff` continuam invalidados. A correção local est�
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `RUNNING` | P3-PR04/PR #14 `GREEN_CANDIDATE` local com isolamento `c9ade54f` e IPC fail-closed `8698dd8`; integração proibida até revisão do head remoto exato |
+| P3 | `RUNNING` | P3-PR04/PR #14 `GREEN` no head remoto `e686882`; publicar fechamento e integrar, `PROVEN` somente pós-merge/regressão |
 | P4 | `BLOCKED` | depende de P2/P3 |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
