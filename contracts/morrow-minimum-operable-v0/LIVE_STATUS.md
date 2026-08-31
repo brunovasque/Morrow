@@ -3,26 +3,26 @@
 ## Snapshot atual
 
 - `snapshot_version`: `1.0`
-- `updated_at`: `2026-08-30`
+- `updated_at`: `2026-08-31`
 - `contract_version`: `1.0`
 - `contract_state`: `READY_FOR_EXECUTION`
 - `target_id`: `morrow-core`
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
-- `active_phase`: `P3`
-- `active_pr_id`: `P3-PR04`
-- `active_route_node`: `CONPTY_MULTIPLEXING_AND_CLEANUP`
-- `active_subaction`: `P3_PR04_PUBLISH_GREEN_CLOSURE_AND_MERGE`
+- `active_phase`: `P4`
+- `active_pr_id`: `P4-PR01`
+- `active_route_node`: `LIVE_ACTIVITY_EVENT_SCHEMA_AND_PROJECTOR`
+- `active_subaction`: `MERGE_P3_PR04_POST_MERGE_PROOF_THEN_START_P4_PR01`
 - `expected_branch_prefix`: `mvo/p3-pr04-`
-- `write_execution_allowed`: `yes, scoped only to P3-PR04 in a dedicated branch`
-- `next_authorized_action`: `START_P3_PR04`
-- `next_authorized_actor`: `Executor/Test Designer/Security Reviewer`
+- `write_execution_allowed`: `no product write before closure integration; after merge, scoped only to P4-PR01 in a new dedicated branch`
+- `next_authorized_action`: `START_P4_PR01`
+- `next_authorized_actor`: `Architect/Executor/Test Designer/Security Reviewer after closure integration`
 
 ## Próxima ação exata
 
-Publicar o fechamento `GREEN` da P3-PR04, conferir que o delta final é somente contratual e integrar a PR #14. O head remoto corrigido `e686882` foi revisado contra a base exata: branch/PR corretos, mergeable/CLEAN, corpo atualizado, backend `11/11`, suíte `164/164`, soak 12 sessões/12 hosts sem órfãos, diff check e reconciliador verdes.
+Integrar o fechamento documental pós-merge da P3-PR04. Depois, sincronizar `phase-2/runtime-v0`, reconciliar e iniciar somente P4-PR01 em nova branch dedicada para definir eventos canônicos e o projector do Live Activity Feed.
 
-Os candidates `ff744d2`/`62b06ff` continuam invalidados. A correção local está `GREEN_CANDIDATE`, não `PROVEN`: fechar documentos, reconciliar, publicar, conferir branch/base/SHA remoto, revisar o diff exato e somente integrar após gates remotos verdes. As três fixtures vermelhas originais permanecem preservadas sob `.morrow-test-tmp`.
+P3-PR04 está `PROVEN`: PR #14 integrou o head `81dfa89` no merge `d4ccc73`; no SHA integrado, `npm ci`, ConPTY `11/11` e suíte `164/164` passaram, e queries restritas a fingerprints Morrow encontraram zero hosts/probes/filhos órfãos. Os candidates `ff744d2`/`62b06ff` continuam invalidados e as três fixtures vermelhas originais permanecem preservadas sob `.morrow-test-tmp`.
 
 ## Bloqueios atuais
 
@@ -37,8 +37,8 @@ Os candidates `ff744d2`/`62b06ff` continuam invalidados. A correção local est�
 | P0 | `PROVEN` | contrato v1, review e reconciliador mecânico provados |
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
-| P3 | `RUNNING` | P3-PR04/PR #14 `GREEN` no head remoto `e686882`; publicar fechamento e integrar, `PROVEN` somente pós-merge/regressão |
-| P4 | `BLOCKED` | depende de P2/P3 |
+| P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
+| P4 | `READY` | P4-PR01 é a próxima unidade após integração deste fechamento documental |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |
@@ -55,6 +55,7 @@ Os candidates `ff744d2`/`62b06ff` continuam invalidados. A correção local est�
 - 130/130 testes passando após hardening e revisão remota P2-PR06;
 - 141/141 testes passando no fechamento P3-PR01;
 - 149/149 testes e probe ConPTY 5/5 passando após as correções adversariais locais P3-PR02.
+- P3-PR04 integrada em `d4ccc73`: isolamento de addon por host, IPC fail-closed, ConPTY 11/11 e suíte 164/164 pós-merge.
 
 Isso não autoriza declarar o produto operacional. `PRS.md` define o restante.
 
