@@ -59,6 +59,15 @@ test("ConPTY support gate refuses platform, architecture, build and package drif
   assert.equal(Object.isFrozen(support.reasons), true);
 });
 
+test("Windows ConPTY refuses concurrency above the measured MVO capacity", {
+  skip: !windowsConptyAvailable,
+}, () => {
+  assert.throws(() => new TerminalSessionManager(join(tmpdir(), "morrow-unproven-conpty-capacity"), {
+    backend: new WindowsConptyTerminalBackend(),
+    maxConcurrentSessions: 3,
+  }), /windows_conpty_max_concurrent_sessions_exceeded/);
+});
+
 test("real Windows ConPTY preserves state, terminal bytes, resize and both interrupts", {
   skip: !windowsConptyAvailable,
   timeout: 30_000,
@@ -323,4 +332,53 @@ test("an immediate stop cannot release the governed command during startup", {
   const result = await handle.completion;
   assert.equal(result.status, "stopped");
   assert.equal(result.stdout.includes("__COMMAND_MUST_NOT_RUN__"), false);
+});
+
+test("real Windows ConPTY multiplexes sessions and cleans timeout, cancel and descendants", {
+  skip: !windowsConptyAvailable,
+  timeout: 45_000,
+}, async () => {
+  const probePath = fileURLToPath(new URL("../src/probes/conpty-multiplex.ts", import.meta.url));
+  const result = await new Promise<{ stdout: string; stderr: string }>((resolvePromise, reject) => {
+    execFile(
+      process.execPath,
+      ["--experimental-strip-types", probePath],
+      { cwd: process.cwd(), timeout: 40_000, windowsHide: true },
+      (error, stdout, stderr) => error
+        ? reject(new Error(`conpty_multiplex_probe_failed:${stderr}`, { cause: error }))
+        : resolvePromise({ stdout, stderr }),
+    );
+  });
+  assert.equal(result.stderr, "");
+  const proof = JSON.parse(result.stdout.trim()) as {
+    ok: boolean;
+    rounds: number;
+    sessions: number;
+    completed: number;
+    timedOut: number;
+    stopped: number;
+    collisionRefusals: number;
+    distinctRootPids: number;
+    distinctDescendantPids: number;
+    identityBoundEvents: number;
+    inputIsolation: boolean;
+    noOrphans: boolean;
+    fixtureRemoved: boolean;
+  };
+  assert.deepEqual(proof, {
+    ok: true,
+    rounds: 3,
+    sessions: 12,
+    completed: 6,
+    timedOut: 3,
+    stopped: 3,
+    collisionRefusals: 12,
+    distinctRootPids: 12,
+    distinctDescendantPids: 12,
+    identityBoundEvents: proof.identityBoundEvents,
+    inputIsolation: true,
+    noOrphans: true,
+    fixtureRemoved: true,
+  });
+  assert.ok(proof.identityBoundEvents >= 48);
 });
