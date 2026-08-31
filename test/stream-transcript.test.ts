@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { once } from "node:events";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import {
@@ -324,6 +326,16 @@ test("refuses checksummed snapshots that violate record size or time ordering", 
     /transcript_snapshot_invalid/,
   );
 
+  const unauthorizedWriter = JSON.parse(original);
+  unauthorizedWriter.records[0].writerId = "intruder";
+  const { checksum: _writerChecksum, ...writerState } = unauthorizedWriter;
+  unauthorizedWriter.checksum = createHash("sha256").update(JSON.stringify(writerState)).digest("hex");
+  await writeFile(snapshot, JSON.stringify(unauthorizedWriter), "utf8");
+  await assert.rejects(
+    PersistentTranscriptStore.open(strictConfiguration),
+    /transcript_snapshot_invalid/,
+  );
+
   const futureDated = JSON.parse(original);
   futureDated.records[0].occurredAt = new Date(baseTime + 200).toISOString();
   const { checksum: _futureChecksum, ...futureState } = futureDated;
@@ -382,6 +394,36 @@ test("serializes concurrent stale lease recovery so only one store can acquire t
     JSON.stringify({ pid: 2_147_483_647, token: "synthetic-stale-owner" }),
     "utf8",
   );
+
+  const recoveryIdentity = createHash("sha256").update(await realpath(root)).digest("hex");
+  const recoveryEndpoint = `\\\\.\\pipe\\morrow-transcript-recovery-${recoveryIdentity}`;
+  const holder = spawn(process.execPath, [
+    "-e",
+    "const net=require('node:net');const server=net.createServer();server.listen(process.argv[1],()=>process.stdout.write('READY\\n'));setInterval(()=>{},1000);",
+    recoveryEndpoint,
+  ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  t.after(() => {
+    if (holder.exitCode === null) holder.kill();
+  });
+  await new Promise<void>((accept, reject) => {
+    let output = "";
+    holder.stdout.setEncoding("utf8");
+    holder.stdout.on("data", (chunk: string) => {
+      output += chunk;
+      if (output.includes("READY\n")) accept();
+    });
+    holder.once("error", reject);
+    holder.once("exit", (code) => {
+      if (!output.includes("READY\n")) reject(new Error(`recovery_holder_exited:${code}`));
+    });
+  });
+  await assert.rejects(
+    PersistentTranscriptStore.open(configuration(root)),
+    /transcript_lease_recovery_active/,
+  );
+  const holderExit = once(holder, "exit");
+  holder.kill();
+  await holderExit;
 
   const results = await Promise.allSettled([
     PersistentTranscriptStore.open(configuration(root)),

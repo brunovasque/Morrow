@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:net";
 import {
   lstat,
   link,
@@ -124,7 +125,6 @@ interface NormalizedTerminalText {
 
 const transcriptFileName = "transcript-v1.json";
 const leaseFileName = ".transcript-v1.lock";
-const leaseRecoveryFileName = ".transcript-v1.lock.recovery";
 const rootMarkerFileName = ".morrow-transcript-root.json";
 const rootMarkerFormat = "morrow.transcript-root/1" as const;
 const maximumSnapshotBytes = 16_777_216;
@@ -625,46 +625,47 @@ class TranscriptLease {
 }
 
 class TranscriptLeaseRecovery {
-  private readonly path: string;
-  private readonly token: string;
+  private readonly server: Server;
   private released = false;
 
-  private constructor(path: string, token: string) {
-    this.path = path;
-    this.token = token;
+  private constructor(server: Server) {
+    this.server = server;
   }
 
   static async acquire(root: string): Promise<TranscriptLeaseRecovery> {
-    const path = join(root, leaseRecoveryFileName);
-    const token = randomUUID();
-    const temp = join(root, `${leaseRecoveryFileName}.${process.pid}.${token}.tmp`);
-    try {
-      await writeFile(temp, JSON.stringify({ pid: process.pid, token }), {
-        encoding: "utf8",
-        flag: "wx",
-        mode: 0o600,
-      });
-      await link(temp, path);
-      return new TranscriptLeaseRecovery(path, token);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        throw transcriptError("transcript_lease_recovery_active");
-      }
-      if (isTranscriptError(error)) throw error;
-      throw transcriptError("transcript_lease_recovery_failed");
-    } finally {
-      await unlink(temp).catch(() => undefined);
+    if (process.platform !== "win32") {
+      throw transcriptError("transcript_stale_lease_recovery_unsupported");
     }
+    const identity = createHash("sha256").update(root).digest("hex");
+    const endpoint = `\\\\.\\pipe\\morrow-transcript-recovery-${identity}`;
+    const server = createServer((socket) => socket.destroy());
+    server.unref();
+    await new Promise<void>((accept, reject) => {
+      const onError = (error: NodeJS.ErrnoException) => {
+        server.removeListener("listening", onListening);
+        if (error.code === "EADDRINUSE") reject(transcriptError("transcript_lease_recovery_active"));
+        else reject(transcriptError("transcript_lease_recovery_failed"));
+      };
+      const onListening = () => {
+        server.removeListener("error", onError);
+        accept();
+      };
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(endpoint);
+    });
+    return new TranscriptLeaseRecovery(server);
   }
 
   async release(): Promise<void> {
     if (this.released) return;
     this.released = true;
-    const existing = await readLease(this.path);
-    if (!existing || existing.token !== this.token || existing.pid !== process.pid) {
-      throw transcriptError("transcript_lease_recovery_owner_mismatch");
-    }
-    await unlink(this.path);
+    await new Promise<void>((accept, reject) => {
+      this.server.close((error) => {
+        if (error) reject(transcriptError("transcript_lease_recovery_failed"));
+        else accept();
+      });
+    });
   }
 }
 
@@ -902,10 +903,8 @@ async function validateOwnedRootEntries(root: string): Promise<void> {
       name === rootMarkerFileName
       || name === transcriptFileName
       || name === leaseFileName
-      || name === leaseRecoveryFileName
       || snapshotTempPattern().test(name)
       || leaseTempPattern().test(name)
-      || leaseRecoveryTempPattern().test(name)
       || rootMarkerTempPattern().test(name)
     ) continue;
     throw transcriptError("transcript_state_root_contains_foreign_entry");
@@ -920,10 +919,6 @@ function leaseTempPattern(): RegExp {
   return /^\.transcript-v1\.lock\.\d+\.[0-9a-f-]{36}\.tmp$/;
 }
 
-function leaseRecoveryTempPattern(): RegExp {
-  return /^\.transcript-v1\.lock\.recovery\.\d+\.[0-9a-f-]{36}\.tmp$/;
-}
-
 function rootMarkerTempPattern(): RegExp {
   return /^\.morrow-transcript-root\.json\.(\d+)\.[0-9a-f-]{36}\.tmp$/;
 }
@@ -931,14 +926,9 @@ function rootMarkerTempPattern(): RegExp {
 async function cleanupOwnedTemps(root: string): Promise<void> {
   const snapshotTemp = snapshotTempPattern();
   const leaseTemp = leaseTempPattern();
-  const leaseRecoveryTemp = leaseRecoveryTempPattern();
   const entries = await readdir(root, { withFileTypes: true });
   for (const entry of entries) {
-    if (
-      !snapshotTemp.test(entry.name)
-      && !leaseTemp.test(entry.name)
-      && !leaseRecoveryTemp.test(entry.name)
-    ) continue;
+    if (!snapshotTemp.test(entry.name) && !leaseTemp.test(entry.name)) continue;
     const path = join(root, entry.name);
     const metadata = await lstat(path);
     if (!entry.isFile() || !metadata.isFile() || metadata.isSymbolicLink()) {
@@ -1024,6 +1014,7 @@ function validatePersistedState(
     if (
       record.ordinal <= previousOrdinal
       || ids.has(record.recordId)
+      || !access.writerIds.includes(record.writerId)
       || occurredAt < previousOccurredAt
       || occurredAt > updatedAt
       || Buffer.byteLength(record.content, "utf8") > retention.maxRecordBytes
