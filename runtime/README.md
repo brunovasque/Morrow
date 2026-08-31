@@ -61,6 +61,8 @@ A integração P3-PR03 do Codex quota-session com o terminal ConPTY gerenciado, 
 
 O multiplexer P3-PR04, a reserva concorrente de identidades/workspaces, o teto ConPTY medido e o soak de timeout/cancel/cleanup estão em [`CONPTY_MULTIPLEXING.md`](CONPTY_MULTIPLEXING.md).
 
+O schema canônico e o projector mecânico do Live Activity Feed P4-PR01 estão em [`LIVE_ACTIVITY_FEED.md`](LIVE_ACTIVITY_FEED.md).
+
 Os registries versionados de Target/Role/Skill/Capability e a fronteira opaca do Secret Broker estão em [`GOVERNANCE_REGISTRIES.md`](GOVERNANCE_REGISTRIES.md).
 
 A resolução auditável de routing/access/model e as reservas determinísticas de cota e budget estão em [`ROUTING_GUARDS.md`](ROUTING_GUARDS.md).
