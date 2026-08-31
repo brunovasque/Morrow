@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -228,8 +229,10 @@ test("rehydrates sanitized records but refuses policy drift and corrupted snapsh
   const snapshot = join(root, "transcript-v1.json");
   const parsed = JSON.parse(await readFile(snapshot, "utf8"));
   parsed.records[0].content = syntheticSecret;
+  const { checksum: _checksum, ...tamperedState } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(tamperedState)).digest("hex");
   await writeFile(snapshot, JSON.stringify(parsed), "utf8");
-  await assert.rejects(PersistentTranscriptStore.open(configuration(root)), /transcript_snapshot_checksum_invalid/);
+  await assert.rejects(PersistentTranscriptStore.open(configuration(root)), /transcript_snapshot_invalid/);
 });
 
 test("allows only one active owner of a transcript root and releases it on orderly close", async (t) => {
