@@ -33,7 +33,7 @@ Cada transição registra somente identificadores estruturados: estado anterior/
 
 `projectContractLiveActivity(contractId, events)` valida antes de projetar:
 
-1. objetos plain com exatamente os campos do schema, sem propriedades herdadas ou accessors;
+1. coleção e objetos plain com exatamente os campos do schema, sem elementos/propriedades herdados ou accessors;
 2. schema e versão exatos;
 3. ids/timestamp/sequence canônicos;
 4. tipo da fonte coerente com a categoria visível (`quota` não pode fabricar `process`, por exemplo);

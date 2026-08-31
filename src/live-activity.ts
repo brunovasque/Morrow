@@ -216,7 +216,9 @@ function projectContractLiveActivityUnchecked(
   let previousOccurredAt = -1;
 
   for (let index = 0; index < inputs.length; index += 1) {
-    const validation = validateLiveActivityEvent(inputs[index]);
+    const input = readDataArrayElement(inputs, index);
+    if (!input.ok) return projectionFailure("INVALID_EVENT", input.detail, index);
+    const validation = validateLiveActivityEvent(input.value);
     if (!validation.ok) return projectionFailure(validation.code, validation.detail, index);
     const event = validation.event;
 
@@ -287,6 +289,16 @@ function projectContractLiveActivityUnchecked(
       activities: [...snapshots.values()],
     }),
   };
+}
+
+function readDataArrayElement(
+  values: readonly unknown[],
+  index: number,
+): { ok: true; value: unknown } | { ok: false; detail: string } {
+  const descriptor = Object.getOwnPropertyDescriptor(values, String(index));
+  return descriptor !== undefined && "value" in descriptor
+    ? { ok: true, value: descriptor.value }
+    : { ok: false, detail: "event_collection_element_not_data" };
 }
 
 function parseActor(input: unknown): Actor | null {

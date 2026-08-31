@@ -87,7 +87,37 @@ test("live activity JSON schema and executable constants stay aligned", async ()
   assert.equal(schema.properties.schemaVersion.const, LIVE_ACTIVITY_SCHEMA_VERSION);
   assert.deepEqual(schema.$defs.state.enum, [...LIVE_ACTIVITY_STATES]);
   assert.deepEqual(schema.properties.transition.properties.sourceKind.enum, [...LIVE_ACTIVITY_SOURCE_KINDS]);
+  assert.deepEqual(schema.required, [
+    "schema",
+    "schemaVersion",
+    "eventId",
+    "causationId",
+    "sequence",
+    "occurredAt",
+    "actor",
+    "identity",
+    "transition",
+  ]);
+  assert.deepEqual(schema.properties.identity.required, [
+    "activityId",
+    "correlationId",
+    "contractId",
+    "stepId",
+    "agentInstanceId",
+    "terminalSessionId",
+    "workspaceId",
+  ]);
+  assert.deepEqual(schema.properties.transition.required, [
+    "from",
+    "to",
+    "reasonCode",
+    "sourceKind",
+    "sourceId",
+  ]);
   assert.equal(schema.additionalProperties, false);
+  assert.equal(schema.properties.actor.additionalProperties, false);
+  assert.equal(schema.properties.identity.additionalProperties, false);
+  assert.equal(schema.properties.transition.additionalProperties, false);
 });
 
 test("projects every required live feed state only from canonical events", () => {
@@ -201,6 +231,23 @@ test("rejects schema drift, extra fields, accessors and inherited events", () =>
     detail: "event_collection_inspection_failed",
     eventIndex: 0,
   });
+
+  let arrayGetterCalls = 0;
+  const accessorArray = [] as unknown[];
+  Object.defineProperty(accessorArray, "0", {
+    enumerable: true,
+    get: () => {
+      arrayGetterCalls += 1;
+      return activityEvent({ sequence: 1, from: null, to: "dispatch" });
+    },
+  });
+  assert.deepEqual(projectContractLiveActivity("C1", accessorArray), {
+    ok: false,
+    code: "INVALID_EVENT",
+    detail: "event_collection_element_not_data",
+    eventIndex: 0,
+  });
+  assert.equal(arrayGetterCalls, 0);
 });
 
 test("binds mechanical source kinds to the visible state category", () => {
