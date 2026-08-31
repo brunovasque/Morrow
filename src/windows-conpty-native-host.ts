@@ -12,13 +12,17 @@ if (!process.connected || typeof process.send !== "function") {
 let session: TerminalBackendSession | null = null;
 let initialized = false;
 let closing = false;
+let failed = false;
 let commandQueue = Promise.resolve();
 let writeQueue = Promise.resolve();
 let eventQueue = Promise.resolve();
 
 process.on("message", (value) => {
   commandQueue = commandQueue
-    .then(() => handleCommand(parseCommand(value)))
+    .then(() => {
+      if (closing || failed) return;
+      return handleCommand(parseCommand(value));
+    })
     .catch((error) => failHost(asError(error)));
 });
 
@@ -54,6 +58,7 @@ async function handleCommand(command: WindowsConptyHostCommand): Promise<void> {
   if (command.type === "write") {
     writeQueue = writeQueue
       .then(async () => {
+        if (closing || failed) throw new Error("terminal_conpty_native_host_not_writable");
         if (!active.write(command.data)) await active.waitForDrain();
         queueEvent({ type: "write-complete", writeId: command.writeId });
       })
@@ -109,7 +114,8 @@ function closeHost(event: Extract<WindowsConptyHostEvent, { type: "exit" }>): vo
 }
 
 function failHost(error: Error): void {
-  if (closing) return;
+  if (closing || failed) return;
+  failed = true;
   queueEvent({ type: "error", error: error.message });
   const stopAccepted = (() => {
     try { return session?.stop(true) ?? false; } catch { return false; }

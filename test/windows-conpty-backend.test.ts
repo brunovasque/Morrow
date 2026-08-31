@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, fork } from "node:child_process";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -24,6 +24,47 @@ test("native ConPTY session refuses use outside its isolated host entrypoint", (
     cwd: process.cwd(),
     env: {},
   }), /windows_conpty_native_session_requires_isolated_host/);
+});
+
+test("native ConPTY host stays failed after an invalid IPC command", async () => {
+  const hostPath = fileURLToPath(new URL("../src/windows-conpty-native-host.ts", import.meta.url));
+  const child = fork(hostPath, [], {
+    cwd: process.cwd(),
+    env: {},
+    execArgv: ["--experimental-strip-types"],
+    serialization: "json",
+    stdio: ["ignore", "ignore", "pipe", "ipc"],
+    windowsHide: true,
+  });
+  const events: unknown[] = [];
+  child.on("message", (event) => events.push(event));
+  const processError = new Promise<Error | null>((resolvePromise) => {
+    child.once("error", resolvePromise);
+    child.once("close", () => resolvePromise(null));
+  });
+  child.send({ type: "end-input", unexpected: true }, () => {});
+  child.send({
+    type: "initialize",
+    request: { command: process.execPath, args: [], cwd: process.cwd(), env: {} },
+  }, () => {});
+  const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolvePromise) => {
+    child.once("close", (code, signal) => resolvePromise({ code, signal }));
+  });
+
+  assert.equal(await processError, null);
+  assert.deepEqual(exit, { code: 1, signal: null });
+  assert.equal(events.some((event) => (
+    event !== null
+    && typeof event === "object"
+    && "type" in event
+    && event.type === "started"
+  )), false);
+  assert.equal(events.some((event) => (
+    event !== null
+    && typeof event === "object"
+    && "type" in event
+    && event.type === "error"
+  )), true);
 });
 
 async function controlledWindowsEnvironment(workspaceRoot: string): Promise<Record<string, string>> {
