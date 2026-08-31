@@ -189,6 +189,7 @@ interface SessionRecord {
   timedOut: boolean;
   stopped: boolean;
   settled: boolean;
+  failureStopRequested: boolean;
   historyTruncated: boolean;
   events: TerminalSessionEvent[];
   stdout: string;
@@ -331,6 +332,7 @@ export class TerminalSessionManager {
       timedOut: false,
       stopped: false,
       settled: false,
+      failureStopRequested: false,
       historyTruncated: false,
       events: [],
       stdout: "",
@@ -629,6 +631,8 @@ export class TerminalSessionManager {
 
   private failAndStop(record: SessionRecord, error: string): void {
     this.markFailed(record, error);
+    if (record.failureStopRequested) return;
+    record.failureStopRequested = true;
     let stopAccepted = false;
     try {
       stopAccepted = record.backendSession.stop(true);

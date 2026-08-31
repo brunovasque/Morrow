@@ -611,6 +611,65 @@ test("force-stops a session when its backend reports a fatal error", async () =>
   assert.equal(stoppedWithForce, true);
 });
 
+test("stops only once when fatal cleanup synchronously reports another error", async () => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-terminal-reentrant-error-"));
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  const descriptor: TerminalBackendDescriptor = {
+    kind: "process-pipes",
+    implementationId: "reentrant-error-test-pipes-v1",
+    protocol: "separate-pipes",
+    capabilities: {
+      tty: false,
+      interactive: true,
+      resize: false,
+      signals: false,
+      utf8: true,
+      exitStatus: true,
+    },
+  };
+  let startedListener: (() => void) | undefined;
+  let errorListener: ((error: Error) => void) | undefined;
+  let stopCalls = 0;
+  const backend: TerminalBackend = {
+    descriptor,
+    create: (): TerminalBackendSession => ({
+      descriptor,
+      pid: 45,
+      inputClosed: false,
+      start: () => {
+        startedListener?.();
+        errorListener?.(new Error("primary_backend_failure"));
+      },
+      onStarted: (listener) => { startedListener = listener; },
+      onOutput: () => {},
+      onError: (listener) => { errorListener = listener; },
+      onExit: () => {},
+      write: () => true,
+      waitForDrain: async () => {},
+      endInput: () => {},
+      resize: () => {},
+      interrupt: () => {},
+      stop: () => {
+        stopCalls += 1;
+        errorListener?.(new Error("cleanup_backend_failure"));
+        return false;
+      },
+    }),
+  };
+  const terminals = new TerminalSessionManager(workspaceRoot, { backend });
+  const workspace = await workspaces.create({
+    workspaceId: "W1",
+    contractId: "C1",
+    roleId: "executor",
+  });
+
+  const result = await (await terminals.start(request(workspace))).completion;
+  assert.equal(result.status, "failed");
+  assert.equal(result.error, "primary_backend_failure");
+  assert.equal(stopCalls, 1);
+});
+
 test("keeps a failed session workspace reserved until backend exit is confirmed", async () => {
   const root = await mkdtemp(join(tmpdir(), "morrow-terminal-delayed-exit-"));
   const workspaceRoot = join(root, "managed-workspaces");
