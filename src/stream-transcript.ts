@@ -135,6 +135,7 @@ const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const canonicalTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const unicodeFormatControlPattern = /^\p{Cf}$/u;
 const assignmentKeyPattern = /(?<![A-Za-z0-9_.-])[A-Za-z][A-Za-z0-9_.-]*(?![A-Za-z0-9_.-])/gu;
+const quotedAssignmentKeyPattern = /(["'])([A-Za-z][A-Za-z0-9_. -]*)\1/gu;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/giu;
 const commonTokenPatterns = [
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/gu,
@@ -1178,6 +1179,20 @@ function collectMappedLiteralRanges(
 }
 
 function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
+  quotedAssignmentKeyPattern.lastIndex = 0;
+  let quotedMatch: RegExpExecArray | null;
+  while ((quotedMatch = quotedAssignmentKeyPattern.exec(text)) !== null) {
+    const key = quotedMatch[2]!;
+    if (!isSensitiveAssignmentKey(key)) continue;
+    collectAssignmentValueRange(
+      text,
+      quotedMatch.index,
+      quotedMatch.index + quotedMatch[0].length,
+      key,
+      ranges,
+    );
+  }
+
   assignmentKeyPattern.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = assignmentKeyPattern.exec(text)) !== null) {
@@ -1191,17 +1206,29 @@ function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
       assignmentStart -= 1;
       cursor += 1;
     }
+    collectAssignmentValueRange(text, assignmentStart, cursor, match[0], ranges);
+  }
+}
+
+function collectAssignmentValueRange(
+  text: string,
+  assignmentStart: number,
+  keyEnd: number,
+  key: string,
+  ranges: RedactionRange[],
+): void {
+    let cursor = keyEnd;
     while (cursor < text.length && /[^\S\r\n]/u.test(text[cursor]!)) cursor += 1;
     if (cursor >= text.length) {
       ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
-      continue;
+      return;
     }
-    if (text[cursor] !== ":" && text[cursor] !== "=") continue;
+    if (text[cursor] !== ":" && text[cursor] !== "=") return;
     cursor += 1;
     while (cursor < text.length && /\s/u.test(text[cursor]!)) cursor += 1;
     if (cursor >= text.length) {
       ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
-      continue;
+      return;
     }
     const quote = text[cursor];
     if (quote === '"' || quote === "'") {
@@ -1217,24 +1244,65 @@ function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
         if (character === quote) break;
       }
       ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
-      continue;
+      return;
+    }
+    if (quote === "|" || quote === ">") {
+      const blockEnd = yamlBlockScalarEnd(text, cursor, assignmentStart);
+      if (blockEnd !== null) {
+        ranges.push({ start: assignmentStart, end: blockEnd, replacement: "redact" });
+        return;
+      }
     }
     const valueStart = cursor;
-    if (assignmentKeySegments(match[0]).includes("authorization")) {
+    if (assignmentKeySegments(key).includes("authorization")) {
       while (cursor < text.length && text[cursor] !== "\r" && text[cursor] !== "\n") cursor += 1;
       ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
-      continue;
+      return;
     }
     while (cursor < text.length && !/[\s,;]/u.test(text[cursor]!)) cursor += 1;
     if (cursor > valueStart) ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
+}
+
+function yamlBlockScalarEnd(text: string, indicatorStart: number, assignmentStart: number): number | null {
+  let cursor = indicatorStart + 1;
+  while (cursor < text.length && /[1-9+-]/u.test(text[cursor]!)) cursor += 1;
+  while (cursor < text.length && /[^\S\r\n]/u.test(text[cursor]!)) cursor += 1;
+  if (text[cursor] === "#") {
+    while (cursor < text.length && text[cursor] !== "\r" && text[cursor] !== "\n") cursor += 1;
   }
+  if (cursor >= text.length) return text.length;
+  if (text[cursor] !== "\r" && text[cursor] !== "\n") return null;
+  if (text[cursor] === "\r" && text[cursor + 1] === "\n") cursor += 2;
+  else cursor += 1;
+
+  const keyLineStart = text.lastIndexOf("\n", assignmentStart - 1) + 1;
+  let keyIndent = 0;
+  while (keyLineStart + keyIndent < assignmentStart && /[ \t]/u.test(text[keyLineStart + keyIndent]!)) {
+    keyIndent += 1;
+  }
+
+  while (cursor < text.length) {
+    const lineStart = cursor;
+    let contentStart = lineStart;
+    while (contentStart < text.length && /[ \t]/u.test(text[contentStart]!)) contentStart += 1;
+    let lineEnd = contentStart;
+    while (lineEnd < text.length && text[lineEnd] !== "\r" && text[lineEnd] !== "\n") lineEnd += 1;
+    const blank = contentStart === lineEnd;
+    const indentation = contentStart - lineStart;
+    if (!blank && indentation <= keyIndent) return lineStart;
+    cursor = lineEnd;
+    if (text[cursor] === "\r" && text[cursor + 1] === "\n") cursor += 2;
+    else if (text[cursor] === "\r" || text[cursor] === "\n") cursor += 1;
+    else return text.length;
+  }
+  return text.length;
 }
 
 function assignmentKeySegments(key: string): string[] {
   return key
     .replace(/([a-z0-9])([A-Z])/gu, "$1_$2")
     .replace(/([A-Z]+)([A-Z][a-z])/gu, "$1_$2")
-    .split(/[_.-]+/u)
+    .split(/[\s_.-]+/u)
     .filter((segment) => segment.length > 0)
     .map((segment) => segment.toLowerCase());
 }

@@ -328,6 +328,70 @@ test("keeps multiline assignment values pending across structural whitespace and
   assert.match(disk, /safeField:\\n  public-value/);
 });
 
+test("redacts complete quoted space-delimited sensitive keys without matching similar phrases", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-space-delimited-keys"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} {"API `),
+    writer.write(`Key":"SPACE_API_KEY_CANARY","Client Se`),
+    writer.write(`cret":"SPACE_CLIENT_SECRET_CANARY","API Keyboard":"public-keyboard",`),
+    writer.write(`"Client Secretariat":"public-secretariat","Access Tokenizer":"public-tokenizer"}`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /SPACE_(?:API_KEY|CLIENT_SECRET)_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.match(liveText, /"API Keyboard":"public-keyboard"/);
+  assert.match(liveText, /"Client Secretariat":"public-secretariat"/);
+  assert.match(liveText, /"Access Tokenizer":"public-tokenizer"/);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /public-keyboard|public-secretariat|public-tokenizer/);
+});
+
+test("keeps YAML block scalar contents inside the sensitive assignment across chunks", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-yaml-block-scalars"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} password: |`),
+    writer.write(`- # synthetic fixture\n  BLOCK_LITERAL_CANARY_LINE_ONE\n`),
+    writer.write(`  BLOCK_LITERAL_CANARY_LINE_TWO\nsafeField: public-value\nclientSecret: >`),
+    writer.write(`\n  BLOCK_FOLDED_CANARY_LINE_ONE\n  BLOCK_FOLDED_CANARY_LINE_TWO\nsafeAfter: public-after`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /BLOCK_(?:LITERAL|FOLDED)_CANARY_LINE_(?:ONE|TWO)/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.match(liveText, /safeField: public-value/);
+  assert.match(liveText, /safeAfter: public-after/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 2);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /safeField: public-value|safeAfter: public-after/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /safeField: public-value/);
+  assert.match(disk, /safeAfter: public-after/);
+});
+
 test("persists and returns only redacted output while dropping terminal input by default", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(configuration(root));
