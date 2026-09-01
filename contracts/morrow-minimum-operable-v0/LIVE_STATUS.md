@@ -12,7 +12,7 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR02`
 - `active_route_node`: `STREAM_REDACTION_RETENTION_TRANSCRIPT`
-- `active_subaction`: `P4_PR02_PUBLISH_REMOTE_REVIEW_FIXES`
+- `active_subaction`: `P4_PR02_INDEPENDENT_REVIEW`
 - `expected_branch_prefix`: `mvo/p4-pr02-`
 - `write_execution_allowed`: `yes, scoped only to P4-PR02 in a dedicated branch`
 - `next_authorized_action`: `START_P4_PR02`
@@ -20,15 +20,15 @@
 
 ## Próxima ação exata
 
-Publicar as correções categóricas de spaced quoted keys e YAML block scalars, responder os dois P1 e revalidar o head exato da PR #18; bloqueadores reproduzíveis dentro da unidade voltam automaticamente ao ciclo. `PROVEN` continua condicionado ao review verde, merge e regressão pós-merge.
+Revisar independentemente o novo head remoto da PR #18 que contém o candidate de código `79382d421a9a6e9df2956007fb701d32d00c5952`; não fazer merge nesta sessão. Bloqueadores reproduzíveis dentro da unidade voltam automaticamente ao ciclo. `PROVEN` continua condicionado ao review verde, merge e regressão pós-merge.
 
-Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. O review do head `2934ed3` reproduziu `API Key`/`Client Secret` quoted e YAML `|`/`>`. `024c5a9` escaneia a chave quoted inteira e mantém block scalar até dedent, com chunks/live/view/disco e negativos. Focused 17/17 e suíte 189/189. Clock/inode/count/lease PID-only estão em `D-014`..`D-017` para P4-PR03.
+Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. Uma revisão independente do head `1d93161` reproduziu assignment PowerShell válido com quote escapada por backtick vazando em chunks/live/inspect/disco; revisões do mesmo head também reproduziram string controls, override de prototype, cursor rewrite sobre linha existente e scalars YAML quoted/plain. `79382d4` corrige as categorias estruturalmente, preserva negativos e cobre block sequence/dedent. Focused 21/21; suíte integral repetida 193/193 após controle verde do `D-013`. Clock/inode/count/lease PID-only permanecem em `D-014`..`D-017` para P4-PR03.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| nenhum | — | a falha nativa material foi corrigida e contraprovada localmente | publicação/revisão remota ainda é gate, não bloqueio técnico |
+| nenhum | — | os P1 reproduzíveis do head `1d93161` foram corrigidos e contraprovados localmente | nova revisão independente do head remoto ainda é gate, não bloqueio técnico |
 
 ## Status por fase
 
@@ -38,7 +38,7 @@ Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. O review do head `29
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR02 `GREEN_CANDIDATE` local após correções spaced key/YAML block; publicação/revalidação/merge e regressão pós-merge pendentes |
+| P4 | `RUNNING` | P4-PR02 `GREEN_CANDIDATE` local em `79382d4` após correções estruturais de escaping/terminal/YAML; revisão independente, merge e regressão pós-merge pendentes |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |

@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhum local; P1s spaced quoted key/YAML block foram corrigidos/contraprovados, aguardando publicação e revalidação; clock/inode/count/lease PID-only separados em `D-014`..`D-017`
+- bloqueio atual: nenhum local; P1s de escaping PowerShell, string controls, prototype, cursor rewrite e YAML quoted/plain do head `1d93161` foram corrigidos/contraprovados em `79382d4`, aguardando nova revisão independente; clock/inode/count/lease PID-only permanecem separados em `D-014`..`D-017`
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 
