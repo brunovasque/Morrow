@@ -228,6 +228,74 @@ test("redacts camelCase sensitive-key categories across chunks before live retur
   assert.match(disk, /public-layout/);
 });
 
+test("applies backspace semantics and fails closed on broader cursor rewrites before redaction", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-terminal-overwrite-assignments"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} passX`),
+    writer.write(`\bword=BACKSPACE_SECRET_CANARY versX\bion=1 `),
+    writer.write(`passX\u001b[1Dword=CSI_SECRET_CANARY status=ok\rpassword=CR_SECRET_CANARY`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /(?:BACKSPACE|CSI|CR)_SECRET_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.ok(fragments.slice(0, -1).some((fragment) => fragment.text.length > 0));
+  assert.match(liveText, /visible-prefix-/);
+  assert.match(liveText, /version=1/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 2);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /version=1/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /version=1/);
+});
+
+test("redacts sensitive components in quoted dotted keys across chunks without matching substrings", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-quoted-dotted-assignments"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} {"request.headers.author`),
+    writer.write(`ization":"Basic DOTTED_AUTH_CANARY","oauth.clientSe`),
+    writer.write(`cret":"DOTTED_SECRET_CANARY","request.headers.contentType":"public/type",`),
+    writer.write(`"meta.clientSecretary":"public-secretary","metrics.accessTokenizer":"public-tokenizer"}`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /DOTTED_(?:AUTH|SECRET)_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.ok(fragments.slice(0, -1).some((fragment) => fragment.text.length > 0));
+  assert.match(liveText, /"request\.headers\.contentType":"public\/type"/);
+  assert.match(liveText, /"meta\.clientSecretary":"public-secretary"/);
+  assert.match(liveText, /"metrics\.accessTokenizer":"public-tokenizer"/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 2);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /public\/type|public-secretary|public-tokenizer/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /public\/type/);
+  assert.match(disk, /public-secretary/);
+  assert.match(disk, /public-tokenizer/);
+});
+
 test("persists and returns only redacted output while dropping terminal input by default", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(configuration(root));

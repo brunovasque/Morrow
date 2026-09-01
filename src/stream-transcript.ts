@@ -134,7 +134,7 @@ const genericPatternHoldback = 4_096;
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const canonicalTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const unicodeFormatControlPattern = /^\p{Cf}$/u;
-const assignmentKeyPattern = /(?<![A-Za-z0-9_-])[A-Za-z][A-Za-z0-9_-]*(?![A-Za-z0-9_-])/gu;
+const assignmentKeyPattern = /(?<![A-Za-z0-9_.-])[A-Za-z][A-Za-z0-9_.-]*(?![A-Za-z0-9_.-])/gu;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/giu;
 const commonTokenPatterns = [
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/gu,
@@ -1234,7 +1234,7 @@ function assignmentKeySegments(key: string): string[] {
   return key
     .replace(/([a-z0-9])([A-Z])/gu, "$1_$2")
     .replace(/([A-Z]+)([A-Z][a-z])/gu, "$1_$2")
-    .split(/[_-]+/u)
+    .split(/[_.-]+/u)
     .filter((segment) => segment.length > 0)
     .map((segment) => segment.toLowerCase());
 }
@@ -1295,16 +1295,22 @@ function mapVisibleRanges(
 }
 
 function normalizeTerminalText(text: string): NormalizedTerminalText {
-  let visible = "";
+  const visible: string[] = [];
   const rawStarts: number[] = [];
   const rawEnds: number[] = [];
   const controlRanges: RedactionRange[] = [];
+  let cursor = 0;
   let index = 0;
   while (index < text.length) {
     const code = text.charCodeAt(index);
     if (code === 0x1b) {
       const end = terminalEscapeEnd(text, index);
-      controlRanges.push({ start: index, end, replacement: "drop" });
+      const cursorChanging = terminalEscapeChangesCursor(text.slice(index, end));
+      controlRanges.push({
+        start: index,
+        end: cursorChanging ? terminalLineEnd(text, end) : end,
+        replacement: cursorChanging ? "redact" : "drop",
+      });
       index = end;
       continue;
     }
@@ -1312,8 +1318,25 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
       const end = code === 0x9b
         ? terminalCsiEnd(text, index + 1)
         : terminalOscEnd(text, index + 1);
-      controlRanges.push({ start: index, end, replacement: "drop" });
+      const cursorChanging = code === 0x9b
+        && terminalEscapeChangesCursor(`\u001b[${text.slice(index + 1, end)}`);
+      controlRanges.push({
+        start: index,
+        end: cursorChanging ? terminalLineEnd(text, end) : end,
+        replacement: cursorChanging ? "redact" : "drop",
+      });
       index = end;
+      continue;
+    }
+    if (code === 0x08) {
+      controlRanges.push({ start: index, end: index + 1, replacement: "drop" });
+      cursor = Math.max(terminalLineStart(visible, cursor), cursor - 1);
+      index += 1;
+      continue;
+    }
+    if (code === 0x0d) {
+      controlRanges.push({ start: index, end: terminalLineEnd(text, index + 1), replacement: "redact" });
+      index += 1;
       continue;
     }
     const codePoint = text.codePointAt(index)!;
@@ -1331,12 +1354,38 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
       index += codePointLength;
       continue;
     }
-    visible += text[index];
-    rawStarts.push(index);
-    rawEnds.push(index + 1);
+    if (cursor < visible.length && visible[cursor] !== "\n") {
+      controlRanges.push({ start: rawStarts[cursor]!, end: rawEnds[cursor]!, replacement: "drop" });
+      visible[cursor] = text[index]!;
+      rawEnds[cursor] = index + 1;
+    } else {
+      cursor = visible.length;
+      visible.push(text[index]!);
+      rawStarts.push(index);
+      rawEnds.push(index + 1);
+    }
+    cursor += 1;
     index += 1;
   }
-  return { visible, rawStarts, rawEnds, controlRanges };
+  return { visible: visible.join(""), rawStarts, rawEnds, controlRanges };
+}
+
+function terminalLineStart(visible: readonly string[], cursor: number): number {
+  for (let index = Math.min(cursor, visible.length) - 1; index >= 0; index -= 1) {
+    if (visible[index] === "\n") return index + 1;
+  }
+  return 0;
+}
+
+function terminalEscapeChangesCursor(sequence: string): boolean {
+  return /^\u001b\[[0-9;?]*[ABCDEFGHJKSTfnsu]$/u.test(sequence);
+}
+
+function terminalLineEnd(text: string, start: number): number {
+  for (let index = start; index < text.length; index += 1) {
+    if (text[index] === "\r" || text[index] === "\n") return index;
+  }
+  return text.length;
 }
 
 function terminalEscapeEnd(text: string, start: number): number {
