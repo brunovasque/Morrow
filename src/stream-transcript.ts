@@ -134,7 +134,7 @@ const genericPatternHoldback = 4_096;
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const canonicalTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const unicodeFormatControlPattern = /^\p{Cf}$/u;
-const assignmentKeyPattern = /(?<![A-Za-z0-9_])(?:[A-Za-z0-9]+_)*(?:token|secret|password|credential|authorization|api[_-]?key)(?:_[A-Za-z0-9]+)*(?![A-Za-z0-9_])/giu;
+const assignmentKeyPattern = /(?<![A-Za-z0-9_-])[A-Za-z][A-Za-z0-9_-]*(?![A-Za-z0-9_-])/gu;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/giu;
 const commonTokenPatterns = [
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/gu,
@@ -1181,6 +1181,7 @@ function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
   assignmentKeyPattern.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = assignmentKeyPattern.exec(text)) !== null) {
+    if (!isSensitiveAssignmentKey(match[0])) continue;
     let assignmentStart = match.index;
     let cursor = match.index + match[0].length;
     const keyQuote = match.index > 0 && (text[match.index - 1] === '"' || text[match.index - 1] === "'")
@@ -1219,7 +1220,7 @@ function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
       continue;
     }
     const valueStart = cursor;
-    if (/(?:^|_)authorization(?:_|$)/iu.test(match[0])) {
+    if (assignmentKeySegments(match[0]).includes("authorization")) {
       while (cursor < text.length && text[cursor] !== "\r" && text[cursor] !== "\n") cursor += 1;
       ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
       continue;
@@ -1227,6 +1228,27 @@ function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
     while (cursor < text.length && !/[\s,;]/u.test(text[cursor]!)) cursor += 1;
     if (cursor > valueStart) ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
   }
+}
+
+function assignmentKeySegments(key: string): string[] {
+  return key
+    .replace(/([a-z0-9])([A-Z])/gu, "$1_$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/gu, "$1_$2")
+    .split(/[_-]+/u)
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.toLowerCase());
+}
+
+function isSensitiveAssignmentKey(key: string): boolean {
+  const segments = assignmentKeySegments(key);
+  if (segments.some((segment) => [
+    "token",
+    "secret",
+    "password",
+    "credential",
+    "authorization",
+  ].includes(segment))) return true;
+  return segments.some((segment, index) => segment === "api" && segments[index + 1] === "key");
 }
 
 function collectMappedAssignmentRanges(

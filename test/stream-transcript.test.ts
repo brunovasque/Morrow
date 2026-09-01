@@ -186,6 +186,48 @@ test("holds a long quoted assignment until its quote or line boundary can be red
   assert.doesNotMatch(await allFileText(root), /QUOTE_CANARY|q{256}/);
 });
 
+test("redacts camelCase sensitive-key categories across chunks before live return and persistence", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-camel-case-assignments"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} {"clientSe`),
+    writer.write(`cret":"CAMEL_CLIENT_SECRET_CANARY","accessTo`),
+    writer.write(`ken":"CAMEL_ACCESS_TOKEN_CANARY","refreshToken":"CAMEL_REFRESH_TOKEN_CANARY",`),
+    writer.write(`"apiKey":"CAMEL_API_KEY_CANARY","serviceCredential":"CAMEL_CREDENTIAL_CANARY",`),
+    writer.write(`"clientSecretary":"public-secretary","accessTokenizer":"public-tokenizer",`),
+    writer.write(`"passwordlessMode":"enabled","credentialedUser":"public-user",`),
+    writer.write(`"apiKeyboardLayout":"public-layout"}`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  const sensitiveCanaries = /CAMEL_(?:CLIENT_SECRET|ACCESS_TOKEN|REFRESH_TOKEN|API_KEY|CREDENTIAL)_CANARY/;
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.ok(fragments.slice(0, -1).some((fragment) => fragment.text.length > 0));
+  assert.match(liveText, /visible-prefix-/);
+  assert.match(liveText, /public-secretary/);
+  assert.match(liveText, /public-tokenizer/);
+  assert.match(liveText, /"passwordlessMode":"enabled"/);
+  assert.match(liveText, /"credentialedUser":"public-user"/);
+  assert.match(liveText, /"apiKeyboardLayout":"public-layout"/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 5);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /public-secretary|public-tokenizer|public-layout/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /public-secretary/);
+  assert.match(disk, /public-tokenizer/);
+  assert.match(disk, /public-layout/);
+});
+
 test("persists and returns only redacted output while dropping terminal input by default", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(configuration(root));
