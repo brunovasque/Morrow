@@ -20,9 +20,9 @@
 
 ## Próxima ação exata
 
-Publicar as correções categóricas de backspace terminal e dotted quoted keys, responder os dois P1 e revalidar o head exato da PR #18; bloqueadores reproduzíveis dentro da unidade voltam automaticamente ao ciclo. `PROVEN` continua condicionado ao review verde, merge e regressão pós-merge.
+Publicar a correção categórica de multiline assignment, responder o P1 e revalidar o head exato da PR #18; bloqueadores reproduzíveis dentro da unidade voltam automaticamente ao ciclo. `PROVEN` continua condicionado ao review verde, merge e regressão pós-merge.
 
-Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. O review do head `0197429` reproduziu `passX\bword` e `request.headers.authorization`. `8819be7` aplica overwrite de backspace antes do matcher, fail-closed para cursor amplo e segmentação de chave dotted completa. Focused 14/14; `D-013` ocorreu como 185/186, controle soak passou 3 rodadas/12 sessões e a repetição passou 186/186. Clock hostil e TOCTOU de inode estão em `D-014`/`D-015` para P4-PR03.
+Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. O review do head `65786cb` reproduziu valor sensível após CR/LF estrutural. `c8465c2` mantém assignment sem valor pendente por whitespace/chunks e contrapõe JSON/YAML live/view/disco. Focused 15/15; uma suíte marcou órfão transitório, o soak controlado confirmou `noOrphans` e a repetição passou 187/187. Clock/inode/count estão em `D-014`/`D-015`/`D-016` para P4-PR03.
 
 ## Bloqueios atuais
 
@@ -38,7 +38,7 @@ Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. O review do head `01
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR02 `GREEN_CANDIDATE` local após correções de backspace/dotted key; publicação/revalidação/merge e regressão pós-merge pendentes |
+| P4 | `RUNNING` | P4-PR02 `GREEN_CANDIDATE` local após correção multiline; publicação/revalidação/merge e regressão pós-merge pendentes |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |

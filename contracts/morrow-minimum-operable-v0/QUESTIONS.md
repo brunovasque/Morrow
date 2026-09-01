@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhum local; os P1s de backspace terminal e dotted quoted key foram corrigidos/contraprovados, aguardando publicação e revalidação; relógio hostil e TOCTOU de inode separados em `D-014`/`D-015`
+- bloqueio atual: nenhum local; o P1 multiline foi corrigido/contraprovado, aguardando publicação e revalidação; relógio hostil, TOCTOU de inode e coerência de count separados em `D-014`/`D-015`/`D-016`
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 
