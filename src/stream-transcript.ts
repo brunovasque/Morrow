@@ -179,6 +179,7 @@ export class StreamRedactor {
       this.policyId = policyId;
       this.#literals = Object.freeze([...literals]);
       this.#holdback = Math.max(genericPatternHoldback, ...literals.map((literal) => literal.length - 1));
+      Object.freeze(this);
     } catch (error) {
       if (isTranscriptError(error)) throw error;
       throw transcriptError("redaction_policy_inspection_failed");
@@ -194,12 +195,12 @@ export class StreamRedactor {
 
   redact(text: string): RedactedStreamFragment {
     if (typeof text !== "string") throw transcriptError("redaction_text_invalid");
-    const ranges = this.ranges(text);
+    const ranges = this.#ranges(text);
     return deepFreeze({ text: renderRedacted(text, ranges), redactionCount: countRedactions(ranges) });
   }
 
   release(pending: string, final: boolean): { released: RedactedStreamFragment; remainder: string } {
-    const ranges = this.ranges(pending);
+    const ranges = this.#ranges(pending);
     if (final) {
       return {
         released: deepFreeze({ text: renderRedacted(pending, ranges), redactionCount: countRedactions(ranges) }),
@@ -223,7 +224,7 @@ export class StreamRedactor {
     };
   }
 
-  private ranges(text: string): RedactionRange[] {
+  #ranges(text: string): RedactionRange[] {
     const terminal = normalizeTerminalText(text);
     const ranges: RedactionRange[] = [...terminal.controlRanges];
     for (const literal of this.#literals) {
@@ -241,6 +242,8 @@ export class StreamRedactor {
     return mergeRanges(ranges);
   }
 }
+
+Object.freeze(StreamRedactor.prototype);
 
 export class StreamRedactorSession {
   #redactor: StreamRedactor;
@@ -1224,6 +1227,7 @@ function collectAssignmentValueRange(
       return;
     }
     if (text[cursor] !== ":" && text[cursor] !== "=") return;
+    const separator = text[cursor]!;
     cursor += 1;
     while (cursor < text.length && /\s/u.test(text[cursor]!)) cursor += 1;
     if (cursor >= text.length) {
@@ -1233,16 +1237,11 @@ function collectAssignmentValueRange(
     const quote = text[cursor];
     if (quote === '"' || quote === "'") {
       cursor += 1;
-      while (cursor < text.length) {
-        const character = text[cursor];
-        if (character === "\r" || character === "\n") break;
-        if (character === "\\") {
-          cursor += cursor + 1 < text.length && text[cursor + 1] !== "\r" && text[cursor + 1] !== "\n" ? 2 : 1;
-          continue;
-        }
-        cursor += 1;
-        if (character === quote) break;
-      }
+      cursor = quotedAssignmentEnd(text, cursor, quote, {
+        powershell: separator === "=" && isPowerShellVariableAssignment(text, assignmentStart),
+        yaml: separator === ":",
+        assignmentStart,
+      });
       ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
       return;
     }
@@ -1259,8 +1258,83 @@ function collectAssignmentValueRange(
       ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
       return;
     }
+    if (separator === ":") {
+      cursor = yamlPlainScalarEnd(text, cursor);
+      if (cursor > valueStart) ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
+      return;
+    }
     while (cursor < text.length && !/[\s,;]/u.test(text[cursor]!)) cursor += 1;
     if (cursor > valueStart) ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
+}
+
+interface QuotedAssignmentContext {
+  powershell: boolean;
+  yaml: boolean;
+  assignmentStart: number;
+}
+
+function quotedAssignmentEnd(
+  text: string,
+  valueStart: number,
+  quote: string,
+  context: QuotedAssignmentContext,
+): number {
+  let cursor = valueStart;
+  while (cursor < text.length) {
+    const character = text[cursor]!;
+    if (character === "\\" || (context.powershell && character === "`")) {
+      if (cursor + 1 >= text.length) return text.length;
+      if (text[cursor + 1] === "\r" && text[cursor + 2] === "\n") cursor += 3;
+      else cursor += 2;
+      continue;
+    }
+    if (character === quote) {
+      if (text[cursor + 1] === quote) {
+        cursor += 2;
+        continue;
+      }
+      return cursor + 1;
+    }
+    if (character === "\r" || character === "\n") {
+      const lineBreakEnd = character === "\r" && text[cursor + 1] === "\n" ? cursor + 2 : cursor + 1;
+      if (context.powershell || (context.yaml && yamlQuotedScalarContinues(text, lineBreakEnd, context.assignmentStart))) {
+        cursor = lineBreakEnd;
+        continue;
+      }
+      return cursor;
+    }
+    cursor += 1;
+  }
+  return text.length;
+}
+
+function isPowerShellVariableAssignment(text: string, assignmentStart: number): boolean {
+  const lineStart = Math.max(text.lastIndexOf("\n", assignmentStart - 1), text.lastIndexOf("\r", assignmentStart - 1)) + 1;
+  return /\$(?:[A-Za-z_][A-Za-z0-9_]*:)?$/u.test(text.slice(lineStart, assignmentStart));
+}
+
+function yamlQuotedScalarContinues(text: string, lineStart: number, assignmentStart: number): boolean {
+  const keyIndent = yamlAssignmentIndent(text, assignmentStart);
+  let contentStart = lineStart;
+  while (contentStart < text.length && /[ \t]/u.test(text[contentStart]!)) contentStart += 1;
+  let lineEnd = contentStart;
+  while (lineEnd < text.length && text[lineEnd] !== "\r" && text[lineEnd] !== "\n") lineEnd += 1;
+  return contentStart === lineEnd || contentStart - lineStart > keyIndent;
+}
+
+function yamlPlainScalarEnd(text: string, valueStart: number): number {
+  let cursor = valueStart;
+  while (cursor < text.length) {
+    const character = text[cursor]!;
+    if (character === "\r" || character === "\n" || character === "," || character === "]" || character === "}") break;
+    if (character === "#" && cursor > valueStart && /[ \t]/u.test(text[cursor - 1]!)) {
+      while (cursor > valueStart && /[ \t]/u.test(text[cursor - 1]!)) cursor -= 1;
+      break;
+    }
+    cursor += 1;
+  }
+  while (cursor > valueStart && /[ \t]/u.test(text[cursor - 1]!)) cursor -= 1;
+  return cursor;
 }
 
 function yamlBlockScalarEnd(text: string, indicatorStart: number, assignmentStart: number): number | null {
@@ -1275,11 +1349,7 @@ function yamlBlockScalarEnd(text: string, indicatorStart: number, assignmentStar
   if (text[cursor] === "\r" && text[cursor + 1] === "\n") cursor += 2;
   else cursor += 1;
 
-  const keyLineStart = text.lastIndexOf("\n", assignmentStart - 1) + 1;
-  let keyIndent = 0;
-  while (keyLineStart + keyIndent < assignmentStart && /[ \t]/u.test(text[keyLineStart + keyIndent]!)) {
-    keyIndent += 1;
-  }
+  const keyIndent = yamlAssignmentIndent(text, assignmentStart);
 
   while (cursor < text.length) {
     const lineStart = cursor;
@@ -1296,6 +1366,17 @@ function yamlBlockScalarEnd(text: string, indicatorStart: number, assignmentStar
     else return text.length;
   }
   return text.length;
+}
+
+function yamlAssignmentIndent(text: string, assignmentStart: number): number {
+  const lineStart = Math.max(text.lastIndexOf("\n", assignmentStart - 1), text.lastIndexOf("\r", assignmentStart - 1)) + 1;
+  let indent = 0;
+  while (lineStart + indent < assignmentStart && /[ \t]/u.test(text[lineStart + indent]!)) indent += 1;
+  if (text[lineStart + indent] === "-") {
+    indent += 1;
+    while (lineStart + indent < assignmentStart && /[ \t]/u.test(text[lineStart + indent]!)) indent += 1;
+  }
+  return indent;
 }
 
 function assignmentKeySegments(key: string): string[] {
@@ -1372,24 +1453,37 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
   while (index < text.length) {
     const code = text.charCodeAt(index);
     if (code === 0x1b) {
+      const kind = text[index + 1];
       const end = terminalEscapeEnd(text, index);
-      const cursorChanging = terminalEscapeChangesCursor(text.slice(index, end));
+      const incomplete = kind === undefined
+        || (kind === "[" && !terminalCsiComplete(text, index + 2, end))
+        || (kind === "]" && !terminalStringComplete(text, end, true))
+        || ((kind === "P" || kind === "X" || kind === "^" || kind === "_")
+          && !terminalStringComplete(text, end, false));
+      const cursorChanging = incomplete || terminalEscapeChangesCursor(text.slice(index, end));
       controlRanges.push({
-        start: index,
+        start: cursorChanging ? terminalRawLineStart(text, index) : index,
         end: cursorChanging ? terminalLineEnd(text, end) : end,
         replacement: cursorChanging ? "redact" : "drop",
       });
       index = end;
       continue;
     }
-    if (code === 0x9b || code === 0x9d) {
+    if (code === 0x9b || code === 0x9d || code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) {
       const end = code === 0x9b
         ? terminalCsiEnd(text, index + 1)
-        : terminalOscEnd(text, index + 1);
-      const cursorChanging = code === 0x9b
-        && terminalEscapeChangesCursor(`\u001b[${text.slice(index + 1, end)}`);
+        : code === 0x9d
+          ? terminalOscEnd(text, index + 1)
+          : terminalStringEnd(text, index + 1);
+      const incomplete = code === 0x9b
+        ? !terminalCsiComplete(text, index + 1, end)
+        : code === 0x9d
+          ? !terminalStringComplete(text, end, true)
+          : !terminalStringComplete(text, end, false);
+      const cursorChanging = incomplete || (code === 0x9b
+        && terminalEscapeChangesCursor(`\u001b[${text.slice(index + 1, end)}`));
       controlRanges.push({
-        start: index,
+        start: cursorChanging ? terminalRawLineStart(text, index) : index,
         end: cursorChanging ? terminalLineEnd(text, end) : end,
         replacement: cursorChanging ? "redact" : "drop",
       });
@@ -1403,7 +1497,16 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
       continue;
     }
     if (code === 0x0d) {
-      controlRanges.push({ start: index, end: terminalLineEnd(text, index + 1), replacement: "redact" });
+      if (text[index + 1] === "\n") {
+        controlRanges.push({ start: index, end: index + 1, replacement: "drop" });
+        index += 1;
+        continue;
+      }
+      controlRanges.push({
+        start: terminalRawLineStart(text, index),
+        end: terminalLineEnd(text, index + 1),
+        replacement: "redact",
+      });
       index += 1;
       continue;
     }
@@ -1456,6 +1559,13 @@ function terminalLineEnd(text: string, start: number): number {
   return text.length;
 }
 
+function terminalRawLineStart(text: string, start: number): number {
+  for (let index = start - 1; index >= 0; index -= 1) {
+    if (text[index] === "\r" || text[index] === "\n") return index + 1;
+  }
+  return 0;
+}
+
 function terminalEscapeEnd(text: string, start: number): number {
   if (start + 1 >= text.length) return text.length;
   const kind = text[start + 1];
@@ -1464,6 +1574,9 @@ function terminalEscapeEnd(text: string, start: number): number {
   }
   if (kind === "]") {
     return terminalOscEnd(text, start + 2);
+  }
+  if (kind === "P" || kind === "X" || kind === "^" || kind === "_") {
+    return terminalStringEnd(text, start + 2);
   }
   return Math.min(start + 2, text.length);
 }
@@ -1476,12 +1589,33 @@ function terminalCsiEnd(text: string, firstParameter: number): number {
   return text.length;
 }
 
+function terminalCsiComplete(text: string, firstParameter: number, end: number): boolean {
+  if (end <= firstParameter) return false;
+  const finalCode = text.charCodeAt(end - 1);
+  return finalCode >= 0x40 && finalCode <= 0x7e;
+}
+
 function terminalOscEnd(text: string, firstPayload: number): number {
   for (let index = firstPayload; index < text.length; index += 1) {
     if (text.charCodeAt(index) === 0x07) return index + 1;
     if (text.charCodeAt(index) === 0x1b && text[index + 1] === "\\") return index + 2;
   }
   return text.length;
+}
+
+function terminalStringEnd(text: string, firstPayload: number): number {
+  for (let index = firstPayload; index < text.length; index += 1) {
+    if (text.charCodeAt(index) === 0x9c) return index + 1;
+    if (text.charCodeAt(index) === 0x1b && text[index + 1] === "\\") return index + 2;
+  }
+  return text.length;
+}
+
+function terminalStringComplete(text: string, end: number, allowBell: boolean): boolean {
+  if (end < 1) return false;
+  if (allowBell && text.charCodeAt(end - 1) === 0x07) return true;
+  if (text.charCodeAt(end - 1) === 0x9c) return true;
+  return end >= 2 && text.charCodeAt(end - 2) === 0x1b && text[end - 1] === "\\";
 }
 
 function mergeRanges(ranges: RedactionRange[]): RedactionRange[] {
