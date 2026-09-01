@@ -8,7 +8,7 @@
 - Pass 1 independente por papéis: `COMPLETE`
 - Pass 2 adversarial: `COMPLETE`
 - perguntas de destino abertas: `0`
-- bloqueio atual: nenhum; P4-PR02 está `GREEN_CANDIDATE` local após quatro passes remotos e hardenings adversariais, aguardando publicação/revalidação, merge e regressão pós-merge
+- bloqueio atual: nenhum; o P1 camelCase da P4-PR02 foi corrigido e contraprovado localmente, aguardando publicação, uma revalidação final, merge e regressão pós-merge; relógio hostil separado em `D-014`
 
 As respostas abaixo consolidam decisões já dadas pelo dono e evidência do repositório. Elas foram atacadas independentemente por Contract Engineer, Architect, Test Designer, Security Reviewer e Acceptance antes de `READY_FOR_EXECUTION`.
 

@@ -3,7 +3,7 @@
 ## Snapshot atual
 
 - `snapshot_version`: `1.0`
-- `updated_at`: `2026-08-31`
+- `updated_at`: `2026-09-01`
 - `contract_version`: `1.0`
 - `contract_state`: `READY_FOR_EXECUTION`
 - `target_id`: `morrow-core`
@@ -20,9 +20,9 @@
 
 ## Próxima ação exata
 
-Publicar as três correções materiais da revisão remota, responder os comentários e revalidar o head exato da PR #18 antes de restaurar `GREEN`; `PROVEN` continua condicionado ao merge e à regressão pós-merge.
+Publicar a correção categórica camelCase e o fechamento documental, responder o P1 e executar uma única revalidação final do head exato da PR #18 antes de restaurar `GREEN`; `PROVEN` continua condicionado ao merge e à regressão pós-merge.
 
-Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. O quarto passe remoto sobre `8d5f49f` encontrou propriedades quoted e credencial após Authorization scheme. `35079ab` aceita chaves quoted e redige authorization não quoted até CR/LF, com contraprovas de retorno e disco. Focused 11/11 e suíte 183/183 estão verdes localmente. `D-013` preserva o falso vermelho intermitente de PID host/descendant sem alterar P3 nesta unidade.
+Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. A revalidação do head `7cde49e` encontrou o P1 camelCase reproduzível em retorno/disco. `1b7a223` segmenta snake/kebab/camel/PascalCase, redige cinco famílias sensíveis em chunks e preserva cinco negativos. Focused 12/12 e suíte 184/184 estão verdes. O comentário de relógio não demonstrou vazamento e está em `D-014` para P4-PR03; `D-013` preserva o falso vermelho intermitente anterior de PID.
 
 ## Bloqueios atuais
 
@@ -38,7 +38,7 @@ Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. O quarto passe remot
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR02 `GREEN_CANDIDATE` local após três correções remotas; publicação/revalidação/merge e regressão pós-merge pendentes |
+| P4 | `RUNNING` | P4-PR02 `GREEN_CANDIDATE` local após correção do P1 camelCase; publicação/revalidação única/merge e regressão pós-merge pendentes |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |
