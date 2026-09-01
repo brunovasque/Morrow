@@ -296,6 +296,38 @@ test("redacts sensitive components in quoted dotted keys across chunks without m
   assert.match(disk, /public-tokenizer/);
 });
 
+test("keeps multiline assignment values pending across structural whitespace and chunks", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-multiline-assignments"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} {"password":\r`),
+    writer.write(`\n  "MULTILINE_JSON_CANARY",\n  "oauth.apiKey":`),
+    writer.write(`\n  "MULTILINE_DOTTED_CANARY"}\nserviceCredential:`),
+    writer.write(`\n  MULTILINE_YAML_CANARY\nsafeField:\n  public-value`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /MULTILINE_(?:JSON|DOTTED|YAML)_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.ok(fragments.slice(0, -1).some((fragment) => fragment.text.length > 0));
+  assert.match(liveText, /safeField:\n  public-value/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 3);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /safeField:\n  public-value/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /safeField:\\n  public-value/);
+});
+
 test("persists and returns only redacted output while dropping terminal input by default", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(configuration(root));

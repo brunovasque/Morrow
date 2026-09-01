@@ -1198,8 +1198,8 @@ function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
     }
     if (text[cursor] !== ":" && text[cursor] !== "=") continue;
     cursor += 1;
-    while (cursor < text.length && /[^\S\r\n]/u.test(text[cursor]!)) cursor += 1;
-    if (cursor >= text.length || text[cursor] === "\r" || text[cursor] === "\n") {
+    while (cursor < text.length && /\s/u.test(text[cursor]!)) cursor += 1;
+    if (cursor >= text.length) {
       ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
       continue;
     }
