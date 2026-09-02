@@ -3,8 +3,9 @@
 ## Snapshot atual
 
 - `snapshot_version`: `1.0`
-- `updated_at`: `2026-09-01`
+- `updated_at`: `2026-09-02`
 - `contract_version`: `1.0`
+- `effective_addenda`: `A-001`
 - `contract_state`: `READY_FOR_EXECUTION`
 - `target_id`: `morrow-core`
 - `integration_branch`: `phase-2/runtime-v0`
@@ -12,23 +13,23 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR02`
 - `active_route_node`: `STREAM_REDACTION_RETENTION_TRANSCRIPT`
-- `active_subaction`: `P4_PR02_INDEPENDENT_REVIEW`
+- `active_subaction`: `P4_PR02_LOCAL_INDEPENDENT_SECURITY_REVIEW`
 - `expected_branch_prefix`: `mvo/p4-pr02-`
-- `write_execution_allowed`: `yes, scoped only to P4-PR02 in a dedicated branch`
+- `write_execution_allowed`: `no for the next review; checkout must remain read-only`
 - `next_authorized_action`: `START_P4_PR02`
-- `next_authorized_actor`: `Architect/Executor/Test Designer/Security Reviewer`
+- `next_authorized_actor`: `Security Reviewer in a local session distinct from the Executor`
 
 ## Próxima ação exata
 
-Revisar independentemente o novo head remoto da PR #18 que contém o candidate de código `79382d421a9a6e9df2956007fb701d32d00c5952`; não fazer merge nesta sessão. Bloqueadores reproduzíveis dentro da unidade voltam automaticamente ao ciclo. `PROVEN` continua condicionado ao review verde, merge e regressão pós-merge.
+Executar, em nova sessão e com revisor distinto do Executor, a revisão local independente de segurança autorizada por `A-001`. O checkout deve ser somente-leitura e fixado à base `3657a070e5dc6b1e7b78fa1804761440c55efffc` e ao head de código `79382d421a9a6e9df2956007fb701d32d00c5952`; o escopo é transcript/redaction. O relatório deve registrar cobertura, ferramenta, testes, achados, limites e veredito. Qualquer P1/P2 bloqueia e retorna P4-PR02 ao ciclo. Não fazer merge durante a revisão e não tratar a prova local como equivalente ao serviço externo indisponível.
 
-Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. Uma revisão independente do head `1d93161` reproduziu assignment PowerShell válido com quote escapada por backtick vazando em chunks/live/inspect/disco; revisões do mesmo head também reproduziram string controls, override de prototype, cursor rewrite sobre linha existente e scalars YAML quoted/plain. `79382d4` corrige as categorias estruturalmente, preserva negativos e cobre block sequence/dedent. Focused 21/21; suíte integral repetida 193/193 após controle verde do `D-013`. Clock/inode/count/lease PID-only permanecem em `D-014`..`D-017` para P4-PR03.
+Reconciliação anterior ao adendo: PR #18 aberta, não draft, `MERGEABLE/CLEAN`, base remota `3657a070e5dc6b1e7b78fa1804761440c55efffc` e head remoto/documental `7fe28a32b597010cf4a869180ab640cfa2e2fb8e`, idêntico ao checkout e upstream naquele momento. O candidate de código permanece `79382d421a9a6e9df2956007fb701d32d00c5952`. Uma revisão independente do head `1d93161` reproduziu assignment PowerShell válido com quote escapada por backtick vazando em chunks/live/inspect/disco; revisões do mesmo head também reproduziram string controls, override de prototype, cursor rewrite sobre linha existente e scalars YAML quoted/plain. `79382d4` corrige as categorias estruturalmente, preserva negativos e cobre block sequence/dedent. Focused 21/21; suíte integral repetida 193/193 após controle verde do `D-013`. Clock/inode/count/lease PID-only permanecem em `D-014`..`D-017` para P4-PR03.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| nenhum | — | os P1 reproduzíveis do head `1d93161` foram corrigidos e contraprovados localmente | nova revisão independente do head remoto ainda é gate, não bloqueio técnico |
+| nenhum | — | o gate externo está indisponível, mas o dono aprovou a substituição estrita `A-001`; a revisão local ainda não foi executada | executar a revisão local independente definida no adendo; P1/P2 passa a ser bloqueio técnico |
 
 ## Status por fase
 
@@ -38,7 +39,7 @@ Base integrada: `3657a070e5dc6b1e7b78fa1804761440c55efffc`. Uma revisão indepen
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR02 `GREEN_CANDIDATE` local em `79382d4` após correções estruturais de escaping/terminal/YAML; revisão independente, merge e regressão pós-merge pendentes |
+| P4 | `RUNNING` | P4-PR02 `GREEN_CANDIDATE` de código em `79382d4`; revisão local independente de segurança de `A-001`, merge e regressão pós-merge pendentes |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |

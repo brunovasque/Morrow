@@ -34,7 +34,7 @@ P1 já existe como baseline, mas permanece no mapa para preservar proveniência 
 | `P1` | Preservar kernel/process/runtime baseline já aceito | Evitar reconstruir ou regredir fundação existente | `P1-PR01..04` | Executor, Reviewer, Auditor | commits históricos + testes | baseline reprodutível de 25 testes | já provado | event log, state, predispatch, workspace, quota adapter, terminal processual | `npm test`, commits e docs | `PROVEN_BASELINE` |
 | `P2` | Criar Local Worker governado, guards/registries mínimos e recovery | PowerShell/CLIs/workspaces locais precisam de autoridade mecânica própria | `P2-PR01..06` | Architect, Executor, Security Reviewer, Reviewer | contrato + baseline P1 | protocolo, serviço, registries, guards, dispatch, heartbeat, recovery | P0 e P1 | processo, filesystem, auth, target, skill, capability, secrets, routing, quota, budget, locks, checkpoint | testes de serviço/recusa/restart/offline e Security Review | Worker inicia, anuncia capabilities e executa somente dispatch completamente autorizado |
 | `P3` | Entregar terminal Windows PTY/ConPTY verdadeiro | Pipes não cumprem a experiência final prometida | `P3-PR01..04` | Architect, Experimenter, Executor, Security Reviewer, Acceptance | Worker P2 + terminal processual P1 | backend ConPTY, multiplexing e Codex CLI integrado | P2 | terminal, sinais, UTF-8, input, resize, cleanup, quota | prova interativa real + testes de isolamento/soak | AC-06, AC-08, AC-14 e AC-20 aplicáveis |
-| `P4` | Tornar atividade observável, segura e reidratável | Terminal vivo sem evento/replay não sustenta confiança nem retomada | `P4-PR01..04` | Architect, Executor, Test Designer, Security Reviewer, Auditor | P2/P3 + Event Log | schema, projector, redaction, transcript, replay, liveness/API stream | P3 | eventos, segredos, storage, restart, ordenação | testes adversariais, replay e duas sessões | AC-03, AC-07, AC-16, AC-20, AC-21 |
+| `P4` | Tornar atividade observável, segura e reidratável | Terminal vivo sem evento/replay não sustenta confiança nem retomada | `P4-PR01..04` | Architect, Executor, Test Designer, Security Reviewer, Auditor | P2/P3 + Event Log | schema, projector, redaction, transcript, replay, liveness/API stream | P3 | eventos, segredos, storage, restart, ordenação | testes adversariais, replay e duas sessões; para P4-PR02, revisão local independente somente-leitura conforme `A-001` | AC-03, AC-07, AC-16, AC-20, AC-21 |
 | `P5` | Entregar interface do operador, Cérebro e reunião | O produto precisa ser operado sem depender do terminal/manual técnico | `P5-PR01..06` | Discovery, Architect, Executor, Reviewer, Security Reviewer, Acceptance | APIs P2-P4 + governança | dashboard, panes, chat, meeting room e controles | P4 | UX, identidade, autoridade, comandos, terminal rendering, meeting | Acceptance visual/funcional, autorização e acessibilidade básica | AC-05, AC-07, AC-10, AC-11, AC-15, AC-28, AC-29 |
 | `P6` | Avisar e receber decisão fora do PC; integrar Nexus opcionalmente | Autonomia para quando o operador não está diante da máquina | `P6-PR01..05` | Architect, Security Reviewer, Executor, Reviewer, Acceptance | eventos/decisões P4-P5 + Worker | gateway, canal externo, resposta autenticada, Nexus adapter, offline semantics | P5 | rede, identidade, replay, duplicação, custo/credenciais | roundtrip externo, delivery receipt, testes offline/security | AC-12, AC-13, AC-16, AC-20 |
 | `P7` | Executar um contrato real completo, incluindo regressão, dívida e aprendizado | Partes isoladas não provam funcionamento do Morrow | `P7-PR01..07` | Discovery, Contract Engineer, Orchestrator, Executor, Diagnostician, Reviewer, Auditor, Acceptance, Supervisor | P0-P6 | objetivo, question round, contrato aprovado, dispatch adaptativo, regressão/inheritance, integração Git, aprendizado, cenário E2E e suite adversarial | P6 | todos os critérios e invariantes | prova objetivo→contrato aprovado→PR com reunião/decisão/restart/debt/retrospectiva | AC-02..AC-23 e AC-25..AC-27 aplicáveis |
@@ -55,13 +55,30 @@ P1 já existe como baseline, mas permanece no mapa para preservar proveniência 
 | achado | retorno mínimo |
 |---|---|
 | ConPTY não preserva semântica necessária | P3-PR01/02 → novo spike/ADR; processo-pipes permanece fallback rotulado, não aceite final |
-| Stream vaza segredo | P4-PR02 → Security Review → reexecução de toda prova afetada |
+| Stream vaza segredo | P4-PR02 → Security Review aplicável (`A-001` somente nesta unidade) → reexecução de toda prova afetada |
 | UI não corresponde a eventos reais | P5 → P4 projector/API → P5 Acceptance novamente |
 | Notificação duplica/perde decisão | P6-PR01/03 → idempotência/auth → repetir cenário P7 |
 | Restart repete efeito | P2-PR06/P4-PR03 → checkpoint/replay → revalidar P7 |
 | Reviewer/Auditor perde independência | P5/P7 → contexto/dispatch → repetir review/audit |
 | Descoberta muda destino | parar; registrar `ADDENDA.md`; exigir owner approval |
 | Descoberta é lateral | `DEBTS.md`; não implementar no contrato atual |
+
+## Exceção de rota aprovada — A-001
+
+Somente para P4-PR02, a indisponibilidade do Security Review externo é tratada pela seguinte rota substituta:
+
+```text
+base 3657a070e5dc6b1e7b78fa1804761440c55efffc
+  → candidate de código 79382d421a9a6e9df2956007fb701d32d00c5952
+  → sessão local de Security Reviewer distinta do Executor
+  → checkout somente-leitura e SHAs verificados antes da análise
+  → relatório de transcript/redaction com cobertura, ferramenta, testes,
+    achados, limites e veredito
+  → P1/P2 encontrado: BLOCKED e retorno a P4-PR02
+  → nenhum P1/P2: gate local satisfeito, ainda sujeito a merge e regressão pós-merge
+```
+
+O relatório deve declarar expressamente que essa prova local não equivale ao serviço externo indisponível e não mede superfícies fora de transcript/redaction. Reviews anteriores, a narrativa do Executor e os testes já registrados são entrada reproduzível, não substitutos da nova revisão independente.
 
 ## Cobertura dos entregáveis
 
