@@ -1,6 +1,6 @@
 # Runtime
 
-A Fase 0/1 definiu a governança e as fronteiras do runtime. A próxima fase implementará o primeiro trilho executável sem acoplar papel a modelo, target ou topologia.
+A Fase 0/1 definiu a governança e as fronteiras do runtime, e a Fase 2 entregou o Local Worker governado. A Fase 3 substitui a automação por pipes pelo terminal real apenas onde as capabilities forem provadas, sem acoplar papel a modelo, target ou topologia.
 
 ## Princípio de execução
 
@@ -39,3 +39,30 @@ Runtime V0 deve provar:
 5. workspace isolado;
 6. retorno/loop livre entre papéis com causa registrada;
 7. um adapter quota-session real sem exigir API.
+8. sessão processual própria por agente, com saída incremental observável;
+9. múltiplas sessões simultâneas em workspaces distintos;
+10. fronteira explícita entre terminais do operador e terminais gerenciados.
+
+A experiência de operação que governa esses itens está em [`OPERATOR_EXPERIENCE.md`](OPERATOR_EXPERIENCE.md). Backend por pipes prova automação, streaming e ciclo de vida; compatibilidade de terminal interativo na interface exige PTY/ConPTY e não pode ser simulada por resumos.
+
+O protocolo versionado entre Control Plane e Local Worker, suas fronteiras de confiança e o limite entre referência de trabalho e execução estão em [`ADR_WORKER_CONTROL_PROTOCOL.md`](ADR_WORKER_CONTROL_PROTOCOL.md).
+
+O serviço local que protege a raiz do Worker e expõe seu ciclo de vida está em [`LOCAL_WORKER_SERVICE.md`](LOCAL_WORKER_SERVICE.md).
+
+A ligação autenticada entre WorkSpec, autoridade, PRE_DISPATCH, routing/guards, lock, workspace, PowerShell determinístico e AgentInstance está em [`AUTHENTICATED_DISPATCH.md`](AUTHENTICATED_DISPATCH.md).
+
+A fila durável, os estados online/offline, o reconnect governado e a regra fail-closed de kill/restart estão em [`WORKER_RECOVERY.md`](WORKER_RECOVERY.md).
+
+A decisão state-of-art do terminal Windows, a fronteira substituível de backend e o capability gate que impede chamar pipes de terminal completo estão em [`ADR_WINDOWS_TERMINAL_BACKEND.md`](ADR_WINDOWS_TERMINAL_BACKEND.md).
+
+A implementação real da P3-PR02, sua ativação protegida por Job Object, interrupções distinguíveis, drenagem e provas de ausência de descendentes órfãos estão em [`WINDOWS_CONPTY_BACKEND.md`](WINDOWS_CONPTY_BACKEND.md).
+
+A integração P3-PR03 do Codex quota-session com o terminal ConPTY gerenciado, autenticação sem exportar credencial, stream ao vivo, metadata efetiva e redaction do argumento sensível está em [`CODEX_CONPTY_SESSION.md`](CODEX_CONPTY_SESSION.md).
+
+O multiplexer P3-PR04, a reserva concorrente de identidades/workspaces, o teto ConPTY medido e o soak de timeout/cancel/cleanup estão em [`CONPTY_MULTIPLEXING.md`](CONPTY_MULTIPLEXING.md).
+
+O schema canônico e o projector mecânico do Live Activity Feed P4-PR01 estão em [`LIVE_ACTIVITY_FEED.md`](LIVE_ACTIVITY_FEED.md).
+
+Os registries versionados de Target/Role/Skill/Capability e a fronteira opaca do Secret Broker estão em [`GOVERNANCE_REGISTRIES.md`](GOVERNANCE_REGISTRIES.md).
+
+A resolução auditável de routing/access/model e as reservas determinísticas de cota e budget estão em [`ROUTING_GUARDS.md`](ROUTING_GUARDS.md).

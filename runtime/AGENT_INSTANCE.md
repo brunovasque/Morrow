@@ -35,7 +35,8 @@ Uma instância registra:
 - access mode;
 - provider/model/runtime efetivos;
 - effort efetivo;
-- session/invocation IDs;
+- `terminal_session_id` quando houver processo observável;
+- provider session/invocation IDs;
 - start/end/status.
 
 ## Muitos agentes com o mesmo papel
@@ -57,6 +58,8 @@ Não existe obrigação de manter um único "Executor da empresa" vivo.
 A sessão do provider pode morrer, resetar ou ser trocada. A identidade operacional continua reconstruível pelo kernel porque contrato, mapa, memória viva, artifacts e eventos ficam fora dela.
 
 Uma nova sessão pode assumir a mesma etapa mediante novo PRE_DISPATCH e contexto reidratado.
+
+O painel de terminal na interface é uma projeção observável dessa execução, não a identidade permanente do papel. Seu ciclo de vida continua separado de qualquer terminal aberto manualmente pelo operador, conforme [`OPERATOR_EXPERIENCE.md`](OPERATOR_EXPERIENCE.md).
 
 ## Papel sem workspace
 

@@ -22,12 +22,16 @@ Nem toda responsabilidade merece um LLM. O Morrow usa agentes para julgamento e 
 16. **Target Registry** — resolve descritores de repositório/projeto-alvo, políticas e perfis sem expor credenciais ao agente.
 17. **Repository Adapter** — interface estreita para fetch/read/branch/commit/PR/status; nunca concede mais poder do que o descritor do alvo permite.
 18. **Workspace Manager** — cria checkout/worktree/sandbox por contrato/etapa, fixa base SHA e garante isolamento entre alvos.
-19. **Regression Resolver** — resolve superfícies, checks/cercas obrigatórios e verifica que foram realmente executados contra o candidato.
-20. **Regression Inheritance Resolver** — em execução filha de débito, reconstrói e deduplica a anti-regressão do contrato-pai/ancestrais vigentes.
-21. **Artifact Store** — guarda arquivos/saídas com hash, versão e vínculo à invocação/contrato.
-22. **Retry Controller** — distingue falha transitória de volta semântica; retry técnico não vira debate de agente.
-23. **Liveness Monitor** — detecta papel parado, sessão morta e mensagem não entregue.
-24. **Policy/Gate Engine** — executa `STATE_OF_ART_SCAN`, `CONTRACT_PREFLIGHT`, `PRE_DISPATCH`, `SCOPE_DRIFT_VETO`, `REGRESSION_VETO`, `DEBT_CLOSE_REGRESSION`, `LEARNING_PROMOTION`, `CONTRACT_CLOSE` e futuros gates.
+19. **Terminal Session Manager / Host** — cria e gerencia sessão processual observável por `AgentInstance` no local-worker, prende seu cwd ao workspace autorizado, transmite o stream da CLI real e governa entrada/timeout/interrupção sem anexar terminais do operador.
+20. **Session Multiplexer** — permite acompanhar múltiplas AgentInstances simultaneamente em panes/tabs/sessões ou equivalente, sem exigir uma sessão permanente por papel.
+21. **Live Activity Feed** — projeta eventos reais do kernel em linguagem operacional legível: dispatch, gate, lock, reunião, tool/process, checkpoint, teste, review/audit, bloqueio e conclusão.
+22. **Stream Redactor** — remove segredos/tokens/variáveis sensíveis antes de espelhar ou persistir streams humanos.
+23. **Regression Resolver** — resolve superfícies, checks/cercas obrigatórios e verifica que foram realmente executados contra o candidato.
+24. **Regression Inheritance Resolver** — em execução filha de débito, reconstrói e deduplica a anti-regressão do contrato-pai/ancestrais vigentes.
+25. **Artifact Store** — guarda arquivos/saídas com hash, versão e vínculo à invocação/contrato.
+26. **Retry Controller** — distingue falha transitória de volta semântica; retry técnico não vira debate de agente.
+27. **Liveness Monitor** — detecta papel parado, sessão morta e mensagem não entregue e informa estado visível (`thinking`, `tool-running`, `waiting-lock`, `waiting-quota`, `blocked`, `failed`, `done`).
+28. **Policy/Gate Engine** — executa `STATE_OF_ART_SCAN`, `CONTRACT_PREFLIGHT`, `PRE_DISPATCH`, `SCOPE_DRIFT_VETO`, `REGRESSION_VETO`, `DEBT_CLOSE_REGRESSION`, `LEARNING_PROMOTION`, `CONTRACT_CLOSE` e futuros gates.
 
 ## O que continua semântico
 
@@ -44,10 +48,12 @@ Exemplos:
 
 Se a pergunta for "a máquina consegue garantir isso sem raciocínio?", a responsabilidade fica no kernel.
 
-Verificar hash, lock, schema, budget, cota exposta, presença de campo, timeout, checkpoint, base SHA, branch permitida, target autorizado, configuração manual e execução de check NÃO são tarefas de agente.
+Verificar hash, lock, schema, budget, cota exposta, presença de campo, timeout, checkpoint, base SHA, branch permitida, target autorizado, configuração manual, execução de check, abertura/fechamento de sessão e anúncio de evento mecânico NÃO são tarefas de agente.
 
 ## Consequência
 
 O Orchestrator decide semanticamente **o que fazer a seguir**. O kernel decide mecanicamente **se a transição é permitida, qual rota de acesso está autorizada e como executá-la com segurança**.
 
 O Morrow pode governar repositórios externos sem existir dentro deles. O kernel mantém contrato/memória/governança; o Workspace Manager e Repository Adapter projetam somente as capacidades autorizadas sobre cada alvo.
+
+No local-worker, execução observável é parte do runtime: o operador deve conseguir acompanhar AgentInstances ativos, reuniões, gates e mudanças de rota sem depender apenas de um JSON final. Ver `runtime/OBSERVABLE_EXECUTION.md`.

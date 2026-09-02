@@ -4,7 +4,7 @@ Codinome de laboratório para um kernel autônomo de execução de contratos de 
 
 ## Estado
 
-**Fase 1 — governança contratual portável.** O núcleo define papéis, memória, gates, routing, targets, conectores e fronteiras do runtime antes da implementação executável do V0.
+**Fase 2 — Runtime V0.** O núcleo de governança já possui um trilho executável e agora avança o worker local, sessões de agente observáveis e isolamento operacional.
 
 ## Princípios
 
@@ -22,6 +22,8 @@ Codinome de laboratório para um kernel autônomo de execução de contratos de 
 12. Novos papéis, skills e connectors podem ser adicionados por contratos de extensão sem reescrever o kernel.
 13. Antes de reinventar capability/infra não trivial, consultar estado da arte e Tech Radar.
 14. Nenhum segredo, dado de cliente ou conhecimento proprietário de produto-alvo entra no core público.
+15. Terminais e projetos abertos pelo operador permanecem fora do ciclo de vida gerenciado pelo Morrow.
+16. A interface observa sessões reais próprias dos agentes; chat com o Cérebro e sala de reunião são canais separados dos terminais.
 
 ## Regra operacional central
 
@@ -29,4 +31,8 @@ Codinome de laboratório para um kernel autônomo de execução de contratos de 
 
 ## Próxima prova
 
-O próximo marco é o Runtime V0: executar um contrato pequeno de ponta a ponta com event log, memória viva, workspace isolado, PRE_DISPATCH determinístico e pelo menos um runtime quota-session real, medindo intervenções humanas e loops necessários.
+O próximo marco é completar o Runtime V0: executar um contrato pequeno de ponta a ponta com event log, memória viva, workspace isolado, PRE_DISPATCH determinístico, pelo menos um runtime quota-session real e terminais de agentes observáveis ao vivo. A experiência canônica do operador está em [`runtime/OPERATOR_EXPERIENCE.md`](runtime/OPERATOR_EXPERIENCE.md).
+
+## Contrato mestre ativo
+
+A conclusão do primeiro Morrow capaz de operar é governada por [`contracts/morrow-minimum-operable-v0/README.md`](contracts/morrow-minimum-operable-v0/README.md). Toda nova aba/agente deve ler esse pacote e executar somente o próximo passo autorizado em `LIVE_STATUS.md`.
