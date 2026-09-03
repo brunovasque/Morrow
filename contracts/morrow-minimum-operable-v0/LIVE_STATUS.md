@@ -13,7 +13,7 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR02`
 - `active_route_node`: `STREAM_REDACTION_RETENTION_TRANSCRIPT`
-- `active_subaction`: `P4_PR02_LOCAL_INDEPENDENT_SECURITY_REVIEW`
+- `active_subaction`: `P4_PR02_LOCAL_INDEPENDENT_SECURITY_REREVIEW`
 - `expected_branch_prefix`: `mvo/p4-pr02-`
 - `write_execution_allowed`: `no for the next review; checkout must remain read-only`
 - `next_authorized_action`: `START_P4_PR02`
@@ -21,15 +21,15 @@
 
 ## Próxima ação exata
 
-Executar, em nova sessão e com revisor distinto do Executor, a revisão local independente de segurança autorizada por `A-001`. O checkout deve ser somente-leitura e fixado à base `3657a070e5dc6b1e7b78fa1804761440c55efffc` e ao head de código `79382d421a9a6e9df2956007fb701d32d00c5952`; o escopo é transcript/redaction. O relatório deve registrar cobertura, ferramenta, testes, achados, limites e veredito. Qualquer P1/P2 bloqueia e retorna P4-PR02 ao ciclo. Não fazer merge durante a revisão e não tratar a prova local como equivalente ao serviço externo indisponível.
+Executar, em nova sessão e com revisor distinto do Executor, a re-revisão local independente de segurança autorizada por `A-001`. O checkout deve ser somente-leitura e fixado à base `3657a070e5dc6b1e7b78fa1804761440c55efffc` e ao novo head de código `a44daee73ac6bb9b91523a947a6e0154397efcee`; o escopo é transcript/redaction, incluindo a complexidade de controles de cursor e a preservação fail-closed. O relatório deve registrar cobertura, ferramenta, testes, achados, limites e veredito. Qualquer P1/P2 bloqueia e retorna P4-PR02 ao ciclo. Não fazer merge durante a revisão e não tratar a prova local como equivalente ao serviço externo indisponível.
 
-Reconciliação documental: PR #18 aberta, não draft, `MERGEABLE/CLEAN`; base de código `3657a070e5dc6b1e7b78fa1804761440c55efffc` e candidate de código `79382d421a9a6e9df2956007fb701d32d00c5952`. A revisão de segurança cobre exclusivamente esse diff de código. O delta posterior medido em `79382d421a9a6e9df2956007fb701d32d00c5952..8c93fc521ebef070b7088cb441c7eb8506d040f5` contém somente `ADDENDA.md`, `DEBTS.md`, `EVIDENCE.md`, `LIVE_STATUS.md`, `MAP.md`, `PRS.md`, `QUESTIONS.md`, `reviews/P4-PR02.md` e `runtime/STREAM_REDACTION_TRANSCRIPT.md`; essa allowlist é documental e não integra o código candidato. Uma revisão independente do head `1d93161` reproduziu assignment PowerShell válido com quote escapada por backtick vazando em chunks/live/inspect/disco; revisões do mesmo head também reproduziram string controls, override de prototype, cursor rewrite sobre linha existente e scalars YAML quoted/plain. `79382d4` corrige as categorias estruturalmente, preserva negativos e cobre block sequence/dedent. Focused 21/21; suíte integral repetida 193/193 após controle verde do `D-013`. Clock/inode/count/lease PID-only permanecem em `D-014`..`D-017` para P4-PR03. A ação permanece `START_P4_PR02`, com `active_subaction` `P4_PR02_LOCAL_INDEPENDENT_SECURITY_REVIEW`.
+O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate `a44daee73ac6bb9b91523a947a6e0154397efcee` elimina as buscas bidirecionais por controle, fecha um range fail-closed por linha e também mantém o início visível da linha sem revarrer backspaces. Pós-fix: medianas 0,7/0,9/1,7/1,9 ms; fail-closed verdadeiro em todos os tamanhos; focused 22/22; suíte final 194/194. Uma execução intermediária teve 193/194 em recovery concorrente, seguida de controle isolado verde e repetição integral verde. `D-014`..`D-017` permanecem para P4-PR03. A ação continua `START_P4_PR02`, agora para re-review independente do novo candidate.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| nenhum | — | o gate externo está indisponível, mas o dono aprovou a substituição estrita `A-001`; a revisão local ainda não foi executada | executar a revisão local independente definida no adendo; P1/P2 passa a ser bloqueio técnico |
+| `P4-PR02-P2-001` | P2 security gate | DoS algorítmica foi reproduzida e corrigida localmente em `a44daee`, mas a correção invalida o review anterior | re-review independente, somente-leitura e fixado em `3657a07..a44daee`; não fazer merge antes de veredito sem P1/P2 |
 
 ## Status por fase
 
@@ -39,7 +39,7 @@ Reconciliação documental: PR #18 aberta, não draft, `MERGEABLE/CLEAN`; base d
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR02 `GREEN_CANDIDATE` de código em `79382d4`; revisão local independente de segurança de `A-001`, merge e regressão pós-merge pendentes |
+| P4 | `RUNNING` | P4-PR02 com P2 corrigido no candidate `a44daee`; re-review local independente de `A-001`, merge e regressão pós-merge pendentes |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |

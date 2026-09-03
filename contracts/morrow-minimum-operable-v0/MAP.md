@@ -69,12 +69,14 @@ Somente para P4-PR02, a indisponibilidade do Security Review externo é tratada 
 
 ```text
 base 3657a070e5dc6b1e7b78fa1804761440c55efffc
-  → candidate de código 79382d421a9a6e9df2956007fb701d32d00c5952
+  → candidate inicial 79382d421a9a6e9df2956007fb701d32d00c5952
   → sessão local de Security Reviewer distinta do Executor
   → checkout somente-leitura e SHAs verificados antes da análise
   → relatório de transcript/redaction com cobertura, ferramenta, testes,
     achados, limites e veredito
-  → P1/P2 encontrado: BLOCKED e retorno a P4-PR02
+  → P2 de DoS algorítmica encontrado: BLOCKED e retorno a P4-PR02
+  → correção estrutural a44daee73ac6bb9b91523a947a6e0154397efcee
+  → nova sessão local independente, read-only, base/head novamente fixados
   → nenhum P1/P2: gate local satisfeito, ainda sujeito a merge e regressão pós-merge
 ```
 
