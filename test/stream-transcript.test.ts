@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 import test, { type TestContext } from "node:test";
 import {
   PersistentTranscriptStore,
@@ -348,6 +349,24 @@ test("consumes terminal string controls and fail-closes the existing line on cur
   const disk = await allFileText(root);
   assert.doesNotMatch(disk, sensitiveCanaries);
   assert.match(disk, /safeField=visible/);
+});
+
+test("bounds repeated cursor-control normalization while fail-closing the affected line", () => {
+  const redactor = new StreamRedactor({ policyId: "cursor-control-complexity", sensitiveLiterals: [] });
+  const unit = `safe\u001b[1D`;
+  const targetBytes = 60 * 1024;
+  const repeated = unit.repeat(Math.floor(targetBytes / Buffer.byteLength(unit)));
+  const input = repeated + "s".repeat(targetBytes - Buffer.byteLength(repeated));
+
+  redactor.redact(unit.repeat(64));
+  const started = performance.now();
+  const result = redactor.redact(input);
+  const elapsedMs = performance.now() - started;
+
+  assert.equal(Buffer.byteLength(input), targetBytes);
+  assert.equal(input.includes("\r") || input.includes("\n"), false);
+  assert.equal(result.text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.ok(elapsedMs < 750, `cursor_control_normalization_too_slow:${elapsedMs.toFixed(1)}ms`);
 });
 
 test("redacts sensitive components in quoted dotted keys across chunks without matching substrings", async (t) => {

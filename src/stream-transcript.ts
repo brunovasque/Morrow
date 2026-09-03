@@ -1449,7 +1449,10 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
   const rawEnds: number[] = [];
   const controlRanges: RedactionRange[] = [];
   let cursor = 0;
+  let visibleLineStart = 0;
   let index = 0;
+  let rawLineStart = 0;
+  let failClosedLine = false;
   while (index < text.length) {
     const code = text.charCodeAt(index);
     if (code === 0x1b) {
@@ -1461,11 +1464,8 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
         || ((kind === "P" || kind === "X" || kind === "^" || kind === "_")
           && !terminalStringComplete(text, end, false));
       const cursorChanging = incomplete || terminalEscapeChangesCursor(text.slice(index, end));
-      controlRanges.push({
-        start: cursorChanging ? terminalRawLineStart(text, index) : index,
-        end: cursorChanging ? terminalLineEnd(text, end) : end,
-        replacement: cursorChanging ? "redact" : "drop",
-      });
+      if (cursorChanging) failClosedLine = true;
+      else controlRanges.push({ start: index, end, replacement: "drop" });
       index = end;
       continue;
     }
@@ -1482,17 +1482,14 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
           : !terminalStringComplete(text, end, false);
       const cursorChanging = incomplete || (code === 0x9b
         && terminalEscapeChangesCursor(`\u001b[${text.slice(index + 1, end)}`));
-      controlRanges.push({
-        start: cursorChanging ? terminalRawLineStart(text, index) : index,
-        end: cursorChanging ? terminalLineEnd(text, end) : end,
-        replacement: cursorChanging ? "redact" : "drop",
-      });
+      if (cursorChanging) failClosedLine = true;
+      else controlRanges.push({ start: index, end, replacement: "drop" });
       index = end;
       continue;
     }
     if (code === 0x08) {
       controlRanges.push({ start: index, end: index + 1, replacement: "drop" });
-      cursor = Math.max(terminalLineStart(visible, cursor), cursor - 1);
+      cursor = Math.max(visibleLineStart, cursor - 1);
       index += 1;
       continue;
     }
@@ -1502,17 +1499,20 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
         index += 1;
         continue;
       }
-      controlRanges.push({
-        start: terminalRawLineStart(text, index),
-        end: terminalLineEnd(text, index + 1),
-        replacement: "redact",
-      });
+      failClosedLine = true;
       index += 1;
       continue;
     }
     const codePoint = text.codePointAt(index)!;
     const codePointLength = codePoint > 0xffff ? 2 : 1;
     const character = String.fromCodePoint(codePoint);
+    if (character === "\n") {
+      if (failClosedLine) {
+        controlRanges.push({ start: rawLineStart, end: index, replacement: "redact" });
+        failClosedLine = false;
+      }
+      rawLineStart = index + codePointLength;
+    }
     const variationSelector = (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
       || (codePoint >= 0xe0100 && codePoint <= 0xe01ef);
     if (
@@ -1536,34 +1536,17 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
       rawEnds.push(index + 1);
     }
     cursor += 1;
+    if (character === "\n") visibleLineStart = cursor;
     index += 1;
+  }
+  if (failClosedLine) {
+    controlRanges.push({ start: rawLineStart, end: text.length, replacement: "redact" });
   }
   return { visible: visible.join(""), rawStarts, rawEnds, controlRanges };
 }
 
-function terminalLineStart(visible: readonly string[], cursor: number): number {
-  for (let index = Math.min(cursor, visible.length) - 1; index >= 0; index -= 1) {
-    if (visible[index] === "\n") return index + 1;
-  }
-  return 0;
-}
-
 function terminalEscapeChangesCursor(sequence: string): boolean {
   return /^\u001b\[[0-9;?]*[ABCDEFGHJKSTfnsu]$/u.test(sequence);
-}
-
-function terminalLineEnd(text: string, start: number): number {
-  for (let index = start; index < text.length; index += 1) {
-    if (text[index] === "\r" || text[index] === "\n") return index;
-  }
-  return text.length;
-}
-
-function terminalRawLineStart(text: string, start: number): number {
-  for (let index = start - 1; index >= 0; index -= 1) {
-    if (text[index] === "\r" || text[index] === "\n") return index + 1;
-  }
-  return 0;
 }
 
 function terminalEscapeEnd(text: string, start: number): number {
