@@ -1,9 +1,8 @@
 # Adendos — MORROW-MVO-001
 
-Nenhum adendo aprovado.
-
 | addendum_id | requested_by | reason | original_clause | approved_change | impact_on_map | impact_on_regression | owner_approval | effective_at |
 |---|---|---|---|---|---|---|---|---|
+| `A-001` | Owner — Bruno Vasque | O serviço externo de Security Review exigido para P4-PR02 está indisponível | `TARGET.md`, Política de segurança: Security Review obrigatório para mudança que toca transcript | Exclusivamente para P4-PR02, substituir o gate externo indisponível por revisão local independente de segurança. O revisor e a sessão devem ser distintos do Executor; o checkout deve permanecer somente-leitura; cada ciclo fixa base/head antes da revisão. O primeiro ciclo cobriu `3657a070e5dc6b1e7b78fa1804761440c55efffc..79382d421a9a6e9df2956007fb701d32d00c5952`, encontrou um P2 de negação de serviço algorítmica e bloqueou integração. A correção autorizada gerou o novo candidate de código `a44daee73ac6bb9b91523a947a6e0154397efcee`, que invalida o parecer anterior e deve ser revisto novamente contra a mesma base. Depois do candidate, somente documentos P4-PR02 da allowlist registrada podem mudar sem integrar o código candidato. O escopo é transcript/redaction; o relatório deve registrar cobertura, ferramenta, testes, achados, limites e veredito; qualquer P1/P2 bloqueia integração. A substituição não é equivalente ao serviço externo, não certifica as superfícies não medidas e não cria precedente para outra PR. | P4-PR02 permanece `RUNNING`; o P2 retorna ao Executor e a correção volta a uma nova revisão local independente antes de merge/regressão pós-merge | Invalida o review do head anterior após qualquer correção; exige reexecução de desempenho, semântica fail-closed e regressão no candidate novo | `APPROVED` — autorização explícita do dono em 2026-09-02; retorno por P2 e correção autorizados em 2026-09-02 | 2026-09-02 |
 
 ## Regra
 
