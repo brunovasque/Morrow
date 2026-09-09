@@ -287,6 +287,26 @@ test("redacts camelCase sensitive-key categories across chunks before live retur
   assert.match(disk, /public-layout/);
 });
 
+test("preserves lexical assignment boundaries for acronyms, digits, and repeated delimiters", () => {
+  const redactor = new StreamRedactor({ policyId: "assignment-key-boundaries", sensitiveLiterals: [] });
+  const result = redactor.redact(
+    "APIKey=API_KEY_BOUNDARY_CANARY "
+      + "ClientSecret=CLIENT_SECRET_BOUNDARY_CANARY "
+      + "XMLHttpRequest=public-xml "
+      + "version2FA=public-version "
+      + "ABCD=public-acronym "
+      + "safe__--__field=public-delimiters",
+  );
+
+  assert.equal(
+    result.text,
+    `${TRANSCRIPT_REDACTION_PLACEHOLDER} ${TRANSCRIPT_REDACTION_PLACEHOLDER} `
+      + "XMLHttpRequest=public-xml version2FA=public-version "
+      + "ABCD=public-acronym safe__--__field=public-delimiters",
+  );
+  assert.equal(result.redactionCount, 2);
+});
+
 test("applies backspace semantics and fails closed on broader cursor rewrites before redaction", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(configuration(root));
@@ -353,20 +373,30 @@ test("consumes terminal string controls and fail-closes the existing line on cur
 
 test("bounds repeated cursor-control normalization while fail-closing the affected line", () => {
   const redactor = new StreamRedactor({ policyId: "cursor-control-complexity", sensitiveLiterals: [] });
-  const unit = `safe\u001b[1D`;
-  const targetBytes = 60 * 1024;
-  const repeated = unit.repeat(Math.floor(targetBytes / Buffer.byteLength(unit)));
-  const input = repeated + "s".repeat(targetBytes - Buffer.byteLength(repeated));
+  const upperPrefix = "A".repeat(30_720);
+  const cursorSuffix = "\u001b[1D".repeat(7_680);
+  const cases = [
+    { name: "upper-prefix", input: upperPrefix, expected: upperPrefix },
+    { name: "upper-prefix-cursor", input: upperPrefix + cursorSuffix, expected: TRANSCRIPT_REDACTION_PLACEHOLDER },
+  ];
 
-  redactor.redact(unit.repeat(64));
-  const started = performance.now();
-  const result = redactor.redact(input);
-  const elapsedMs = performance.now() - started;
+  redactor.redact("safe\u001b[1D".repeat(64));
+  for (const scenario of cases) {
+    const started = performance.now();
+    const result = redactor.redact(scenario.input);
+    const elapsedMs = performance.now() - started;
 
-  assert.equal(Buffer.byteLength(input), targetBytes);
-  assert.equal(input.includes("\r") || input.includes("\n"), false);
-  assert.equal(result.text, TRANSCRIPT_REDACTION_PLACEHOLDER);
-  assert.ok(elapsedMs < 750, `cursor_control_normalization_too_slow:${elapsedMs.toFixed(1)}ms`);
+    assert.equal(scenario.input.includes("\r") || scenario.input.includes("\n"), false);
+    assert.equal(result.text, scenario.expected, `${scenario.name}:semantic`);
+    assert.ok(elapsedMs < 750, `${scenario.name}:too_slow:${elapsedMs.toFixed(1)}ms`);
+  }
+});
+
+test("handles a long uppercase assignment key ending in lowercase without changing semantics", () => {
+  const redactor = new StreamRedactor({ policyId: "assignment-key-complexity", sensitiveLiterals: [] });
+  const input = `${"A".repeat(16_384)}a=public-long-uppercase-key`;
+
+  assert.equal(redactor.redact(input).text, input);
 });
 
 test("redacts sensitive components in quoted dotted keys across chunks without matching substrings", async (t) => {

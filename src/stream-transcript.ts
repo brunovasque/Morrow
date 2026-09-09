@@ -1380,12 +1380,41 @@ function yamlAssignmentIndent(text: string, assignmentStart: number): number {
 }
 
 function assignmentKeySegments(key: string): string[] {
-  return key
-    .replace(/([a-z0-9])([A-Z])/gu, "$1_$2")
-    .replace(/([A-Z]+)([A-Z][a-z])/gu, "$1_$2")
-    .split(/[\s_.-]+/u)
-    .filter((segment) => segment.length > 0)
-    .map((segment) => segment.toLowerCase());
+  const segments: string[] = [];
+  let runStart = 0;
+  for (let index = 0; index <= key.length; index += 1) {
+    if (index < key.length && !/[\s_.-]/u.test(key[index]!)) continue;
+    appendIdentifierSegments(key, runStart, index, segments);
+    runStart = index + 1;
+  }
+  return segments;
+}
+
+function appendIdentifierSegments(key: string, start: number, end: number, segments: string[]): void {
+  let segmentStart = start;
+  for (let index = start + 1; index < end; index += 1) {
+    const previous = key.charCodeAt(index - 1);
+    const current = key.charCodeAt(index);
+    const next = index + 1 < end ? key.charCodeAt(index + 1) : 0;
+    const boundary = (isAsciiLowerOrDigit(previous) && isAsciiUpper(current))
+      || (isAsciiUpper(previous) && isAsciiUpper(current) && isAsciiLower(next));
+    if (!boundary) continue;
+    segments.push(key.slice(segmentStart, index).toLowerCase());
+    segmentStart = index;
+  }
+  if (segmentStart < end) segments.push(key.slice(segmentStart, end).toLowerCase());
+}
+
+function isAsciiUpper(code: number): boolean {
+  return code >= 0x41 && code <= 0x5a;
+}
+
+function isAsciiLower(code: number): boolean {
+  return code >= 0x61 && code <= 0x7a;
+}
+
+function isAsciiLowerOrDigit(code: number): boolean {
+  return isAsciiLower(code) || (code >= 0x30 && code <= 0x39);
 }
 
 function isSensitiveAssignmentKey(key: string): boolean {
