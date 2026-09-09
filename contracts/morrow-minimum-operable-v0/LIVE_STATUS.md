@@ -3,7 +3,7 @@
 ## Snapshot atual
 
 - `snapshot_version`: `1.0`
-- `updated_at`: `2026-09-02`
+- `updated_at`: `2026-09-09`
 - `contract_version`: `1.0`
 - `effective_addenda`: `A-001`
 - `contract_state`: `READY_FOR_EXECUTION`
@@ -21,15 +21,15 @@
 
 ## Próxima ação exata
 
-Executar, em nova sessão e com revisor distinto do Executor, a re-revisão local independente de segurança autorizada por `A-001`. O checkout deve ser somente-leitura e fixado à base `3657a070e5dc6b1e7b78fa1804761440c55efffc` e ao novo head de código `a44daee73ac6bb9b91523a947a6e0154397efcee`; o escopo é transcript/redaction, incluindo a complexidade de controles de cursor e a preservação fail-closed. O relatório deve registrar cobertura, ferramenta, testes, achados, limites e veredito. Qualquer P1/P2 bloqueia e retorna P4-PR02 ao ciclo. Não fazer merge durante a revisão e não tratar a prova local como equivalente ao serviço externo indisponível.
+Executar, em nova sessão e com revisor distinto do Executor, a re-revisão local independente de segurança autorizada por `A-001`. O checkout deve ser somente-leitura e fixado à base `3657a070e5dc6b1e7b78fa1804761440c55efffc` e ao novo head de código `15e3ac733fc295d4cff3762de957f348a6e02c01`; o escopo é transcript/redaction, incluindo a complexidade de controles de cursor e segmentação de chaves, além da preservação fail-closed. O relatório deve registrar cobertura, ferramenta, testes, achados, limites e veredito. Qualquer P1/P2 bloqueia e retorna P4-PR02 ao ciclo. Não fazer merge durante a revisão e não tratar a prova local como equivalente ao serviço externo indisponível.
 
-O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate `a44daee73ac6bb9b91523a947a6e0154397efcee` elimina as buscas bidirecionais por controle, fecha um range fail-closed por linha e também mantém o início visível da linha sem revarrer backspaces. Pós-fix: medianas 0,7/0,9/1,7/1,9 ms; fail-closed verdadeiro em todos os tamanhos; focused 22/22; suíte final 194/194. Uma execução intermediária teve 193/194 em recovery concorrente, seguida de controle isolado verde e repetição integral verde. `D-014`..`D-017` permanecem para P4-PR03. A ação continua `START_P4_PR02`, agora para re-review independente do novo candidate.
+O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas atuais do novo candidate: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobre somente o microfix e não equivale ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03. A ação continua `START_P4_PR02`, agora para re-review independente do candidate `15e3ac7`.
 
 ## Bloqueios atuais
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P4-PR02-P2-001` | P2 security gate | DoS algorítmica foi reproduzida e corrigida localmente em `a44daee`, mas a correção invalida o review anterior | re-review independente, somente-leitura e fixado em `3657a07..a44daee`; não fazer merge antes de veredito sem P1/P2 |
+| `P4-PR02-P2-001` | A-001 security gate | DoS algorítmica do candidate anterior foi corrigida em `a44daee`, mas esse candidate foi superseded/invalidated pelo microfix `15e3ac7`; o A-001 completo ainda não foi executado no candidate atual | re-review independente, somente-leitura e fixado em `3657a070e5dc6b1e7b78fa1804761440c55efffc..15e3ac733fc295d4cff3762de957f348a6e02c01`; não fazer merge antes de veredito sem P1/P2 |
 
 ## Status por fase
 
@@ -39,7 +39,7 @@ O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c59
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR02 com P2 corrigido no candidate `a44daee`; re-review local independente de `A-001`, merge e regressão pós-merge pendentes |
+| P4 | `RUNNING` | P4-PR02 `BLOCKED ON A-001`; `a44daee` é predecessor superseded/invalidated e `15e3ac7` é o candidate atual; re-review local independente, merge e regressão pós-merge pendentes |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |
