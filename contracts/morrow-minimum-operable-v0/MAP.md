@@ -78,7 +78,10 @@ base 3657a070e5dc6b1e7b78fa1804761440c55efffc
   → correção estrutural a44daee73ac6bb9b91523a947a6e0154397efcee
   → microfix posterior de segmentação linear 15e3ac733fc295d4cff3762de957f348a6e02c01; a44daee superseded/invalidated
   → nova sessão local independente, read-only, base `3657a070e5dc6b1e7b78fa1804761440c55efffc` e candidate `15e3ac733fc295d4cff3762de957f348a6e02c01` novamente fixados
-  → nenhum P1/P2: gate local satisfeito, ainda sujeito a merge e regressão pós-merge
+  → A-001 do candidate 15e3ac733fc295d4cff3762de957f348a6e02c01 executado: P2 de bypass por reconstrução VT CSI b / REP encontrado; BLOCKED
+  → Executor reproduziu o RED e corrigiu o fail-closed para REP; novo candidate `ba350658a39f270cbc9ec559c193997a1a0db047`; 15e3ac7 superseded/invalidated
+  → focused 25/25, regressão completa 197/197 e `git diff --check` GREEN no novo candidate, sem A-001 válido ainda
+  → nova sessão local independente, read-only, deve revisar exatamente `3657a070e5dc6b1e7b78fa1804761440c55efffc..ba350658a39f270cbc9ec559c193997a1a0db047`; merge e regressão pós-merge continuam proibidos/pendentes
 ```
 
 O relatório deve declarar expressamente que essa prova local não equivale ao serviço externo indisponível e não mede superfícies fora de transcript/redaction. Reviews anteriores, a narrativa do Executor e os testes já registrados são entrada reproduzível, não substitutos da nova revisão independente.

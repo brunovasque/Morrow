@@ -7,3 +7,10 @@
 ## Regra
 
 Alterar objetivo mestre, critério de aceitação, exclusão, envelope operacional ou invariante exige linha aprovada aqui. Correção de rota, ordem, tecnologia ou papel permanece no mapa/ADR quando o destino não muda.
+
+## Estado factual atualizado — A-001 / P4-PR02
+
+- A revisão local independente do candidate `15e3ac733fc295d4cff3762de957f348a6e02c01` foi executada em nova sessão e ficou `BLOCKED` por um achado P2 de reconstrução via VT CSI `b` / REP.
+- O Executor reproduziu o RED antes da correção, corrigiu o caminho fail-closed e criou o novo candidate `ba350658a39f270cbc9ec559c193997a1a0db047`.
+- O candidate `15e3ac733fc295d4cff3762de957f348a6e02c01` está `SUPERSEDED`/`INVALIDATED`. O novo candidate ainda não possui A-001 válido.
+- P4-PR02 permanece `RUNNING` / `BLOCKED ON A-001`; merge permanece proibido e P4-PR03 permanece não autorizada. O próximo ciclo deve usar base `3657a070e5dc6b1e7b78fa1804761440c55efffc` e candidate `ba350658a39f270cbc9ec559c193997a1a0db047`.

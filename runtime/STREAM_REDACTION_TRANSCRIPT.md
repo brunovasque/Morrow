@@ -2,9 +2,12 @@
 
 - contract: `MORROW-MVO-001`
 - PR-ID: `P4-PR02`
-- estado: `GREEN_CANDIDATE`
+- estado: `BLOCKED_ON_A-001`
 - formato durável: `morrow.transcript/1.0`
 - implementação: `src/stream-transcript.ts`
+- candidate de código atual: `ba350658a39f270cbc9ec559c193997a1a0db047`
+- candidate anterior `15e3ac733fc295d4cff3762de957f348a6e02c01`: `SUPERSEDED`/`INVALIDATED` após A-001 `BLOCKED` por reconstrução VT CSI `b` / REP
+- provas reportadas do novo candidate: focused `25/25`, `npm test` `197/197`, `git diff --check` GREEN; A-001 do novo candidate ainda pendente
 
 ## Fronteira obrigatória
 
