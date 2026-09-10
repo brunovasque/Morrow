@@ -389,6 +389,174 @@ test("red test: CSI REP can reconstruct a sensitive assignment outside the match
   assert.doesNotMatch(disk, /VT_REPEAT_PASSWORD_CANARY/);
 });
 
+test("red test: VT HPA plus DCH can reconstruct a sensitive assignment across chunks", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root, () => baseTime, {
+    redaction: { policyId: "hpa-dch-red-test", sensitiveLiterals: [] },
+  }));
+  const writer = store.beginRecord(request("record-hpa-dch-red"));
+  const fragments = [
+    writer.write("passX\u001b["),
+    writer.write("5"),
+    writer.write("`\u001b[1"),
+    writer.write("Pword=VT_HPA_DCH_CANARY"),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  await store.close();
+  const disk = await allFileText(root);
+
+  assert.equal(liveText, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.equal(inspected, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.doesNotMatch(disk, /VT_HPA_DCH_CANARY/);
+});
+
+test("allows only proven-inert SGR and fails closed for mutating, query, private, intermediate, and unknown CSI", () => {
+  const redactor = new StreamRedactor({ policyId: "csi-classification-matrix", sensitiveLiterals: [] });
+  const mutatingOrUnknown = [
+    ["HPA", "\u001b[5`"],
+    ["ICH", "\u001b[1@"],
+    ["DCH", "\u001b[1P"],
+    ["IL", "\u001b[1L"],
+    ["DL", "\u001b[1M"],
+    ["ECH", "\u001b[1X"],
+    ["CHT", "\u001b[1I"],
+    ["CBT", "\u001b[1Z"],
+    ["HPR", "\u001b[1a"],
+    ["VPA", "\u001b[1d"],
+    ["VPR", "\u001b[1e"],
+    ["REP", "\u001b[1b"],
+    ["save", "\u001b[s"],
+    ["restore", "\u001b[u"],
+    ["query", "\u001b[6n"],
+    ["unknown", "\u001b[1q"],
+    ["private-mode", "\u001b[?25l"],
+    ["intermediate", "\u001b[2 q"],
+    ["C1-HPA", "\u009b5`"],
+  ] as const;
+
+  for (const [name, sequence] of mutatingOrUnknown) {
+    assert.equal(
+      redactor.redact(`passX${sequence}word=${name.toUpperCase()}_CSI_CANARY`).text,
+      TRANSCRIPT_REDACTION_PLACEHOLDER,
+      name,
+    );
+  }
+
+  assert.equal(redactor.redact("\u001b[32mhello\u001b[0m").text, "hello");
+  assert.equal(redactor.redact("\u001b[38:2::255:0:0mhello\u001b[39m").text, "hello");
+  assert.equal(redactor.redact("safeField=public-value").text, "safeField=public-value");
+  assert.equal(redactor.redact("\u001b[?munknown-private-sgr").text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+});
+
+test("preserves SGR-only output across chunks and every transcript channel", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-safe-sgr"));
+  const fragments = [
+    writer.write("\u001b[32mhel"),
+    writer.write("lo\u001b[0m"),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  await store.close();
+  const disk = await allFileText(root);
+
+  assert.equal(liveText, "hello");
+  assert.equal(inspected, "hello");
+  assert.equal(disk.includes("\u001b"), false);
+  assert.match(disk, /hello/);
+});
+
+test("drops complete 7-bit and C1 string controls with equivalent textual semantics", () => {
+  const redactor = new StreamRedactor({ policyId: "string-control-equivalence", sensitiveLiterals: [] });
+  const controls = [
+    ["OSC-7bit", "\u001b]0;STRING_CONTROL_PAYLOAD\u0007"],
+    ["OSC-C1", "\u009d0;STRING_CONTROL_PAYLOAD\u0007"],
+    ["APC-7bit", "\u001b_STRING_CONTROL_PAYLOAD\u001b\\"],
+    ["APC-C1", "\u009fSTRING_CONTROL_PAYLOAD\u009c"],
+    ["DCS-7bit", "\u001bPSTRING_CONTROL_PAYLOAD\u001b\\"],
+    ["DCS-C1", "\u0090STRING_CONTROL_PAYLOAD\u009c"],
+    ["PM-7bit", "\u001b^STRING_CONTROL_PAYLOAD\u001b\\"],
+    ["PM-C1", "\u009eSTRING_CONTROL_PAYLOAD\u009c"],
+    ["SOS-7bit", "\u001bXSTRING_CONTROL_PAYLOAD\u001b\\"],
+    ["SOS-C1", "\u0098STRING_CONTROL_PAYLOAD\u009c"],
+  ] as const;
+
+  for (const [name, sequence] of controls) {
+    const result = redactor.redact(`safe${sequence}text`);
+    assert.equal(result.text, "safetext", name);
+    assert.doesNotMatch(result.text, /STRING_CONTROL_PAYLOAD/);
+  }
+});
+
+test("fails closed for incomplete string controls and stateful or unknown ESC sequences", () => {
+  const redactor = new StreamRedactor({ policyId: "string-control-fail-closed", sensitiveLiterals: [] });
+  const incomplete = [
+    "\u001b]0;incomplete-osc",
+    "\u009d0;incomplete-osc",
+    "\u001b_incomplete-apc",
+    "\u009fincomplete-apc",
+    "\u001bPincomplete-dcs",
+    "\u001b^incomplete-pm",
+    "\u001bXincomplete-sos",
+  ] as const;
+  for (const sequence of incomplete) {
+    assert.equal(redactor.redact(`safe${sequence}text`).text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  }
+
+  const statefulOrUnknown = ["\u001b7", "\u001b8", "\u001bD", "\u001bM", "\u001b?", "\u001b(" ] as const;
+  for (const sequence of statefulOrUnknown) {
+    assert.equal(redactor.redact(`safe${sequence}text`).text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  }
+});
+
+test("keeps CSI classification and redaction near-linear under repeated controls and long input", () => {
+  const redactor = new StreamRedactor({ policyId: "csi-classification-performance", sensitiveLiterals: [] });
+  const cases = [
+    { name: "many-sgr", input: "\u001b[32m".repeat(4_000) + "hello", expected: "hello" },
+    {
+      name: "many-mutating",
+      input: "A".repeat(16_384) + "\u001b[1D".repeat(4_000),
+      expected: TRANSCRIPT_REDACTION_PLACEHOLDER,
+    },
+    {
+      name: "many-unknown",
+      input: "A".repeat(16_384) + "\u001b[1q".repeat(4_000),
+      expected: TRANSCRIPT_REDACTION_PLACEHOLDER,
+    },
+    {
+      name: "hpa-dch-repeated",
+      input: "A".repeat(16_384) + "\u001b[5`\u001b[1P".repeat(2_000),
+      expected: TRANSCRIPT_REDACTION_PLACEHOLDER,
+    },
+    {
+      name: "rep-repeated",
+      input: "A".repeat(16_384) + "\u001b[1b".repeat(4_000),
+      expected: TRANSCRIPT_REDACTION_PLACEHOLDER,
+    },
+    {
+      name: "long-assignment",
+      input: `safeField=${"x".repeat(24_000)}`,
+      expected: `safeField=${"x".repeat(24_000)}`,
+    },
+  ];
+
+  for (const scenario of cases) {
+    const started = performance.now();
+    const result = redactor.redact(scenario.input);
+    const elapsedMs = performance.now() - started;
+    assert.equal(result.text, scenario.expected, `${scenario.name}:semantic`);
+    assert.ok(elapsedMs < 750, `${scenario.name}:too_slow:${elapsedMs.toFixed(1)}ms`);
+  }
+});
+
 test("consumes terminal string controls and fail-closes the existing line on cursor rewrites", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(configuration(root));

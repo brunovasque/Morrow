@@ -1492,8 +1492,12 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
         || (kind === "]" && !terminalStringComplete(text, end, true))
         || ((kind === "P" || kind === "X" || kind === "^" || kind === "_")
           && !terminalStringComplete(text, end, false));
-      const cursorChanging = incomplete || terminalEscapeChangesCursor(text.slice(index, end));
-      if (cursorChanging) failClosedLine = true;
+      const stringControl = kind === "]" || kind === "P" || kind === "X" || kind === "^" || kind === "_";
+      const requiresFailClosed = incomplete
+        || (kind === "["
+          ? terminalEscapeChangesCursor(text.slice(index, end))
+          : !stringControl);
+      if (requiresFailClosed) failClosedLine = true;
       else controlRanges.push({ start: index, end, replacement: "drop" });
       index = end;
       continue;
@@ -1575,12 +1579,18 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
 }
 
 function terminalEscapeChangesCursor(sequence: string): boolean {
-  const match = /^\u001b\[[0-9;?]*([A-Za-z])$/u.exec(sequence);
-  if (!match) return false;
-  // REP (CSI Ps b) changes the rendered character stream by repeating the
-  // previous grapheme. It is intentionally fail-closed with cursor rewrites;
-  // this redactor does not emulate terminal display state.
-  return "ABCDEFGHJKSTbfnsu".includes(match[1]!);
+  // This is deliberately an allowlist. The redactor does not emulate terminal
+  // state, so only standard SGR can be dropped without changing the textual
+  // sequence that a renderer would see. Every other syntactically complete
+  // CSI is treated as a possible rewrite, query, mode change, or extension.
+  if (sequence.length < 3 || sequence.charCodeAt(0) !== 0x1b || sequence[1] !== "[") return true;
+  const finalCode = sequence.charCodeAt(sequence.length - 1);
+  if (!isTerminalCsiFinalByte(finalCode) || sequence[sequence.length - 1] !== "m") return true;
+  for (let index = 2; index < sequence.length - 1; index += 1) {
+    const code = sequence.charCodeAt(index);
+    if (!((code >= 0x30 && code <= 0x39) || code === 0x3b || code === 0x3a)) return true;
+  }
+  return false;
 }
 
 function terminalEscapeEnd(text: string, start: number): number {
@@ -1601,7 +1611,7 @@ function terminalEscapeEnd(text: string, start: number): number {
 function terminalCsiEnd(text: string, firstParameter: number): number {
   for (let index = firstParameter; index < text.length; index += 1) {
     const code = text.charCodeAt(index);
-    if (code >= 0x40 && code <= 0x7e) return index + 1;
+    if (isTerminalCsiFinalByte(code)) return index + 1;
   }
   return text.length;
 }
@@ -1609,7 +1619,11 @@ function terminalCsiEnd(text: string, firstParameter: number): number {
 function terminalCsiComplete(text: string, firstParameter: number, end: number): boolean {
   if (end <= firstParameter) return false;
   const finalCode = text.charCodeAt(end - 1);
-  return finalCode >= 0x40 && finalCode <= 0x7e;
+  return isTerminalCsiFinalByte(finalCode);
+}
+
+function isTerminalCsiFinalByte(code: number): boolean {
+  return code >= 0x40 && code <= 0x7e;
 }
 
 function terminalOscEnd(text: string, firstPayload: number): number {
