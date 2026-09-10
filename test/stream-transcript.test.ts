@@ -287,6 +287,43 @@ test("redacts camelCase sensitive-key categories across chunks before live retur
   assert.match(disk, /public-layout/);
 });
 
+test("redacts structurally sensitive CLI options across chunks before live return and persistence", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-cli-options"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} --pass`),
+    writer.write(`word=CLI_PASSWORD_EQUALS_CANARY --password CLI_PASSWORD_SPACE_CANARY --api-key=CLI_API_EQUALS_CANARY --api-key `),
+    writer.write("CLI_API_SPACE_CAN"),
+    writer.write(`ARY --client-se`),
+    writer.write(`cret=CLI_CLIENT_EQUALS_CANARY --client-secret CLI_CLIENT_SPACE_CANARY --client-secret "CLI_CLIENT_QUOTED_CANARY" `),
+    writer.write(`--access-token=CLI_ACCESS_CANARY --refresh-token=CLI_REFRESH_CANARY `),
+    writer.write("--client-secretary public --access-tokenizer public --passwordless-mode true --api-keyboard-layout us"),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /CLI_(?:PASSWORD_EQUALS|PASSWORD_SPACE|API_EQUALS|API_SPACE|CLIENT_EQUALS|CLIENT_SPACE|CLIENT_QUOTED|ACCESS|REFRESH)_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.match(liveText, /--client-secretary public/);
+  assert.match(liveText, /--access-tokenizer public/);
+  assert.match(liveText, /--passwordless-mode true/);
+  assert.match(liveText, /--api-keyboard-layout us/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 8);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /--client-secretary public/);
+  assert.match(disk, /--api-keyboard-layout us/);
+});
+
 test("preserves lexical assignment boundaries for acronyms, digits, and repeated delimiters", () => {
   const redactor = new StreamRedactor({ policyId: "assignment-key-boundaries", sensitiveLiterals: [] });
   const result = redactor.redact(
@@ -478,7 +515,11 @@ test("drops complete 7-bit and C1 string controls with equivalent textual semant
   const redactor = new StreamRedactor({ policyId: "string-control-equivalence", sensitiveLiterals: [] });
   const controls = [
     ["OSC-7bit", "\u001b]0;STRING_CONTROL_PAYLOAD\u0007"],
+    ["OSC-7bit-ESC-ST", "\u001b]0;STRING_CONTROL_PAYLOAD\u001b\\"],
+    ["OSC-7bit-C1-ST", "\u001b]0;STRING_CONTROL_PAYLOAD\u009c"],
     ["OSC-C1", "\u009d0;STRING_CONTROL_PAYLOAD\u0007"],
+    ["OSC-C1-ESC-ST", "\u009d0;STRING_CONTROL_PAYLOAD\u001b\\"],
+    ["OSC-C1-C1-ST", "\u009d0;STRING_CONTROL_PAYLOAD\u009c"],
     ["APC-7bit", "\u001b_STRING_CONTROL_PAYLOAD\u001b\\"],
     ["APC-C1", "\u009fSTRING_CONTROL_PAYLOAD\u009c"],
     ["DCS-7bit", "\u001bPSTRING_CONTROL_PAYLOAD\u001b\\"],
@@ -514,6 +555,55 @@ test("fails closed for incomplete string controls and stateful or unknown ESC se
   const statefulOrUnknown = ["\u001b7", "\u001b8", "\u001bD", "\u001bM", "\u001b?", "\u001b(" ] as const;
   for (const sequence of statefulOrUnknown) {
     assert.equal(redactor.redact(`safe${sequence}text`).text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  }
+});
+
+test("tracks incomplete string-control payloads incrementally across tiny chunks", () => {
+  const redactor = new StreamRedactor({ policyId: "string-control-incremental-performance", sensitiveLiterals: [] });
+  const cases = [
+    { name: "OSC", start: "\u001b]", end: "\u0007" },
+    { name: "DCS", start: "\u001bP", end: "\u001b\\" },
+  ] as const;
+
+  for (const scenario of cases) {
+    const timings: number[] = [];
+    for (const size of [4_000, 8_000, 12_000, 16_000]) {
+      const session = redactor.start(20_000);
+      const started = performance.now();
+      const fragments = [session.push(scenario.start)];
+      for (let index = 0; index < size; index += 1) fragments.push(session.push("x"));
+      timings.push(performance.now() - started);
+      assert.ok(fragments.every((fragment) => fragment.text === ""), `${scenario.name}:${size}:premature-release`);
+      assert.equal(session.finish().text, TRANSCRIPT_REDACTION_PLACEHOLDER, `${scenario.name}:${size}:incomplete`);
+    }
+
+    assert.ok(timings[3]! < timings[0]! * 8 + 100, `${scenario.name}:superlinear-growth`);
+  }
+});
+
+test("keeps long string-control payload security invariant independent of chunk size", () => {
+  const redactor = new StreamRedactor({ policyId: "string-control-chunk-size", sensitiveLiterals: [] });
+  const controls = [
+    ["OSC", "\u001b]", "\u0007"],
+    ["DCS", "\u001bP", "\u001b\\"],
+  ] as const;
+
+  for (const [name, start, end] of controls) {
+    const sequence = `${start}${"payload".repeat(2_000)}${end}`;
+    const oneChunk = redactor.start(20_000);
+    const oneChunkOutput = [oneChunk.push(`safe${sequence}tail`), oneChunk.finish()]
+      .map((fragment) => fragment.text)
+      .join("");
+
+    const manyChunks = redactor.start(20_000);
+    const fragments = [manyChunks.push("safe"), manyChunks.push(start)];
+    for (const character of `${"payload".repeat(2_000)}${end}tail`) fragments.push(manyChunks.push(character));
+    fragments.push(manyChunks.finish());
+    const manyChunksOutput = fragments.map((fragment) => fragment.text).join("");
+
+    assert.equal(oneChunkOutput, "safetail", `${name}:one-chunk`);
+    assert.equal(manyChunksOutput, oneChunkOutput, `${name}:chunk-equivalence`);
+    assert.doesNotMatch(manyChunksOutput, /payload/);
   }
 });
 
@@ -688,6 +778,38 @@ test("keeps multiline assignment values pending across structural whitespace and
   const disk = await allFileText(root);
   assert.doesNotMatch(disk, sensitiveCanaries);
   assert.match(disk, /safeField:\\n  public-value/);
+});
+
+test("redacts JSON assignments with CRLF and LF whitespace before the colon across chunks", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-json-whitespace-before-colon"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} {"password"`),
+    writer.write("\n"),
+    writer.write(":\n"),
+    writer.write(`"JSON_NL_CANARY","clientSecret"\r\n`),
+    writer.write(` : \r\n"JSON_CRLF_CANARY","oauth.apiKey"\n:\n`),
+    writer.write(`"JSON_DOTTED_CANARY","safeField"\n:\n"public"}`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /JSON_(?:NL|CRLF|DOTTED)_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.match(liveText, /"safeField"\n:\n"public"/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 3);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /\\"safeField\\"/);
 });
 
 test("redacts multiline quoted and whitespace-containing YAML scalars without consuming safe fields", async (t) => {

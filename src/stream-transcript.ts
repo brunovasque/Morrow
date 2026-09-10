@@ -116,6 +116,11 @@ interface RedactionRange {
   replacement: "redact" | "drop";
 }
 
+type StreamTerminalScanState =
+  | { mode: "normal" }
+  | { mode: "escape" }
+  | { mode: "string"; allowBell: boolean; escapePending: boolean };
+
 interface NormalizedTerminalText {
   visible: string;
   rawStarts: number[];
@@ -135,6 +140,7 @@ const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const canonicalTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const unicodeFormatControlPattern = /^\p{Cf}$/u;
 const assignmentKeyPattern = /(?<![A-Za-z0-9_.-])[A-Za-z][A-Za-z0-9_.-]*(?![A-Za-z0-9_.-])/gu;
+const cliOptionPattern = /(?<![A-Za-z0-9_.-])--([A-Za-z][A-Za-z0-9_.-]*)(?=(?:=|\s|$))/gu;
 const quotedAssignmentKeyPattern = /(["'])([A-Za-z][A-Za-z0-9_. -]*)\1/gu;
 const bearerPattern = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/giu;
 const commonTokenPatterns = [
@@ -251,6 +257,7 @@ export class StreamRedactorSession {
   #pending = "";
   #pendingBytes = 0;
   #finished = false;
+  #terminalScanState: StreamTerminalScanState = { mode: "normal" };
 
   constructor(redactor: StreamRedactor, maxPendingBytes: number) {
     this.#redactor = redactor;
@@ -269,6 +276,10 @@ export class StreamRedactorSession {
     }
     this.#pending += chunk;
     this.#pendingBytes += chunkBytes;
+    this.#terminalScanState = scanTerminalChunk(this.#terminalScanState, chunk);
+    if (this.#terminalScanState.mode === "string") {
+      return deepFreeze({ text: "", redactionCount: 0 });
+    }
     const result = this.#redactor.release(this.#pending, false);
     this.#pending = result.remainder;
     this.#pendingBytes = Buffer.byteLength(this.#pending, "utf8");
@@ -281,6 +292,7 @@ export class StreamRedactorSession {
     const result = this.#redactor.release(this.#pending, true).released;
     this.#pending = "";
     this.#pendingBytes = 0;
+    this.#terminalScanState = { mode: "normal" };
     return result;
   }
 
@@ -288,6 +300,7 @@ export class StreamRedactorSession {
     this.#finished = true;
     this.#pending = "";
     this.#pendingBytes = 0;
+    this.#terminalScanState = { mode: "normal" };
   }
 }
 
@@ -1182,6 +1195,14 @@ function collectMappedLiteralRanges(
 }
 
 function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
+  cliOptionPattern.lastIndex = 0;
+  let cliMatch: RegExpExecArray | null;
+  while ((cliMatch = cliOptionPattern.exec(text)) !== null) {
+    const key = cliMatch[1]!;
+    if (!isSensitiveAssignmentKey(key)) continue;
+    collectCliOptionValueRange(text, cliMatch.index, cliMatch.index + cliMatch[0].length, ranges);
+  }
+
   quotedAssignmentKeyPattern.lastIndex = 0;
   let quotedMatch: RegExpExecArray | null;
   while ((quotedMatch = quotedAssignmentKeyPattern.exec(text)) !== null) {
@@ -1213,6 +1234,36 @@ function collectAssignmentRanges(text: string, ranges: RedactionRange[]): void {
   }
 }
 
+function collectCliOptionValueRange(
+  text: string,
+  optionStart: number,
+  optionEnd: number,
+  ranges: RedactionRange[],
+): void {
+  let cursor = optionEnd;
+  const hasEquals = text[cursor] === "=";
+  if (hasEquals) cursor += 1;
+  while (cursor < text.length && /\s/u.test(text[cursor]!)) cursor += 1;
+  if (cursor >= text.length) {
+    ranges.push({ start: optionStart, end: cursor, replacement: "redact" });
+    return;
+  }
+
+  const quote = text[cursor];
+  if (quote === '"' || quote === "'") {
+    cursor = quotedAssignmentEnd(text, cursor + 1, quote, {
+      powershell: false,
+      yaml: false,
+      assignmentStart: optionStart,
+    });
+    ranges.push({ start: optionStart, end: cursor, replacement: "redact" });
+    return;
+  }
+
+  while (cursor < text.length && !/\s/u.test(text[cursor]!)) cursor += 1;
+  ranges.push({ start: optionStart, end: cursor, replacement: "redact" });
+}
+
 function collectAssignmentValueRange(
   text: string,
   assignmentStart: number,
@@ -1221,7 +1272,7 @@ function collectAssignmentValueRange(
   ranges: RedactionRange[],
 ): void {
     let cursor = keyEnd;
-    while (cursor < text.length && /[^\S\r\n]/u.test(text[cursor]!)) cursor += 1;
+    while (cursor < text.length && /\s/u.test(text[cursor]!)) cursor += 1;
     if (cursor >= text.length) {
       ranges.push({ start: assignmentStart, end: cursor, replacement: "redact" });
       return;
@@ -1629,9 +1680,69 @@ function isTerminalCsiFinalByte(code: number): boolean {
 function terminalOscEnd(text: string, firstPayload: number): number {
   for (let index = firstPayload; index < text.length; index += 1) {
     if (text.charCodeAt(index) === 0x07) return index + 1;
+    if (text.charCodeAt(index) === 0x9c) return index + 1;
     if (text.charCodeAt(index) === 0x1b && text[index + 1] === "\\") return index + 2;
   }
   return text.length;
+}
+
+function scanTerminalChunk(state: StreamTerminalScanState, chunk: string): StreamTerminalScanState {
+  let current = state;
+  let index = 0;
+  while (index < chunk.length) {
+    if (current.mode === "string") {
+      if (current.escapePending) {
+        current.escapePending = false;
+        if (chunk[index] === "\\") {
+          current = { mode: "normal" };
+          index += 1;
+          continue;
+        }
+      }
+      const code = chunk.charCodeAt(index);
+      if ((current.allowBell && code === 0x07) || code === 0x9c) {
+        current = { mode: "normal" };
+        index += 1;
+      } else if (code === 0x1b) {
+        current.escapePending = true;
+        index += 1;
+      } else {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (current.mode === "escape") {
+      const character = chunk[index]!;
+      if (character === "]" || character === "P" || character === "X" || character === "^" || character === "_") {
+        current = { mode: "string", allowBell: character === "]", escapePending: false };
+      } else {
+        current = { mode: "normal" };
+      }
+      index += 1;
+      continue;
+    }
+
+    const code = chunk.charCodeAt(index);
+    if (code === 0x1b) {
+      if (index + 1 >= chunk.length) {
+        current = { mode: "escape" };
+        index += 1;
+        continue;
+      }
+      const character = chunk[index + 1]!;
+      if (character === "]" || character === "P" || character === "X" || character === "^" || character === "_") {
+        current = { mode: "string", allowBell: character === "]", escapePending: false };
+      }
+      index += 2;
+      continue;
+    }
+    if (code === 0x9d || code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) {
+      current = { mode: "string", allowBell: code === 0x9d, escapePending: false };
+    }
+    index += 1;
+  }
+  return current;
 }
 
 function terminalStringEnd(text: string, firstPayload: number): number {
