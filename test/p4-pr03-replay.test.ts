@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { JsonlEventLog } from "../src/event-log.ts";
@@ -442,6 +442,81 @@ test("P2-03 rejects a giant UTF-8 JSONL record while accumulating chunks", async
   assert.equal(result.status, "invalid");
 });
 
+test("P2 RED/GREEN: event-log rewrite, removal and insertion cannot forge authenticated history", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "authenticated-events.jsonl");
+  const log = new JsonlEventLog(file);
+  for (let index = 1; index <= 3; index += 1) await log.append(event("C-P4-PR03", `auth-${index}`));
+  const original = (await readFile(file, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, any>);
+  const rewrites = [
+    (entries: Record<string, any>[]) => {
+      entries[0]!.event = { ...entries[0]!.event, payload: { eventId: "forged" } };
+      return entries;
+    },
+    (entries: Record<string, any>[]) => entries.filter((_, index) => index !== 1),
+    (entries: Record<string, any>[]) => [entries[0], { ...entries[1], event: event("C-P4-PR03", "inserted") }, entries[1], entries[2]],
+  ];
+  for (const rewrite of rewrites) {
+    const forged = reindexWithPublicSha(rewrite(structuredClone(original)));
+    await writeFile(file, `${forged.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+    assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  }
+});
+
+test("P2: authenticated event-log domain rejects isolated field changes and downgrade", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "field-events.jsonl");
+  const log = new JsonlEventLog(file);
+  await log.append(event("C-P4-PR03", "field-1"));
+  const original = (await readFile(file, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, any>);
+  const mutations = [
+    (entry: Record<string, any>) => { entry.sequence = 2; },
+    (entry: Record<string, any>) => { entry.event.eventId = "changed-id"; },
+    (entry: Record<string, any>) => { entry.event.contractId = "changed-contract"; },
+    (entry: Record<string, any>) => { entry.event.type = "CHANGED"; },
+    (entry: Record<string, any>) => { entry.event.payload = { changed: true }; },
+    (entry: Record<string, any>) => { entry.previousHash = "f".repeat(64); },
+    (entry: Record<string, any>) => { entry.format = "morrow.event-log/2"; },
+    (entry: Record<string, any>) => { entry.eventHash = "not-hex"; },
+    (entry: Record<string, any>) => { entry.eventHash = "f".repeat(64); },
+  ];
+  for (const mutate of mutations) {
+    const changed = structuredClone(original);
+    mutate(changed[0]!);
+    await writeFile(file, `${changed.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+    assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  }
+  const downgraded = structuredClone(original);
+  downgraded[0]!.format = "morrow.event-log/1";
+  await writeFile(file, `${JSON.stringify(downgraded[0])}\n`, "utf8");
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+});
+
+test("P2: event-log key is required, isolated by purpose and bound to its path", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "key-events.jsonl");
+  const log = new JsonlEventLog(file);
+  await log.append(event("C-P4-PR03", "key-1"));
+  const originalLog = await readFile(file, "utf8");
+  const keyPath = `${file}.event-log-key-v1`;
+  const copiedFile = join(root, "copied-events.jsonl");
+  const copiedKey = `${copiedFile}.event-log-key-v1`;
+  await copyFile(file, copiedFile);
+  await copyFile(keyPath, copiedKey);
+  assert.equal((await new JsonlEventLog(copiedFile).replay("C-P4-PR03")).status, "invalid");
+
+  await unlink(file);
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  await writeFile(file, originalLog, "utf8");
+  await unlink(keyPath);
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  await writeFile(keyPath, Buffer.alloc(32, 7), { flag: "wx" });
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  await unlink(keyPath);
+  await writeFile(keyPath, Buffer.alloc(31), { flag: "wx" });
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+});
+
 test("P3: HMAC provenance rejects invalid length, encoding and different tags", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
@@ -542,6 +617,22 @@ function liveEvent(eventId: string, sequence: number, causationId: string | null
     },
     transition: { from: sequence === 1 ? null : "dispatch", to, reasonCode: "fixture", sourceKind: to === "dispatch" ? "kernel" : "process", sourceId: "fixture" },
   };
+}
+
+function reindexWithPublicSha(entries: Record<string, any>[]): Record<string, any>[] {
+  let previousHash = "0".repeat(64);
+  return entries.map((entry, index) => {
+    entry.sequence = index + 1;
+    entry.previousHash = previousHash;
+    entry.eventHash = createHash("sha256").update(JSON.stringify({
+      format: entry.format,
+      sequence: entry.sequence,
+      previousHash: entry.previousHash,
+      event: entry.event,
+    })).digest("hex");
+    previousHash = entry.eventHash;
+    return entry;
+  });
 }
 
 function workerConfiguration(root: string, clock: () => unknown = () => baseTime): WorkerRecoveryConfiguration {
