@@ -287,10 +287,9 @@ export class StreamRedactorSession {
     if (this.#terminalScanState.mode === "string") {
       return deepFreeze({ text: "", redactionCount: 0 });
     }
-    const hasLineBoundary = chunk.includes("\n");
     if (
       this.#pending.length <= this.#holdback
-      || (this.#releasedOnce && !hasLineBoundary && this.#pendingSinceReleaseBytes < this.#releaseBatchBytes)
+      || (this.#releasedOnce && this.#pendingSinceReleaseBytes < this.#releaseBatchBytes)
     ) {
       return deepFreeze({ text: "", redactionCount: 0 });
     }

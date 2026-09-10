@@ -618,6 +618,122 @@ test("amortizes one-byte release scans across and beyond holdback", () => {
   }
 });
 
+test("amortizes fragmented LF and CRLF release scans across multiple holdback windows", () => {
+  const redactor = new StreamRedactor({ policyId: "newline-release-complexity", sensitiveLiterals: [] });
+  const sizes = [2_000, 4_000, 8_000, 12_000, 16_000];
+  const makeInput = (size: number, lineEnding: "\n" | "\r\n") => {
+    const unit = `x${lineEnding}`;
+    return unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
+  };
+  const run = (input: string, chunkSize: number) => {
+    const session = redactor.start(100_000);
+    const fragments = [];
+    for (let offset = 0; offset < input.length; offset += chunkSize) {
+      fragments.push(session.push(input.slice(offset, offset + chunkSize)));
+    }
+    fragments.push(session.finish());
+    return fragments;
+  };
+
+  for (const lineEnding of ["\n", "\r\n"] as const) {
+    const timings: number[] = [];
+    for (const size of sizes) {
+      const input = makeInput(size, lineEnding);
+      const started = performance.now();
+      const oneByteFragments = run(input, 1);
+      timings.push(performance.now() - started);
+
+      const oneByteOutput = oneByteFragments.map((fragment) => fragment.text).join("");
+      for (const chunkSize of [input.length, 1_024]) {
+        const output = run(input, chunkSize).map((fragment) => fragment.text).join("");
+        assert.equal(output, oneByteOutput, `${JSON.stringify(lineEnding)}:${size}:${chunkSize}:chunk-equivalence`);
+      }
+
+      const nonEmptyReleases = oneByteFragments.filter((fragment) => fragment.text.length > 0).length;
+      assert.ok(
+        nonEmptyReleases <= Math.ceil(Buffer.byteLength(input, "utf8") / 4_096) + 2,
+        `${JSON.stringify(lineEnding)}:${size}:release-amortization:${nonEmptyReleases}`,
+      );
+    }
+
+    const first = timings[0]!;
+    const last = timings[timings.length - 1]!;
+    assert.ok(
+      last < first * 20 + 300,
+      `${JSON.stringify(lineEnding)}:superlinear-growth:${timings.map((timing) => timing.toFixed(1)).join(",")}`,
+    );
+  }
+});
+
+test("keeps multiline secrets fail-closed while newline batching crosses holdback boundaries", () => {
+  const redactor = new StreamRedactor({ policyId: "newline-multiline-security", sensitiveLiterals: [] });
+  const sensitiveCanaries = /NEWLINE_BATCH_(?:BLOCK|JSON|POWERSHELL)_CANARY/;
+  const makeInput = (size: number, lineEnding: "\n" | "\r\n") => {
+    const safeLine = `safeField: public${lineEnding}`;
+    const multiline = [
+      `password: |${lineEnding}`,
+      `  NEWLINE_BATCH_BLOCK_CANARY${lineEnding}`,
+      `safeSibling: visible${lineEnding}`,
+      `{"password":${lineEnding}`,
+      `  "NEWLINE_BATCH_JSON_CANARY",${lineEnding}`,
+      `  "safeField": "public"}${lineEnding}`,
+      `$env:NEWLINE_BATCH_SECRET = "NEWLINE_BATCH_POWERSHELL_CANARY${lineEnding}`,
+      `  continuation"${lineEnding}`,
+      `safeAfter: visible${lineEnding}`,
+    ].join("");
+    const padding = Math.max(0, size - multiline.length);
+    const prefix = safeLine.repeat(Math.floor(padding / 2 / safeLine.length));
+    const suffix = safeLine.repeat(Math.ceil((padding - prefix.length) / safeLine.length));
+    return `${prefix}${multiline}${suffix}`;
+  };
+  const run = (input: string, chunkSize: number) => {
+    const session = redactor.start(100_000);
+    const fragments = [];
+    for (let offset = 0; offset < input.length; offset += chunkSize) {
+      fragments.push(session.push(input.slice(offset, offset + chunkSize)));
+    }
+    fragments.push(session.finish());
+    return fragments;
+  };
+
+  for (const lineEnding of ["\n", "\r\n"] as const) {
+    for (const size of [2_000, 4_000, 8_000, 12_000, 16_000]) {
+      const input = makeInput(size, lineEnding);
+      const results = [run(input, input.length), run(input, 1_024), run(input, 1)];
+      const expected = results[0]!.map((fragment) => fragment.text).join("");
+      assert.doesNotMatch(expected, sensitiveCanaries, `${JSON.stringify(lineEnding)}:${size}:final-canary`);
+      assert.match(expected, /safeSibling: visible/);
+      assert.match(expected, /safeAfter: visible/);
+      for (const fragments of results) {
+        for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+        assert.equal(fragments.map((fragment) => fragment.text).join(""), expected);
+      }
+    }
+  }
+});
+
+test("does not release again for a newline just after an exact LF or CRLF batch boundary", () => {
+  const redactor = new StreamRedactor({ policyId: "newline-batch-boundary", sensitiveLiterals: [] });
+  const cases = [
+    { name: "LF", beforeBoundary: "y".repeat(4_095), boundary: "\n", afterBoundary: "\n" },
+    { name: "CRLF", beforeBoundary: "y".repeat(4_094), boundary: "\r\n", afterBoundary: "\r\n" },
+  ] as const;
+
+  for (const scenario of cases) {
+    const session = redactor.start(100_000);
+    const fragments = [
+      session.push("x".repeat(4_097)),
+      session.push(scenario.beforeBoundary),
+      session.push(scenario.boundary),
+      session.push(scenario.afterBoundary),
+      session.finish(),
+    ];
+    assert.equal(fragments[1]!.text, "", `${scenario.name}:before-boundary-release`);
+    assert.notEqual(fragments[2]!.text, "", `${scenario.name}:exact-boundary-release`);
+    assert.equal(fragments[3]!.text, "", `${scenario.name}:post-boundary-newline-release`);
+  }
+});
+
 test("preserves SGR-only output across chunks and every transcript channel", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(configuration(root));
@@ -894,7 +1010,6 @@ test("keeps multiline assignment values pending across structural whitespace and
   const liveText = fragments.map((fragment) => fragment.text).join("");
   for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
   assert.doesNotMatch(liveText, sensitiveCanaries);
-  assert.ok(fragments.slice(0, -1).some((fragment) => fragment.text.length > 0));
   assert.match(liveText, /safeField:\n  public-value/);
   assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 3);
 
