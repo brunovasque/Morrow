@@ -229,6 +229,73 @@ test("D-016 counterproof: an artificial placeholder without redactor provenance 
   );
 });
 
+test("P2-01 RED: deleting current provenance downgrades a snapshot to legacy-v1", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  const writer = store.beginRecord(recordRequest("legacy-downgrade"));
+  writer.write("ordinary output");
+  await writer.commit();
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const original = JSON.parse(await readFile(snapshot, "utf8")) as {
+    redactionProvenanceFormat?: string;
+    records: Array<Record<string, unknown>>;
+    checksum: string;
+  };
+  const variants = [
+    (parsed: typeof original) => {
+      delete parsed.redactionProvenanceFormat;
+      for (const record of parsed.records) delete record.redactionProvenance;
+    },
+    (parsed: typeof original) => { delete parsed.records[0]!.redactionProvenance; },
+    (parsed: typeof original) => { parsed.redactionProvenanceFormat = "legacy-v1"; },
+    (parsed: typeof original) => {
+      (parsed.records[0]!.redactionProvenance as Record<string, unknown>).format = "legacy-v1";
+    },
+  ];
+  for (const mutate of variants) {
+    const parsed = structuredClone(original);
+    mutate(parsed);
+    const { checksum: _checksum, ...withoutChecksum } = parsed;
+    parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+    await writeFile(snapshot, `${JSON.stringify(parsed)}\n`, "utf8");
+    await assert.rejects(
+      PersistentTranscriptStore.open(transcriptConfiguration(root)),
+      /transcript_snapshot_(invalid|checksum_invalid)/,
+    );
+  }
+});
+
+test("P2-02 RED: changing transcript ordinals survives checksum and unauthenticated provenance", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  for (const id of ["ordinal-1", "ordinal-2"]) {
+    const writer = store.beginRecord(recordRequest(id));
+    writer.write(id);
+    await writer.commit();
+  }
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const parsed = JSON.parse(await readFile(snapshot, "utf8")) as {
+    records: Array<{ ordinal: number }>;
+    nextOrdinal: number;
+    checksum: string;
+  };
+  parsed.records[0]!.ordinal = 2;
+  parsed.records[1]!.ordinal = 3;
+  parsed.nextOrdinal = 4;
+  const { checksum: _checksum, ...withoutChecksum } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+  await writeFile(snapshot, `${JSON.stringify(parsed)}\n`, "utf8");
+
+  await assert.rejects(
+    PersistentTranscriptStore.open(transcriptConfiguration(root)),
+    /transcript_snapshot_invalid/,
+  );
+});
+
 test("P2-03 rejects transcript ordinal gaps and hostile cursor traps", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
@@ -332,6 +399,25 @@ test("P2-03 rejects event reorder, gap, duplicate and hostile cursor traps", asy
     await writeFile(file, `${corrupt(original).map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
     assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
   }
+  const duplicateEventId = structuredClone(original);
+  duplicateEventId[2]!.event = {
+    ...(duplicateEventId[2]!.event as Record<string, unknown>),
+    eventId: "integrity-1",
+    payload: { eventId: "integrity-1" },
+  };
+  let previousHash = "0".repeat(64);
+  for (const entry of duplicateEventId) {
+    entry.previousHash = previousHash;
+    entry.eventHash = createHash("sha256").update(JSON.stringify({
+      format: entry.format,
+      sequence: entry.sequence,
+      previousHash: entry.previousHash,
+      event: entry.event,
+    })).digest("hex");
+    previousHash = entry.eventHash as string;
+  }
+  await writeFile(file, `${duplicateEventId.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
   await writeFile(file, "{malformed-json}\n", "utf8");
   assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
   await writeFile(file, `${original.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
@@ -339,6 +425,44 @@ test("P2-03 rejects event reorder, gap, duplicate and hostile cursor traps", asy
   const hostile = new Proxy({}, { getPrototypeOf: () => { throw new Error("CURSOR_SECRET"); } });
   assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03", hostile)).status, "invalid");
   assert.equal(current.status, "ok");
+});
+
+test("P2-03 rejects a giant UTF-8 JSONL record while accumulating chunks", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "giant-event.jsonl");
+  const giant = {
+    format: "morrow.event-log/2",
+    sequence: 1,
+    previousHash: "0".repeat(64),
+    eventHash: "0".repeat(64),
+    event: { ...event("C-P4-PR03", "giant"), payload: "é".repeat(600_000) },
+  };
+  await writeFile(file, `${JSON.stringify(giant)}\n`, "utf8");
+  const result = await new JsonlEventLog(file).replay("C-P4-PR03", undefined, 1);
+  assert.equal(result.status, "invalid");
+});
+
+test("P3: HMAC provenance rejects invalid length, encoding and different tags", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  const writer = store.beginRecord(recordRequest("hmac-validation"));
+  writer.write("safe output");
+  await writer.commit();
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const original = JSON.parse(await readFile(snapshot, "utf8")) as {
+    records: Array<{ redactionProvenance: { tag: string } }>;
+    checksum: string;
+  };
+  for (const tag of ["not-a-tag", "b".repeat(64)]) {
+    const parsed = structuredClone(original);
+    parsed.records[0]!.redactionProvenance.tag = tag;
+    const { checksum: _checksum, ...withoutChecksum } = parsed;
+    parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+    await writeFile(snapshot, `${JSON.stringify(parsed)}\n`, "utf8");
+    await assert.rejects(PersistentTranscriptStore.open(transcriptConfiguration(root)), /transcript_snapshot_invalid/);
+  }
 });
 
 test("transcript cursor is ordinal-based and survives restart independently from event cursor", async (t) => {

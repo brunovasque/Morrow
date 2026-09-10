@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:net";
 import { constants } from "node:fs";
 import {
@@ -73,7 +73,7 @@ export interface TranscriptRecord {
 }
 
 export interface TranscriptRedactionProvenance {
-  format: "hmac-sha256-v1" | "legacy-v1";
+  format: "hmac-sha256-v1";
   inputDigest: string;
   tag: string;
 }
@@ -539,6 +539,9 @@ export class PersistentTranscriptStore {
           redactionCount,
           sensitiveInput,
           inputDigest,
+          this.#state.nextOrdinal,
+          now,
+          transcriptStreamId(this.#filePath),
         ),
       };
       const draft = cloneState(this.#state);
@@ -1138,7 +1141,7 @@ async function loadState(
   } finally {
     await handle?.close().catch(() => undefined);
   }
-  const state = validatePersistedState(parsed, retention, access, redactor, redactionKey);
+  const state = validatePersistedState(parsed, retention, access, redactor, redactionKey, transcriptStreamId(path));
   return state;
 }
 
@@ -1148,19 +1151,9 @@ function validatePersistedState(
   access: NormalizedAccessPolicy,
   redactor: StreamRedactor,
   redactionKey: Buffer,
+  streamId: string,
 ): TranscriptState {
-  const legacy = isPlainDataRecord(input) && !Object.prototype.hasOwnProperty.call(input, "redactionProvenanceFormat");
-  const expectedKeys = legacy ? [
-    "format",
-    "redactionPolicyId",
-    "revision",
-    "nextOrdinal",
-    "updatedAt",
-    "retention",
-    "access",
-    "records",
-    "checksum",
-  ] : [
+  const expectedKeys = [
     "format",
     "redactionProvenanceFormat",
     "redactionPolicyId",
@@ -1179,7 +1172,7 @@ function validatePersistedState(
   }
   if (
     input.format !== TRANSCRIPT_FORMAT
-    || (!legacy && input.redactionProvenanceFormat !== redactionProvenanceFormat)
+    || input.redactionProvenanceFormat !== redactionProvenanceFormat
     || input.redactionPolicyId !== redactor.policyId
     || !boundedInteger(input.revision, 0, Number.MAX_SAFE_INTEGER)
     || !boundedInteger(input.nextOrdinal, 1, Number.MAX_SAFE_INTEGER)
@@ -1202,7 +1195,7 @@ function validatePersistedState(
   let previousOccurredAt = Number.NEGATIVE_INFINITY;
   const updatedAt = Date.parse(input.updatedAt);
   for (let index = 0; index < input.records.length; index += 1) {
-    const record = parsePersistedRecord(readDataArrayElement(input.records, index), !legacy);
+    const record = parsePersistedRecord(readDataArrayElement(input.records, index), true);
     const occurredAt = Date.parse(record.occurredAt);
     if (
       (records.length > 0 && record.ordinal !== previousOrdinal + 1)
@@ -1212,16 +1205,13 @@ function validatePersistedState(
       || occurredAt > updatedAt
       || Buffer.byteLength(record.content, "utf8") > retention.maxRecordBytes
       || redactor.redact(record.content).text !== record.content
-      || (legacy
-        ? record.redactionCount !== persistedRedactionCount(record.content, record.sensitiveInput)
-        : !record.redactionProvenance || !verifyRedactionProvenance(redactionKey, record))
+      || !record.redactionProvenance || !verifyRedactionProvenance(redactionKey, record, streamId)
     ) {
       throw transcriptError("transcript_snapshot_invalid");
     }
     previousOrdinal = record.ordinal;
     previousOccurredAt = occurredAt;
     ids.add(record.recordId);
-    if (legacy) record.redactionProvenance = createLegacyRedactionProvenance(redactionKey, record);
     records.push(record);
   }
   if (records.length > 0 && input.nextOrdinal !== records[records.length - 1]!.ordinal + 1) {
@@ -1993,17 +1983,6 @@ function countRedactions(ranges: readonly RedactionRange[]): number {
   return ranges.filter((range) => range.replacement === "redact").length;
 }
 
-function persistedRedactionCount(content: string, sensitiveInput: boolean): number {
-  if (sensitiveInput) return content === SENSITIVE_INPUT_PLACEHOLDER ? 1 : 0;
-  let count = 0;
-  let offset = 0;
-  while ((offset = content.indexOf(TRANSCRIPT_REDACTION_PLACEHOLDER, offset)) >= 0) {
-    count += 1;
-    offset += TRANSCRIPT_REDACTION_PLACEHOLDER.length;
-  }
-  return count;
-}
-
 function createRedactionProvenance(
   key: Buffer,
   request: TranscriptRecordRequest,
@@ -2011,34 +1990,31 @@ function createRedactionProvenance(
   redactionCount: number,
   sensitiveInput: boolean,
   inputDigest: string,
+  ordinal: number,
+  occurredAt: string,
+  streamId: string,
 ): TranscriptRedactionProvenance {
   return {
     format: redactionProvenanceFormat,
     inputDigest,
-    tag: redactionTag(key, redactionProvenanceFormat, request, content, redactionCount, sensitiveInput, inputDigest),
-  };
-}
-
-function createLegacyRedactionProvenance(key: Buffer, record: TranscriptRecord): TranscriptRedactionProvenance {
-  const inputDigest = "legacy-v1";
-  return {
-    format: "legacy-v1",
-    inputDigest,
     tag: redactionTag(
       key,
-      "legacy-v1",
-      record,
-      record.content,
-      record.redactionCount,
-      record.sensitiveInput,
+      redactionProvenanceFormat,
+      request,
+      content,
+      redactionCount,
+      sensitiveInput,
       inputDigest,
+      ordinal,
+      occurredAt,
+      streamId,
     ),
   };
 }
 
-function verifyRedactionProvenance(key: Buffer, record: TranscriptRecord): boolean {
+function verifyRedactionProvenance(key: Buffer, record: TranscriptRecord, streamId: string): boolean {
   const provenance = record.redactionProvenance;
-  if (!provenance) return false;
+  if (!provenance || provenance.format !== redactionProvenanceFormat) return false;
   const expected = redactionTag(
     key,
     provenance.format,
@@ -2047,18 +2023,23 @@ function verifyRedactionProvenance(key: Buffer, record: TranscriptRecord): boole
     record.redactionCount,
     record.sensitiveInput,
     provenance.inputDigest,
+    record.ordinal,
+    record.occurredAt,
+    streamId,
   );
-  return expected === provenance.tag;
+  if (!/^[0-9a-f]{64}$/u.test(provenance.tag)) return false;
+  const expectedBytes = Buffer.from(expected, "hex");
+  const actualBytes = Buffer.from(provenance.tag, "hex");
+  return expectedBytes.length === actualBytes.length && timingSafeEqual(expectedBytes, actualBytes);
 }
 
 function parseRedactionProvenance(input: unknown): TranscriptRedactionProvenance {
   if (!isPlainDataRecord(input) || !hasExactDataKeys(input, ["format", "inputDigest", "tag"])) {
     throw transcriptError("transcript_snapshot_invalid");
   }
-  if ((input.format !== redactionProvenanceFormat && input.format !== "legacy-v1")
+  if (input.format !== redactionProvenanceFormat
     || typeof input.inputDigest !== "string"
-    || (input.format === redactionProvenanceFormat && !/^[0-9a-f]{64}$/u.test(input.inputDigest))
-    || (input.format === "legacy-v1" && input.inputDigest !== "legacy-v1")
+    || !/^[0-9a-f]{64}$/u.test(input.inputDigest)
     || typeof input.tag !== "string"
     || !/^[0-9a-f]{64}$/u.test(input.tag)) {
     throw transcriptError("transcript_snapshot_invalid");
@@ -2078,9 +2059,15 @@ function redactionTag(
   redactionCount: number,
   sensitiveInput: boolean,
   inputDigest: string,
+  ordinal: number,
+  occurredAt: string,
+  streamId: string,
 ): string {
   const payload = JSON.stringify({
     format,
+    streamId,
+    ordinal,
+    occurredAt,
     inputDigest,
     recordId: record.recordId,
     contractId: record.contractId,

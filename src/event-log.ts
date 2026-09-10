@@ -1,13 +1,16 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
-import { createInterface } from "node:readline";
 import { dirname, resolve } from "node:path";
 import type { MorrowEvent } from "./types.ts";
 
-const eventLogFormat = "morrow.event-log/1" as const;
+const eventLogFormat = "morrow.event-log/2" as const;
 const maximumEventLogBytes = 33_554_432;
 const maximumEventLogRecords = 1_000_000;
+const maximumEventLineBytes = 1_048_576;
+const eventIdBloomBytes = 8 * 1_048_576;
+const eventIdBloomHashes = 7;
+const zeroEventHash = "0".repeat(64);
 
 export type EventReplayStatus = "ok" | "invalid" | "stale" | "future";
 export interface EventReplayCursor { streamId: string; sequence: number; }
@@ -32,6 +35,8 @@ export interface JsonlEventLogOptions { maxEventsPerContract?: number; }
 interface PersistedEventEnvelope {
   format: typeof eventLogFormat;
   sequence: number;
+  previousHash: string;
+  eventHash: string;
   event: MorrowEvent;
 }
 
@@ -39,7 +44,8 @@ interface EventLogScan {
   bytes: number;
   records: number;
   heads: Map<string, number>;
-  ids: Map<string, Set<string>>;
+  lastHashes: Map<string, string>;
+  eventIds: EventIdBloom;
 }
 
 export class JsonlEventLog implements EventLog {
@@ -52,7 +58,7 @@ export class JsonlEventLog implements EventLog {
   constructor(filePath: string, options: JsonlEventLogOptions = {}) {
     this.filePath = filePath;
     this.streamIdentity = createHash("sha256")
-      .update(`morrow.event-log/1|${resolve(filePath).toLowerCase()}`, "utf8")
+      .update(`morrow.event-log/2|${resolve(filePath).toLowerCase()}`, "utf8")
       .digest("hex");
     this.maxEventsPerContract = options.maxEventsPerContract === undefined
       ? null
@@ -65,20 +71,30 @@ export class JsonlEventLog implements EventLog {
     const operation = this.appendTail.then(async () => {
       if (!validEvent(event)) throw new Error("morrow_event_invalid");
       const scan = this.appendState ?? await this.scan();
-      const ids = scan.ids.get(event.contractId) ?? new Set<string>();
-      if (ids.has(event.eventId)) throw new Error("morrow_event_duplicate");
+      const eventKey = eventIdKey(event.contractId, event.eventId);
+      if (scan.eventIds.has(eventKey)) throw new Error("morrow_event_duplicate");
       const sequence = (scan.heads.get(event.contractId) ?? 0) + 1;
-      const envelope: PersistedEventEnvelope = { format: eventLogFormat, sequence, event };
+      const previousHash = scan.lastHashes.get(event.contractId) ?? zeroEventHash;
+      const envelope: PersistedEventEnvelope = {
+        format: eventLogFormat,
+        sequence,
+        previousHash,
+        eventHash: zeroEventHash,
+        event,
+      };
+      envelope.eventHash = eventHashFor(envelope);
       const serialized = `${JSON.stringify(envelope)}\n`;
-      if (scan.bytes + Buffer.byteLength(serialized, "utf8") > maximumEventLogBytes
+      const serializedBytes = Buffer.byteLength(serialized, "utf8");
+      if (serializedBytes > maximumEventLineBytes
+        || scan.bytes + serializedBytes > maximumEventLogBytes
         || scan.records >= maximumEventLogRecords) throw new Error("morrow_event_log_too_large");
       await mkdir(dirname(this.filePath), { recursive: true });
       await appendFile(this.filePath, serialized, "utf8");
-      ids.add(event.eventId);
-      scan.ids.set(event.contractId, ids);
+      scan.eventIds.add(eventKey);
       scan.heads.set(event.contractId, sequence);
+      scan.lastHashes.set(event.contractId, envelope.eventHash);
       scan.records += 1;
-      scan.bytes += Buffer.byteLength(serialized, "utf8");
+      scan.bytes += serializedBytes;
       this.appendState = scan;
     });
     this.appendTail = operation.then(() => undefined, () => undefined);
@@ -134,54 +150,136 @@ export class JsonlEventLog implements EventLog {
 
   private async scan(consumer?: (event: MorrowEvent, sequence: number) => void | Promise<void>): Promise<EventLogScan> {
     const heads = new Map<string, number>();
-    const ids = new Map<string, Set<string>>();
+    const lastHashes = new Map<string, string>();
+    const eventIds = new EventIdBloom();
     let bytes = 0;
     let records = 0;
-    let input: ReturnType<typeof createReadStream>;
-    try {
-      input = createReadStream(this.filePath, { encoding: "utf8" });
-      const lines = createInterface({ input, crlfDelay: Infinity });
-      try {
-        for await (const line of lines) {
-          bytes += Buffer.byteLength(line, "utf8") + 1;
-          if (bytes > maximumEventLogBytes || records >= maximumEventLogRecords || line.length === 0) {
-            throw new Error("morrow_event_log_too_large_or_invalid");
-          }
-          let value: unknown;
-          try {
-            value = JSON.parse(line);
-          } catch {
-            throw new Error("morrow_event_log_invalid_json");
-          }
-          const envelope = parseEnvelope(value);
-          const event = envelope.event;
-          const previous = heads.get(event.contractId) ?? 0;
-          if (envelope.sequence !== previous + 1) throw new Error("morrow_event_log_sequence_invalid");
-          const eventIds = ids.get(event.contractId) ?? new Set<string>();
-          if (eventIds.has(event.eventId)) throw new Error("morrow_event_log_duplicate");
-          eventIds.add(event.eventId);
-          ids.set(event.contractId, eventIds);
-          heads.set(event.contractId, envelope.sequence);
-          records += 1;
-          await consumer?.(event, envelope.sequence);
-        }
-      } finally {
-        lines.close();
+    let input: ReturnType<typeof createReadStream> | undefined;
+    let lineParts: Buffer[] = [];
+    let lineBytes = 0;
+    const processLine = async (rawLine: Buffer): Promise<void> => {
+      let line = rawLine;
+      if (line.at(-1) === 0x0d) line = line.subarray(0, line.length - 1);
+      if (line.length === 0 || records >= maximumEventLogRecords) {
+        throw new Error("morrow_event_log_too_large_or_invalid");
       }
+      let text: string;
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(line);
+      } catch {
+        throw new Error("morrow_event_log_invalid_utf8");
+      }
+      let value: unknown;
+      try {
+        value = JSON.parse(text);
+      } catch {
+        throw new Error("morrow_event_log_invalid_json");
+      }
+      const envelope = parseEnvelope(value);
+      const event = envelope.event;
+      const previousSequence = heads.get(event.contractId) ?? 0;
+      const previousHash = lastHashes.get(event.contractId) ?? zeroEventHash;
+      if (envelope.sequence !== previousSequence + 1 || envelope.previousHash !== previousHash) {
+        throw new Error("morrow_event_log_sequence_invalid");
+      }
+      if (envelope.eventHash !== eventHashFor(envelope)) {
+        throw new Error("morrow_event_log_integrity_invalid");
+      }
+      const key = eventIdKey(event.contractId, event.eventId);
+      if (eventIds.has(key)) throw new Error("morrow_event_log_duplicate");
+      eventIds.add(key);
+      heads.set(event.contractId, envelope.sequence);
+      lastHashes.set(event.contractId, envelope.eventHash);
+      records += 1;
+      await consumer?.(event, envelope.sequence);
+    };
+    try {
+      input = createReadStream(this.filePath);
+      for await (const chunk of input) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        bytes += buffer.length;
+        if (bytes > maximumEventLogBytes) throw new Error("morrow_event_log_too_large");
+        let offset = 0;
+        while (offset < buffer.length) {
+          const newline = buffer.indexOf(0x0a, offset);
+          const end = newline < 0 ? buffer.length : newline;
+          const segment = buffer.subarray(offset, end);
+          lineBytes += segment.length;
+          if (lineBytes > maximumEventLineBytes) throw new Error("morrow_event_log_record_too_large");
+          if (segment.length > 0) lineParts.push(segment);
+          if (newline < 0) {
+            offset = buffer.length;
+          } else {
+            await processLine(Buffer.concat(lineParts, lineBytes));
+            lineParts = [];
+            lineBytes = 0;
+            offset = newline + 1;
+          }
+        }
+      }
+      if (lineBytes > 0) await processLine(Buffer.concat(lineParts, lineBytes));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { bytes: 0, records: 0, heads, ids };
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { bytes: 0, records: 0, heads, lastHashes, eventIds };
+      }
       if (error instanceof Error && error.message.startsWith("morrow_event_log_")) throw error;
       throw new Error("morrow_event_log_read_failed");
+    } finally {
+      input?.destroy();
     }
-    return { bytes, records, heads, ids };
+    return { bytes, records, heads, lastHashes, eventIds };
   }
 }
 
 function parseEnvelope(value: unknown): PersistedEventEnvelope {
-  if (!isPlainRecord(value) || !hasExactKeys(value, ["format", "sequence", "event"])
+  if (!isPlainRecord(value) || !hasExactKeys(value, ["format", "sequence", "previousHash", "eventHash", "event"])
     || value.format !== eventLogFormat || !Number.isSafeInteger(value.sequence) || value.sequence < 1
+    || typeof value.previousHash !== "string" || !/^[0-9a-f]{64}$/u.test(value.previousHash)
+    || typeof value.eventHash !== "string" || !/^[0-9a-f]{64}$/u.test(value.eventHash)
     || !validEvent(value.event)) throw new Error("morrow_event_log_invalid");
-  return { format: eventLogFormat, sequence: value.sequence, event: value.event };
+  return {
+    format: eventLogFormat,
+    sequence: value.sequence,
+    previousHash: value.previousHash,
+    eventHash: value.eventHash,
+    event: value.event,
+  };
+}
+
+function eventHashFor(envelope: PersistedEventEnvelope): string {
+  const domain = {
+    format: envelope.format,
+    sequence: envelope.sequence,
+    previousHash: envelope.previousHash,
+    event: envelope.event,
+  };
+  return createHash("sha256").update(JSON.stringify(domain), "utf8").digest("hex");
+}
+
+function eventIdKey(contractId: string, eventId: string): string {
+  return JSON.stringify([contractId, eventId]);
+}
+
+class EventIdBloom {
+  private readonly bits = new Uint8Array(eventIdBloomBytes);
+
+  has(value: string): boolean {
+    return this.positions(value).every((position) => (this.bits[position >> 3]! & (1 << (position & 7))) !== 0);
+  }
+
+  add(value: string): void {
+    for (const position of this.positions(value)) this.bits[position >> 3] |= 1 << (position & 7);
+  }
+
+  private positions(value: string): number[] {
+    const digest = createHash("sha256").update(value, "utf8").digest();
+    const bitCount = this.bits.length * 8;
+    const positions: number[] = [];
+    for (let index = 0; index < eventIdBloomHashes; index += 1) {
+      positions.push(digest.readUInt32BE(index * 4) % bitCount);
+    }
+    return positions;
+  }
 }
 
 function validEvent(value: unknown): value is MorrowEvent {
