@@ -146,3 +146,65 @@ Mensagem de agente, merge ou build verde isolado não é evidência suficiente.
 - Regressão pós-merge: `npm ci` GREEN; focused `42/42`; `npm test` `214/214`; `git diff --check` GREEN; D-013 não ocorreu.
 - Resultado exato do reconciliador em worktree limpa: `allowed=false`, `state=BLOCKED_STATE_DIVERGENCE`, `nextPrId=P4-PR03`, `nextAuthorizedAction=START_P4_PR03`, `reasons=[git_branch_mismatch:mvo/p4-pr02-proven-record]`. A decisão auditada é `EXPECTED_DETACHED_CONTEXT_DIVERGENCE`: em detached HEAD, `git branch --show-current` é vazio e o reconciliador é branch-aware. Isso não representa regressão do artefato integrado.
 - PR #18 foi o único veículo de integração do produto/código. A closure-record somente documental foi transportada pela PR #19 e integrada no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`; não é nova unidade contratual, não contém código/runtime/testes, não reinicia A-001 ou regressão de produto e não constitui P4-PR03. P4-PR03 ainda não foi iniciada e não está bloqueada por essa closure-record.
+
+## START_P4_PR03 — kickoff e PRE_DISPATCH
+
+- estado atual: `P4-PR03 = RUNNING`; `P4-PR02 = PROVEN`; nenhuma execução de código de P4-PR03 começou nesta sessão.
+- base integrada fixada: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` em `phase-2/runtime-v0`.
+- branch de execução: `mvo/p4-pr03-replay-rehydration`, criada diretamente dessa base.
+- contrato: `MORROW-MVO-001`, versão `1.0`, addendum efetivo `A-001`; `A-001` é exclusivo de P4-PR02 e não se aplica a P4-PR03.
+- map step/route: `P4-PR03` / `REPLAY_REHYDRATION_CURSORS_LIVENESS`.
+- objetivo único: implementar replay/reidratação, cursores e liveness após restart.
+- critério de conclusão: o cliente retoma sem duplicar ou perder eventos e distingue esperas válidas, sessão viva/morta, Worker offline/reiniciado, lease stale e falha real.
+- débitos obrigatórios, classificados como `REQUIRED_BLOCKER`: `D-014` hostile clock conversion; `D-015` snapshot TOCTOU; `D-016` coerência verificável de `redactionCount` reidratado; `D-017` identidade recuperável de lease/instância para impedir PID reuse.
+- escopo adicional obrigatório: ordering; cursor válido, stale, future e invalid; restart durante e depois da persistência; redaction/segredos preservados após reidratação.
+- allowed paths iniciais: `src/stream-transcript.ts`, `src/worker-recovery.ts`, testes correspondentes, e `src/event-log.ts` e/ou `src/live-activity.ts` somente se comprovadamente necessários para cursor/replay real; documentação contratual de P4-PR03.
+- forbidden: P4-PR04; API/UI multi-session; P3/ConPTY; `D-013`; deploy; Enova; qualquer outro repositório; autorização genérica para todo `src/`; package files não necessários ao objetivo.
+- segurança: Security Review normal, independente do Executor, obrigatório sobre o candidate completo antes da integração; nenhuma exceção A-001 será reutilizada.
+- regressão final obrigatória: focused P4-PR03; focused transcript/P4-PR02; `npm test`; `git diff --check`; `npm run contract:reconcile`; validação contratual aplicável; contraprovas de restart durante/depois da persistência, replay inicial/intermediário, cursor no limite/invalid/stale/future, ordering, dedup/loss, snapshot adulterado/truncado, troca concorrente/reparse/symlink quando aplicável, hostile clock, metadata incoerente, PID reuse, lease stale, sessão viva/morta, restart repetido e preservação de redaction/segredos.
+- RED obrigatório antes da correção: criar e executar contraprovas vermelhas para `D-014`..`D-017` e para as classes relevantes de replay/cursor/restart; manter cada RED causal e reproduzível no candidate.
+- regressão herdada: testes aceitos de transcript/P4-PR02, baseline P3 e suíte completa permanecem obrigatoriamente verdes; não repetir a cerimônia extraordinária de A-001 da P4-PR02.
+- continuidade: `SESSION_REUSE_BY_DEFAULT`; o Executor permanece na mesma sessão durante implementação e correções. Sessão nova somente para Security Reviewer independente e Auditor independente.
+- routing/runtime: `manual`; access mode `quota-session`; modelo `GPT-5.6 Luna`; effort `high`; sem API; `write mode: pr-only`; workspace restrito a `D:\Morrow` e à branch dedicada.
+- decisões do dono: nenhuma aberta; `P4-PR04` fora de escopo; `D-013` não entra nesta unidade; Security Review normal independente é gate antes da integração.
+- perguntas bloqueantes: nenhuma.
+
+### TASK — EXECUTOR P4-PR03
+
+```text
+Base: cd7113febd147925cc5a5ab3557cb1d2ea48d1dc
+Branch: mvo/p4-pr03-replay-rehydration
+Objetivo único: implementar replay/reidratação, cursores e liveness após restart.
+
+Obrigatórios:
+- D-014 hostile clock conversion, com sanitização fail-closed;
+- D-015 snapshot TOCTOU, vinculando validação e leitura ao mesmo handle/mecanismo comprovável;
+- D-016 redactionCount reidratado coerente e verificável com conteúdo/stream;
+- D-017 identidade de lease/instância recuperável, não apenas PID reutilizável;
+- replay sem duplicação e sem perda, ordering e cursor válido/stale/future/invalid;
+- restart durante e depois da persistência;
+- distinção de sessão viva, sessão morta, espera válida, Worker offline e falha real;
+- redaction e segredos preservados após reidratação.
+
+Antes da correção, prove RED causal e reproduzível para D-014..D-017 e para replay/cursor/restart.
+
+Allowed paths:
+- src/stream-transcript.ts
+- src/worker-recovery.ts
+- testes correspondentes
+- src/event-log.ts e/ou src/live-activity.ts somente se necessários para replay/cursor real
+- documentação contratual de P4-PR03
+
+Forbidden: P4-PR04, API/UI multi-session, P3/ConPTY, D-013, deploy, Enova,
+outros repositórios e autorização genérica para todo src/.
+
+Antes de solicitar integração, passe focused P4-PR03, focused transcript/P4-PR02,
+npm test, git diff --check, npm run contract:reconcile, validação contratual e
+as contraprovas de restart/cursor/order/dedup/loss listadas no manifesto.
+Security Reviewer independente deve revisar o candidate completo antes da integração.
+Mantenha SESSION_REUSE_BY_DEFAULT durante implementação/correções; sessões novas
+somente para Security Reviewer e Auditor independentes. Não execute push, merge,
+deploy nem inicie P4-PR04.
+```
+
+- resultado PRE_DISPATCH: manifesto completo e autorizado para handoff ao Executor; o reconciliador deve confirmar `READY_FOR_EXECUTION`, `nextPrId: P4-PR03` e `nextAuthorizedAction: START_P4_PR03` em worktree limpa nesta branch.
