@@ -2,7 +2,7 @@
 
 - contract: `MORROW-MVO-001`
 - PR-ID: `P4-PR02`
-- estado: `RUNNING (A-001 GREEN_LOCAL; integração pós-review pendente)`
+- estado: `PROVEN (PR #18 integrada; closure-record documental pendente de integração)`
 - formato durável: `morrow.transcript/1.0`
 - implementação: `src/stream-transcript.ts`
 - candidate de código anterior `dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`: `SUPERSEDED`/`INVALIDATED` antes de novo A-001, após contraprovas adicionais encontrarem superfícies ainda não cobertas; não houve novo A-001 sobre `dc0bbaf`
@@ -104,5 +104,15 @@ O objeto retornado por `inspect()` é cópia destacada e profundamente congelada
 - produtores/API e observabilidade ponta a ponta de sessões reais: P4-PR04;
 - dashboard, terminal renderer e controles de UI: P5;
 - armazenamento de credencial real não pertence ao transcript; continua atrás do Secret Broker.
+
+## Fechamento final pós-merge — `P4_PR02_PROVEN_READY`
+
+P4-PR02 foi provada após a integração da PR de produto `#18` no merge commit `3738d7877cc1613e363adee8063322eefb595528`, com parents `3657a070e5dc6b1e7b78fa1804761440c55efffc` e `46167607c6f0c55a7f48eec2464a7cbda327dc22`. O candidate A-001 `76a41db64343131dfc20b699bedfae491859f88b` e o head integrado `46167607c6f0c55a7f48eec2464a7cbda327dc22` são ancestrais, a árvore do merge é idêntica à árvore do head integrado e não houve drift ou path inesperado.
+
+O gate de segurança foi `GREEN_LOCAL_A-001`, explicitamente não equivalente ao Security Review externo indisponível e sem precedente para outras PRs. O Auditor pré-merge emitiu `MERGE_READY`; o Auditor final emitiu `P4_PR02_PROVEN_READY`. A regressão pós-merge foi: `npm ci` GREEN; focused `42/42`; `npm test` `214/214`; `git diff --check` GREEN; D-013 não ocorreu; findings finais P1/P2/P3: nenhum; blocker: nenhum.
+
+O reconciliador da closure-record branch, após o commit e com worktree limpa, retornou exatamente `allowed: false`, `state: BLOCKED_STATE_DIVERGENCE`, `nextPrId: P4-PR03`, `nextAuthorizedAction: START_P4_PR03` e `reasons: [git_branch_mismatch:mvo/p4-pr02-proven-record]`. No checkout detached da conferência, a decisão auditada é `EXPECTED_DETACHED_CONTEXT_DIVERGENCE`, porque `git branch --show-current` é vazio e o reconciliador é branch-aware; isso não representa regressão do artefato integrado.
+
+PR #18 permaneceu o único veículo de integração do produto/código. Depois do merge, o registro final `PROVEN` não podia ser acrescentado nela; sob `write mode: pr-only`, esta closure-record será transportada por PR documental. Ela não é unidade contratual nova, não contém código/runtime/testes, não reinicia A-001, não reinicia regressão de produto e não constitui P4-PR03. P4-PR03 permanece proibida até o registro chegar à branch de integração.
 
 As provas desta PR usam apenas canários sintéticos e raízes temporárias sob `.morrow-test-tmp` no próprio repositório Morrow.

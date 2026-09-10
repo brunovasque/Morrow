@@ -11,17 +11,17 @@
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
 - `active_phase`: `P4`
-- `active_pr_id`: `P4-PR02`
-- `active_route_node`: `STREAM_REDACTION_RETENTION_TRANSCRIPT`
-- `active_subaction`: `P4_PR02_CLOSURE_PROTOCOL_SEALED`
-- `expected_branch_prefix`: `mvo/p4-pr02-`
+- `active_pr_id`: `P4-PR03`
+- `active_route_node`: `REPLAY_REHYDRATION_CURSORS_LIVENESS`
+- `active_subaction`: `P4_PR02_PROVEN_CLOSURE_RECORD_AWAITING_INTEGRATION`
+- `expected_branch_prefix`: `mvo/p4-pr03-`
 - `write_execution_allowed`: `no for integration/merge; START is coarse and not merge authorization`
-- `next_authorized_action`: `START_P4_PR02`
-- `next_authorized_actor`: `P4-PR02 integration stage; first Auditor must emit MERGE_READY before merge`
+- `next_authorized_action`: `START_P4_PR03`
+- `next_authorized_actor`: `P4-PR03 permanece proibida até a closure-record documental de P4-PR02 chegar à branch de integração`
 
 ## Próxima ação exata
 
-O A-001 completo do candidate `76a41db64343131dfc20b699bedfae491859f88b` passou com veredito `GREEN_LOCAL_A-001`; o gate A-001 exigido para o candidate atual está registrado. A resolução canônica de fechamento está em `ADDENDA.md`: `START_P4_PR02` é coarse; `b6ed5ebc6411dad07ef9193554db13e88790ccee` é somente o anchor pré-fechamento; o HEAD publicável é a ponta local validada mecanicamente pelas condições de ancestry, delta documental, ausência de código, worktree/diff e divergência remota, capturada e registrada pelo Integrator imediatamente antes do push. O PR #18 permanece o veículo e merge commit sem squash/rebase é escolha específica desta PR. P4-PR02 permanece `RUNNING` e não é promovida a `PROVEN`; a integração só pode prosseguir pelo fluxo Auditor `MERGE_READY` → Integrator → Auditor `P4_PR02_PROVEN_READY` → Scribe. Não iniciar P4-PR03 e não tratar a prova local como equivalente ao Security Review externo indisponível.
+P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com Auditor pré-merge `MERGE_READY`, regressão pós-merge verde e Auditor final `P4_PR02_PROVEN_READY`. A prova local `GREEN_LOCAL_A-001` não equivale ao Security Review externo indisponível e não cria precedente. A próxima unidade contratual identificada é P4-PR03, mas esta closure-record é somente documental e ainda aguarda integração; portanto P4-PR03 permanece proibida.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -33,7 +33,7 @@ Reconciliacao factual adicional de 2026-09-09: o A-001 do candidate `ba350658a39
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P4-PR02-P2-001` | A-001 security gate | Histórico encerrado no candidate `189c1ce`; o A-001 completo do candidate atual `76a41db` passou como `GREEN_LOCAL_A-001`, sem P1/P2 | nenhuma re-review A-001 aberta; integração/regressão pós-merge permanecem etapas contratuais posteriores |
+| `P4-PR02-P2-001` | A-001 security gate | Encerrado: o A-001 do candidate `76a41db` passou como `GREEN_LOCAL_A-001`, sem P1/P2 | nenhuma re-review A-001 aberta; P4-PR02 está `PROVEN` |
 
 ## Status por fase
 
@@ -43,7 +43,7 @@ Reconciliacao factual adicional de 2026-09-09: o A-001 do candidate `ba350658a39
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR02 `GREEN_LOCAL_A-001` no candidate `76a41db`; predecessors anteriores superseded/invalidated; PR #18, merge commit, regressão pós-merge e Auditor final pendentes |
+| P4 | `PROVEN` | P4-PR02 `PROVEN` em PR #18 / merge `3738d787`; regressão pós-merge e Auditor final verdes; P4-PR03 é a próxima unidade, ainda proibida até a integração da closure-record |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |

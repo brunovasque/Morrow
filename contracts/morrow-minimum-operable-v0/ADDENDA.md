@@ -100,3 +100,25 @@ Esta resolução é específica da P4-PR02 e não altera a política global de m
 9. Somente `P4_PR02_PROVEN_READY` permite ao Scribe alterar P4-PR02 para `PROVEN`.
 
 Acceptance não é gate desta PR; permanece vinculada ao fechamento contratual correspondente. P4-PR03 permanece proibida até P4-PR02 estar documental e mecanicamente `PROVEN`.
+
+## Fechamento final auditado — P4-PR02 — `P4_PR02_PROVEN_READY`
+
+- Resultado final: `P4_PR02_PROVEN_READY`; P4-PR02 está `PROVEN`; PR de produto: `#18`.
+- Integração: merge commit `3738d7877cc1613e363adee8063322eefb595528`; parents `3657a070e5dc6b1e7b78fa1804761440c55efffc` e `46167607c6f0c55a7f48eec2464a7cbda327dc22`.
+- Lineage confirmado: candidate A-001 `76a41db64343131dfc20b699bedfae491859f88b` e head integrado `46167607c6f0c55a7f48eec2464a7cbda327dc22` são ancestrais; a árvore do merge é idêntica à árvore do head integrado; não houve drift nem path inesperado.
+- Security gate: `GREEN_LOCAL_A-001`; esta prova local não equivale ao Security Review externo indisponível e não cria precedente para outras PRs.
+- Auditor pré-merge: `MERGE_READY`. Auditor final: `P4_PR02_PROVEN_READY`. Findings finais: P1 nenhum; P2 nenhum; P3 nenhum; blocker nenhum.
+- Regressão pós-merge: `npm ci` GREEN; focused `42/42`; `npm test` `214/214`; `git diff --check` GREEN; D-013 não ocorreu; nenhum drift; nenhum path inesperado.
+- Resultado exato do reconciliador após o commit, nesta branch documental, em worktree limpa:
+  ```json
+  {
+    "allowed": false,
+    "state": "BLOCKED_STATE_DIVERGENCE",
+    "nextPrId": "P4-PR03",
+    "nextAuthorizedAction": "START_P4_PR03",
+    "reasons": ["git_branch_mismatch:mvo/p4-pr02-proven-record"]
+  }
+  ```
+- No checkout detached usado na conferência, o resultado foi exclusivamente `BLOCKED_STATE_DIVERGENCE` / `git_branch_mismatch`. Decisão auditada: `EXPECTED_DETACHED_CONTEXT_DIVERGENCE`, porque `git branch --show-current` é vazio em detached HEAD e o reconciliador é branch-aware. Isso não representa regressão do artefato integrado.
+- O PR #18 permaneceu o único veículo de integração do produto/código da P4-PR02. Depois do merge tornou-se impossível acrescentar o registro final `PROVEN` nele; sob `write mode: pr-only`, o fechamento oficial será transportado por uma PR documental de closure-record.
+- A closure-record não é nova unidade contratual: não contém código/runtime/testes, não reinicia A-001, não reinicia regressão de produto e não constitui P4-PR03. P4-PR03 permanece proibida até este registro chegar à branch de integração.
