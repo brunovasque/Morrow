@@ -133,3 +133,10 @@ O relatório deve declarar expressamente que essa prova local não equivale ao s
 6. Ao provar a PR, atualize `EVIDENCE.md`, `PRS.md` e `LIVE_STATUS.md` antes de autorizar a próxima.
 
 O campo `next_authorized_action` de `LIVE_STATUS.md` é a projeção humana dessa regra e nunca pode contrariá-la.
+
+## Fechamento atual de P4-PR02
+
+- P4-PR02 está `PROVEN`: PR de produto `#18`, merge `3738d7877cc1613e363adee8063322eefb595528`, parents `3657a070e5dc6b1e7b78fa1804761440c55efffc` e `46167607c6f0c55a7f48eec2464a7cbda327dc22`.
+- `P4_PR02_PROVEN_READY` foi emitido após `MERGE_READY`, `npm ci` GREEN, focused `42/42`, `npm test` `214/214`, `git diff --check` GREEN, ausência de D-013, drift e paths inesperados; a árvore do merge é idêntica à do head integrado.
+- O reconciliador na closure-record branch retornou exclusivamente `BLOCKED_STATE_DIVERGENCE` / `git_branch_mismatch`, decisão `EXPECTED_DETACHED_CONTEXT_DIVERGENCE` para o contexto detached/branch-aware quando aplicável. A divergência não é regressão do artefato integrado.
+- A próxima unidade identificada é P4-PR03. Ela não foi iniciada e permanece proibida até o registro documental chegar à branch de integração. A closure-record não é unidade contratual nova e não contém código/runtime/testes.
