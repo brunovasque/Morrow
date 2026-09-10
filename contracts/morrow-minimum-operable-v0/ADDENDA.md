@@ -75,3 +75,26 @@ Alterar objetivo mestre, critério de aceitação, exclusão, envelope operacion
 - Medianas independentes em chunks de 1 byte para 2k/4k/8k/12k/16k: comum `1.591 / 1.617 / 4.745 / 5.668 / 7.213 ms`; assignment seguro `0.988 / 1.870 / 3.558 / 5.762 / 8.417 ms`; terminal `1.071 / 1.837 / 3.802 / 4.330 / 5.917 ms`; string-control `0.714 / 1.376 / 2.450 / 3.658 / 5.127 ms`; LF `0.774 / 1.530 / 3.733 / 6.203 / 9.835 ms`; CRLF `0.891 / 1.696 / 3.383 / 5.570 / 8.887 ms`; combinado adversarial `0.974 / 2.010 / 5.963 / 6.158 / 8.104 ms`.
 - As fronteiras 4095/4096/4097/8191/8192/8193 também passaram sem liberação de canário.
 - `GREEN_LOCAL_A-001` registra somente a passagem do gate A-001 exigido para o candidate atual. Não torna P4-PR02 `PROVEN`, não autoriza por si só integração/merge e não cria precedente para outras PRs. Também não equivale ao Security Review externo indisponível.
+
+## Resolução técnica canônica — fechamento de P4-PR02
+
+Esta resolução é específica da P4-PR02 e não altera a política global de merge das demais PRs:
+
+- `START_P4_PR02` é autorização coarse para continuar a unidade ativa; não equivale a autorização automática de merge.
+- O HEAD a publicar no PR #18 é exatamente `b6ed5ebc6411dad07ef9193554db13e88790ccee`.
+- O PR #18 permanece o veículo de integração; não abrir nova PR.
+- A estratégia de integração desta PR é `merge commit`, sem squash e sem rebase, para preservar integralmente os SHAs já usados como objetos de evidência e A-001 e manter ancestry auditável.
+
+### Fluxo obrigatório de fechamento
+
+1. O Integrator publica a branch e verifica mecanicamente o PR #18, o HEAD/base, os checks e a ausência de drift.
+2. Executa os testes/CI pré-merge aplicáveis.
+3. O primeiro Auditor, em modo read-only, verifica lineage, HEAD remoto exato, A-001 `GREEN_LOCAL_A-001`, PR #18 correta, CI/testes pré-merge, ausência de drift e suficiência da evidência. Ele emite `MERGE_READY` ou `BLOCKED`.
+4. Somente `MERGE_READY` permite ao Integrator realizar o merge commit no PR #18.
+5. Após o merge, o Integrator descobre mecanicamente o novo HEAD real de `phase-2/runtime-v0` e executa a regressão nesse SHA.
+6. A regressão pós-merge inclui, no mínimo, a instalação determinística prevista pelo target (`npm ci`, se aplicável), `focused test/stream-transcript.test.ts`, `npm test`, `git diff --check`, `npm run contract:reconcile`, validação contratual/reconciliador aplicável e confirmação de ausência de drift na integração.
+7. Se D-013 ocorrer isoladamente, aplica-se somente o protocolo já documentado; não se altera P3/ConPTY dentro da P4-PR02.
+8. Depois da regressão pós-merge, um Auditor read-only verifica as novas evidências e emite `P4_PR02_PROVEN_READY` ou `BLOCKED`.
+9. Somente `P4_PR02_PROVEN_READY` permite ao Scribe alterar P4-PR02 para `PROVEN`.
+
+Acceptance não é gate desta PR; permanece vinculada ao fechamento contratual correspondente. P4-PR03 permanece proibida até P4-PR02 estar documental e mecanicamente `PROVEN`.
