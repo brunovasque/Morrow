@@ -5,10 +5,17 @@
 - estado: `BLOCKED_ON_A-001`
 - formato durável: `morrow.transcript/1.0`
 - implementação: `src/stream-transcript.ts`
-- candidate de código atual: `dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`
+- candidate de código anterior `dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`: `SUPERSEDED`/`INVALIDATED` antes de novo A-001, após contraprovas adicionais encontrarem superfícies ainda não cobertas; não houve novo A-001 sobre `dc0bbaf`
+- candidate de código atual: `95e808294395449b46438b799c0b7d480cece52d`
 - candidate anterior `15e3ac733fc295d4cff3762de957f348a6e02c01`: `SUPERSEDED`/`INVALIDATED` após A-001 `BLOCKED` por reconstrução VT CSI `b` / REP
 - candidate predecessor `ba350658a39f270cbc9ec559c193997a1a0db047`: `SUPERSEDED`/`INVALIDATED` após A-001 `BLOCKED` por composição HPA + DCH
-- provas finais do novo candidate: focused `31/31`, controle `npm run probe:conpty-soak` GREEN, `npm test` `203/203`, `git diff --check` GREEN; A-001 do novo candidate ainda pendente
+- provas do candidate atual reportadas pelo Executor: focused `35/35` GREEN; primeira regressão completa `206/207`, com única falha correspondente ao histórico `D-013`; `npm run probe:conpty-soak` posteriormente GREEN com 12 sessões, PIDs distintos, `noOrphans: true` e fixture removida; reexecução completa `207/207` GREEN; `git diff --check` GREEN; A-001 do candidate atual ainda pendente
+
+## Reconciliação factual do candidate atual
+
+O Executor reproduziu REDs para opção CLI sensível; assignment JSON com whitespace multiline antes do separador; custo superlinear ao receber string-control incompleto fragmentado; e tratamento incorreto de terminador C1 em OSC, causando over-redaction. As causas foram o boundary genérico sem reconhecimento da chave sensível após opção CLI, whitespace anterior ao separador sem CR/LF, `release()` reprocessando o `pending` crescente e `terminalOscEnd()` sem reconhecer C1-ST. A correção implementada no candidate `95e808294395449b46438b799c0b7d480cece52d`, parent `84f095d87b6f3852d736f8cb11bbfa2d56efd2d6`, usa reconhecimento estrutural de opções CLI sensíveis, whitespace estrutural multiline, scanner incremental bounded de terminal/string-control entre chunks e reconhecimento de C1-ST em OSC, preservando as cercas CSI/VT estruturais já presentes. O candidate contém somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`.
+
+As medições reportadas para string-control incompleto caíram de ordem de segundos para poucos milissegundos no mesmo envelope de `4k/8k/12k/16k`. `D-013` permanece aberto e não foi corrigido, escondido ou alterado. Não houve alteração de ConPTY/P3, push, merge ou deploy. O candidate ainda não possui A-001 válido; P4-PR02 permanece `RUNNING` / `BLOCKED ON A-001`; merge continua proibido e P4-PR03 não é autorizada. O próximo ator é Security Reviewer independente, nova sessão Luna `xhigh`, read-only, revisando `3657a070e5dc6b1e7b78fa1804761440c55efffc..95e808294395449b46438b799c0b7d480cece52d`.
 
 ## Fronteira obrigatória
 

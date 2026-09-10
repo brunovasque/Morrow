@@ -86,6 +86,13 @@ base 3657a070e5dc6b1e7b78fa1804761440c55efffc
   → novo candidate real `dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`, parent `c8bb6afda8640bc11b9b82d36d931374fd725153`, somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`
   → focused 31/31, controle ConPTY GREEN, regressão completa 203/203 e `git diff --check` GREEN; D-013 permanece aberto e não foi corrigido nem ocultado; sem A-001 válido ainda
   → nova sessão local independente, read-only, deve revisar exatamente `3657a070e5dc6b1e7b78fa1804761440c55efffc..dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`; merge e regressão pós-merge continuam proibidos/pendentes
+  → contraprovas adicionais encontraram superfícies ainda não cobertas; `dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf` foi superseded/invalidated antes de novo A-001; não houve novo A-001 sobre `dc0bbaf`
+  → REDs reproduzidos: opção CLI sensível; assignment JSON com whitespace multiline antes do separador; custo superlinear de string-control incompleto fragmentado; terminador C1 incorreto em OSC com over-redaction
+  → causas: boundary genérico sem chave sensível após opção CLI; whitespace sem CR/LF antes do separador; `release()` reprocessando o `pending` crescente; `terminalOscEnd()` sem reconhecer C1-ST
+  → novo candidate `95e808294395449b46438b799c0b7d480cece52d`, parent `84f095d87b6f3852d736f8cb11bbfa2d56efd2d6`, somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`
+  → correção: reconhecimento estrutural de opções CLI sensíveis, whitespace estrutural multiline, scanner incremental bounded de terminal/string-control entre chunks e reconhecimento C1-ST em OSC; cercas CSI/VT estruturais preservadas
+  → focused 35/35, primeira regressão 206/207 com única falha histórica D-013, soak posterior GREEN com 12 sessões/PIDs distintos/`noOrphans: true`/fixture removida, reexecução 207/207 e custo reduzido de segundos a poucos milissegundos no envelope 4k/8k/12k/16k; D-013 permanece aberto; sem alteração ConPTY/P3, push, merge ou deploy
+  → novo candidate ainda sem A-001 válido; nova sessão local independente, read-only, deve revisar exatamente `3657a070e5dc6b1e7b78fa1804761440c55efffc..95e808294395449b46438b799c0b7d480cece52d`; merge e regressão pós-merge continuam proibidos/pendentes
 ```
 
 O relatório deve declarar expressamente que essa prova local não equivale ao serviço externo indisponível e não mede superfícies fora de transcript/redaction. Reviews anteriores, a narrativa do Executor e os testes já registrados são entrada reproduzível, não substitutos da nova revisão independente.
