@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:net";
+import { constants } from "node:fs";
 import {
   lstat,
   link,
   mkdir,
+  open,
   readFile,
   readdir,
   realpath,
@@ -88,6 +90,23 @@ export interface TranscriptView {
   retention: TranscriptRetentionPolicy;
   records: readonly TranscriptRecord[];
   totalBytes: number;
+}
+
+export interface TranscriptCursor {
+  streamId: string;
+  ordinal: number;
+}
+
+export type TranscriptReplayStatus = "ok" | "invalid" | "stale" | "future";
+
+export interface TranscriptReplayResult {
+  status: TranscriptReplayStatus;
+  streamId: string;
+  cursor: TranscriptCursor;
+  nextCursor: TranscriptCursor;
+  retainedFromOrdinal: number;
+  headOrdinal: number;
+  records: readonly TranscriptRecord[];
 }
 
 interface TranscriptState {
@@ -414,6 +433,28 @@ export class PersistentTranscriptStore {
     return viewState(this.#state);
   }
 
+  replay(readerId: string, cursor?: unknown, limit = 1_024): TranscriptReplayResult {
+    this.assertOpen();
+    if (!isIdentifier(readerId) || !this.#access.readerIds.includes(readerId)) {
+      throw transcriptError("transcript_read_not_authorized");
+    }
+    const streamId = transcriptStreamId(this.#filePath);
+    const headOrdinal = this.#state.nextOrdinal - 1;
+    const retainedFromOrdinal = this.#state.records[0]?.ordinal ?? 1;
+    const initial = { streamId, ordinal: 0 } as TranscriptCursor;
+    const parsed = parseTranscriptCursor(cursor, streamId);
+    if (!parsed.ok) return transcriptReplayResult("invalid", streamId, initial, initial, retainedFromOrdinal, headOrdinal, []);
+    const start = parsed.cursor;
+    if (start.ordinal > headOrdinal) return transcriptReplayResult("future", streamId, start, start, retainedFromOrdinal, headOrdinal, []);
+    if (start.ordinal < retainedFromOrdinal - 1) return transcriptReplayResult("stale", streamId, start, start, retainedFromOrdinal, headOrdinal, []);
+    if (!Number.isSafeInteger(limit) || limit < 0 || limit > 100_000) {
+      return transcriptReplayResult("invalid", streamId, start, start, retainedFromOrdinal, headOrdinal, []);
+    }
+    const records = this.#state.records.filter((record) => record.ordinal > start.ordinal).slice(0, limit);
+    const nextOrdinal = records.length === 0 ? start.ordinal : records[records.length - 1]!.ordinal;
+    return transcriptReplayResult("ok", streamId, start, { streamId, ordinal: nextOrdinal }, retainedFromOrdinal, headOrdinal, records);
+  }
+
   async sweepRetention(actorId: string): Promise<readonly string[]> {
     this.assertOpen();
     if (!isIdentifier(actorId) || !this.#access.writerIds.includes(actorId)) {
@@ -448,12 +489,16 @@ export class PersistentTranscriptStore {
       if (Buffer.byteLength(content, "utf8") > this.#retention.maxRecordBytes) {
         throw transcriptError("transcript_record_too_large");
       }
+      const expectedRedactionCount = persistedRedactionCount(content, sensitiveInput);
       if (
         this.#redactor.redact(content).text !== content
         || (request.stream === "input") !== sensitiveInput
         || (sensitiveInput && content !== SENSITIVE_INPUT_PLACEHOLDER && content !== "")
+        || redactionCount !== expectedRedactionCount
       ) {
-        throw transcriptError("transcript_content_not_redacted");
+        throw transcriptError(redactionCount !== expectedRedactionCount
+          ? "transcript_redaction_metadata_invalid"
+          : "transcript_content_not_redacted");
       }
       if (this.#state.records.some((record) => record.recordId === request.recordId)) {
         throw transcriptError("transcript_record_id_conflict");
@@ -596,16 +641,21 @@ class TranscriptRecordWriter {
 class TranscriptLease {
   private readonly path: string;
   private readonly token: string;
+  private readonly activeServer: Server;
   private released = false;
 
-  private constructor(path: string, token: string) {
+  private constructor(path: string, token: string, activeServer: Server) {
     this.path = path;
     this.token = token;
+    this.activeServer = activeServer;
   }
 
   static async acquire(root: string): Promise<TranscriptLease> {
     const path = join(root, leaseFileName);
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    const activeServer = await TranscriptActiveLease.acquire(root);
+    let transferred = false;
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
       const token = randomUUID();
       const temp = join(root, `${leaseFileName}.${process.pid}.${token}.tmp`);
       try {
@@ -616,7 +666,8 @@ class TranscriptLease {
             mode: 0o600,
           });
           await link(temp, path);
-          return new TranscriptLease(path, token);
+          transferred = true;
+          return new TranscriptLease(path, token, activeServer);
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
             throw transcriptError("transcript_lease_failed");
@@ -626,7 +677,6 @@ class TranscriptLease {
         }
         const existing = await readLease(path);
         if (!existing) continue;
-        if (processIsAlive(existing.pid)) throw transcriptError("transcript_store_already_active");
         const recovery = await TranscriptLeaseRecovery.acquire(root);
         try {
           const current = await readLease(path);
@@ -634,7 +684,6 @@ class TranscriptLease {
           if (current.pid !== existing.pid || current.token !== existing.token) {
             throw transcriptError("transcript_lease_changed_during_recovery");
           }
-          if (processIsAlive(current.pid)) throw transcriptError("transcript_store_already_active");
           await unlink(path);
         } finally {
           await recovery.release();
@@ -643,19 +692,63 @@ class TranscriptLease {
         if (isTranscriptError(error)) throw error;
         throw transcriptError("transcript_lease_failed");
       }
+      }
+      throw transcriptError("transcript_lease_failed");
+    } finally {
+      if (!transferred) await closeTranscriptActiveLease(activeServer).catch(() => undefined);
     }
-    throw transcriptError("transcript_lease_failed");
   }
 
   async release(): Promise<void> {
     if (this.released) return;
     this.released = true;
     const existing = await readLease(this.path);
-    if (!existing || existing.token !== this.token || existing.pid !== process.pid) {
+    if (!existing || existing.token !== this.token) {
       throw transcriptError("transcript_lease_owner_mismatch");
     }
+    await closeTranscriptActiveLease(this.activeServer);
     await unlink(this.path);
   }
+}
+
+class TranscriptActiveLease {
+  static async acquire(root: string): Promise<Server> {
+    const identity = createHash("sha256").update(resolve(root).toLowerCase(), "utf8").digest("hex");
+    const endpoint = process.platform === "win32"
+      ? `\\\\.\\pipe\\morrow-transcript-active-${identity}`
+      : join(root, ".transcript-v1-active.sock");
+    const server = createServer((socket) => socket.destroy());
+    server.unref();
+    try {
+      await new Promise<void>((resolvePromise, rejectPromise) => {
+        const onError = (error: NodeJS.ErrnoException) => {
+          server.removeListener("listening", onListening);
+          rejectPromise(error);
+        };
+        const onListening = () => {
+          server.removeListener("error", onError);
+          resolvePromise();
+        };
+        server.once("error", onError);
+        server.once("listening", onListening);
+        server.listen(endpoint);
+      });
+      return server;
+    } catch (error) {
+      await closeTranscriptActiveLease(server).catch(() => undefined);
+      if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+        throw transcriptError("transcript_store_already_active");
+      }
+      throw transcriptError("transcript_lease_failed");
+    }
+  }
+}
+
+async function closeTranscriptActiveLease(server: Server): Promise<void> {
+  if (!server.listening) return;
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    server.close((error) => error ? rejectPromise(error) : resolvePromise());
+  });
 }
 
 class TranscriptLeaseRecovery {
@@ -872,6 +965,11 @@ function pathsReferToSameLocation(left: string, right: string): boolean {
   return left === right;
 }
 
+function sameFileIdentity(left: { dev: number; ino: number; size: number; mtimeMs: number }, right: { dev: number; ino: number; size: number; mtimeMs: number }): boolean {
+  return left.dev === right.dev && left.ino === right.ino
+    && left.size === right.size && left.mtimeMs === right.mtimeMs;
+}
+
 async function ensureOwnedRoot(root: string): Promise<void> {
   const markerPath = join(root, rootMarkerFileName);
   let names = await readdir(root);
@@ -978,21 +1076,39 @@ async function loadState(
   access: NormalizedAccessPolicy,
   redactor: StreamRedactor,
 ): Promise<TranscriptState | null> {
-  let metadata;
+  let pathMetadata;
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
   try {
-    metadata = await lstat(path);
+    pathMetadata = await lstat(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw transcriptError("transcript_snapshot_read_failed");
   }
-  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > maximumSnapshotBytes) {
+  if (!pathMetadata.isFile() || pathMetadata.isSymbolicLink() || pathMetadata.size > maximumSnapshotBytes) {
     throw transcriptError("transcript_snapshot_too_large_or_invalid");
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readFile(path, "utf8"));
-  } catch {
+    handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const before = await handle.stat();
+    if (!before.isFile() || before.isSymbolicLink() || before.size !== pathMetadata.size) {
+      throw transcriptError("transcript_snapshot_race_detected");
+    }
+    const raw = await handle.readFile("utf8");
+    const after = await handle.stat();
+    const pathAfter = await lstat(path);
+    if (!after.isFile() || after.isSymbolicLink()
+      || after.size !== before.size
+      || Buffer.byteLength(raw, "utf8") !== before.size
+      || !sameFileIdentity(pathMetadata, pathAfter)) {
+      throw transcriptError("transcript_snapshot_race_detected");
+    }
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    if (isTranscriptError(error)) throw error;
     throw transcriptError("transcript_snapshot_invalid");
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
   const state = validatePersistedState(parsed, retention, access, redactor);
   return state;
@@ -1053,6 +1169,7 @@ function validatePersistedState(
       || occurredAt > updatedAt
       || Buffer.byteLength(record.content, "utf8") > retention.maxRecordBytes
       || redactor.redact(record.content).text !== record.content
+      || record.redactionCount !== persistedRedactionCount(record.content, record.sensitiveInput)
     ) {
       throw transcriptError("transcript_snapshot_invalid");
     }
@@ -1824,6 +1941,53 @@ function countRedactions(ranges: readonly RedactionRange[]): number {
   return ranges.filter((range) => range.replacement === "redact").length;
 }
 
+function persistedRedactionCount(content: string, sensitiveInput: boolean): number {
+  if (sensitiveInput) return content === SENSITIVE_INPUT_PLACEHOLDER ? 1 : 0;
+  let count = 0;
+  let offset = 0;
+  while ((offset = content.indexOf(TRANSCRIPT_REDACTION_PLACEHOLDER, offset)) >= 0) {
+    count += 1;
+    offset += TRANSCRIPT_REDACTION_PLACEHOLDER.length;
+  }
+  return count;
+}
+
+function transcriptStreamId(path: string): string {
+  return createHash("sha256").update(`morrow.transcript-replay/1|${resolve(path).toLowerCase()}`, "utf8").digest("hex");
+}
+
+function parseTranscriptCursor(value: unknown, streamId: string): { ok: true; cursor: TranscriptCursor } | { ok: false } {
+  if (value === undefined) return { ok: true, cursor: { streamId, ordinal: 0 } };
+  if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) return { ok: false };
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== 2 || !keys.every((key) => typeof key === "string" && (key === "streamId" || key === "ordinal"))) return { ok: false };
+  const stream = Object.getOwnPropertyDescriptor(value, "streamId");
+  const ordinal = Object.getOwnPropertyDescriptor(value, "ordinal");
+  if (!stream || !ordinal || !("value" in stream) || !("value" in ordinal)
+    || stream.value !== streamId || !Number.isSafeInteger(ordinal.value) || ordinal.value < 0) return { ok: false };
+  return { ok: true, cursor: { streamId, ordinal: ordinal.value as number } };
+}
+
+function transcriptReplayResult(
+  status: TranscriptReplayStatus,
+  streamId: string,
+  cursor: TranscriptCursor,
+  nextCursor: TranscriptCursor,
+  retainedFromOrdinal: number,
+  headOrdinal: number,
+  records: readonly TranscriptRecord[],
+): TranscriptReplayResult {
+  return Object.freeze({
+    status,
+    streamId,
+    cursor: Object.freeze({ ...cursor }),
+    nextCursor: Object.freeze({ ...nextCursor }),
+    retainedFromOrdinal,
+    headOrdinal,
+    records: Object.freeze(records.map(cloneRecord)),
+  });
+}
+
 function checksumState(state: object): string {
   return createHash("sha256").update(JSON.stringify(state)).digest("hex");
 }
@@ -1866,15 +2030,18 @@ function processIsAlive(pid: number): boolean {
 }
 
 function trustedNow(clock?: () => string | number | Date): string {
-  let value: string | number | Date;
   try {
-    value = clock ? clock() : Date.now();
+    const value = clock ? clock() : Date.now();
+    let milliseconds: number;
+    if (value instanceof Date) milliseconds = value.getTime();
+    else if (typeof value === "number") milliseconds = value;
+    else if (typeof value === "string") milliseconds = Date.parse(value);
+    else throw new Error("clock_value_invalid");
+    if (!Number.isFinite(milliseconds)) throw new Error("clock_value_invalid");
+    return new Date(milliseconds).toISOString();
   } catch {
-    throw transcriptError("transcript_clock_failed");
+    throw transcriptError("transcript_clock_invalid");
   }
-  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
-  if (!Number.isFinite(date.getTime())) throw transcriptError("transcript_clock_invalid");
-  return date.toISOString();
 }
 
 function isTranscriptStream(value: unknown): value is TranscriptStream {

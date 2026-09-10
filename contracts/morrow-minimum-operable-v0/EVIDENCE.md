@@ -208,3 +208,13 @@ deploy nem inicie P4-PR04.
 ```
 
 - resultado PRE_DISPATCH: manifesto completo e autorizado para handoff ao Executor; o reconciliador deve confirmar `READY_FOR_EXECUTION`, `nextPrId: P4-PR03` e `nextAuthorizedAction: START_P4_PR03` em worktree limpa nesta branch.
+
+## P4-PR03 — evidência factual do Executor
+
+- D-014 RED: conversão de `Date` hostil podia lançar fora da conversão sanitizada em transcript e recovery. GREEN: toda conversão de clock aceita somente string, número ou `Date` convertível, captura falha de getter/conversão e retorna apenas `transcript_clock_invalid` ou `worker_recovery_clock_invalid`, sem payload hostil.
+- D-015 RED: a leitura anterior usava inspeção de caminho seguida de `readFile`, deixando a janela de troca entre validação e conteúdo. GREEN: snapshot é aberto uma vez, tipo/tamanho são conferidos no handle, conteúdo é lido pelo mesmo handle e o handle é conferido novamente contra identidade/tamanho do caminho; symlink/reparse/troca/truncamento falham fechado. Contraprova de symlink e snapshot race está em `test/p4-pr03-replay.test.ts`.
+- D-016 RED: snapshot com checksum recalculado e `redactionCount` arbitrário era aceito. GREEN: o valor reidratado deve ser exatamente a contagem de placeholders persistidos (`[REDACTED]`) ou o marcador único de input sensível; o conteúdo continua validado pelo redactor e nenhum segredo é necessário para a validação.
+- D-017 RED: lease stale com PID numericamente vivo era tratado como ativo. GREEN: lease de recovery e transcript mantém endpoint nomeado da instância; PID não é autoridade. Instância viva continua exclusiva pelo endpoint, enquanto lease stale/PID reutilizado é recuperável após o endpoint ser liberado.
+- Replay GREEN: `JsonlEventLog.replay` implementa stream identity, sequência derivada por contrato, cursor de entrada/`nextCursor`, limite, head e piso retido com estados `ok`, `invalid`, `stale` e `future`; `replayLiveActivity` usa sequência/identidade próprios; transcript usa ordinal próprio.
+- Reidratação GREEN: snapshot checksum/políticas/ordenação/redaction continuam fail-closed; recovery mantém `queued`, `blocked`, `failed`, `completed` e `outcome_unknown` distintos, sem repetir efeito concluído ou efeito de resultado desconhecido após restart. A view expõe `liveness` derivado sem colapsar `connectivity` ou o motivo durável.
+- Provas focadas nesta execução: P4-PR03 `10/10`; transcript `42/42`; worker-recovery `21/21`. A suíte completa e os gates finais serão registrados no congelamento do candidate.

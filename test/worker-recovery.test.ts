@@ -294,6 +294,7 @@ test("blocks a result whose idempotency key is not the claimed effect", async (t
   const accepted = await coordinator.accept(dispatchMessage());
   assert.equal(accepted.ok, true);
   assert.equal(coordinator.inspect().connectivity, "offline");
+  assert.equal(coordinator.inspect().liveness, "blocked");
   assert.deepEqual(coordinator.inspect().dispatches.map(({ status, reason }) => ({ status, reason })), [{
     status: "blocked",
     reason: "attempt_result_invalid",
@@ -712,6 +713,7 @@ test("kill after effect blocks unknown outcome on restart without replay", async
     reason: "execution_outcome_unknown_after_restart",
     attempts: 1,
   }]);
+  assert.equal(reopened.inspect().liveness, "outcome_unknown");
   await connect(reopened, "worker-session-after-crash");
   assert.equal(replayAttempts, 0);
   assert.equal(await readFile(effectPath, "utf8"), "dispatch-recovery-1\n");
