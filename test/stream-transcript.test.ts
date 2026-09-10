@@ -1,0 +1,1505 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { join, relative, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
+import test, { type TestContext } from "node:test";
+import {
+  PersistentTranscriptStore,
+  SENSITIVE_INPUT_PLACEHOLDER,
+  StreamRedactor,
+  TRANSCRIPT_REDACTION_PLACEHOLDER,
+  type PersistentTranscriptConfiguration,
+  type TranscriptStream,
+} from "../src/stream-transcript.ts";
+
+const controlledParent = resolve(process.cwd(), ".morrow-test-tmp");
+const syntheticSecret = "MORROW_SYNTHETIC_SECRET_CANARY_9f31a7c2";
+const baseTime = Date.parse("2026-08-31T15:00:00.000Z");
+
+async function makeRoot(t: TestContext): Promise<string> {
+  await mkdir(controlledParent, { recursive: true });
+  const root = await mkdtemp(join(controlledParent, "p4-pr02-"));
+  t.after(async () => {
+    const scoped = relative(controlledParent, root);
+    assert.notEqual(scoped, "");
+    assert.equal(scoped.startsWith(".."), false);
+    await rm(root, { recursive: true, force: true });
+  });
+  return root;
+}
+
+function configuration(
+  stateRoot: string,
+  now: () => number = () => baseTime,
+  overrides: Partial<PersistentTranscriptConfiguration> = {},
+): PersistentTranscriptConfiguration {
+  return {
+    stateRoot,
+    retention: {
+      maxAgeMs: 60_000,
+      maxRecords: 8,
+      maxTotalBytes: 65_536,
+      maxRecordBytes: 16_384,
+    },
+    access: { writerIds: ["kernel", "worker"], readerIds: ["operator", "auditor"] },
+    redaction: { policyId: "transcript-policy-v1", sensitiveLiterals: [syntheticSecret] },
+    clock: now,
+    ...overrides,
+  };
+}
+
+function request(recordId: string, stream: TranscriptStream = "stdout", writerId = "kernel") {
+  return {
+    recordId,
+    contractId: "MORROW-MVO-001",
+    stepId: "P4-PR02",
+    terminalSessionId: "terminal-fixture-1",
+    agentInstanceId: "agent-fixture-1",
+    stream,
+    writerId,
+  };
+}
+
+async function append(
+  store: PersistentTranscriptStore,
+  recordId: string,
+  content: string,
+  stream: TranscriptStream = "stdout",
+) {
+  const writer = store.beginRecord(request(recordId, stream));
+  writer.write(content);
+  return await writer.commit();
+}
+
+async function allFileText(root: string): Promise<string> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const contents: string[] = [];
+  for (const entry of entries) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) contents.push(await allFileText(path));
+    else if (entry.isFile()) contents.push(await readFile(path, "utf8"));
+  }
+  return contents.join("\n");
+}
+
+test("redacts exact literals and token shapes split across stream chunks before release", () => {
+  const redactor = new StreamRedactor({
+    policyId: "stream-policy-v1",
+    sensitiveLiterals: [syntheticSecret],
+  });
+  const session = redactor.start(65_536);
+  const fragments = [
+    session.push(`visible-${"x".repeat(5_000)}-${syntheticSecret.slice(0, 13)}`),
+    session.push(`${syntheticSecret.slice(13)} authorization=Bearer abcdefghijklmnopqrstuvwxyz012345 tail`),
+    session.finish(),
+  ];
+  const released = fragments.map((fragment) => fragment.text).join("");
+  assert.doesNotMatch(released, new RegExp(syntheticSecret));
+  assert.doesNotMatch(released, /abcdefghijklmnopqrstuvwxyz012345/);
+  assert.match(released, /\[REDACTED\]/);
+  assert.ok(fragments.some((fragment) => fragment.text.length > 0));
+  assert.ok(fragments.reduce((total, fragment) => total + fragment.redactionCount, 0) >= 2);
+
+  const ansiHidden = `${syntheticSecret.slice(0, 14)}\u001b[31m${syntheticSecret.slice(14)}\u001b[0m`;
+  const normalized = redactor.redact(`color=\u001b[32mgreen\u001b[0m hidden=${ansiHidden}`);
+  assert.equal(normalized.text.includes("\u001b"), false);
+  assert.match(normalized.text, /color=green/);
+  assert.doesNotMatch(normalized.text, new RegExp(syntheticSecret));
+  assert.doesNotMatch(normalized.text, /MORROW_SYNTHETIC_SECRET/);
+  assert.match(normalized.text, /hidden=\[REDACTED\]/);
+
+  const invisibleHidden = `${syntheticSecret.slice(0, 9)}\u200b${syntheticSecret.slice(9)}`;
+  const invisible = redactor.redact(`hidden=${invisibleHidden}`);
+  assert.equal(invisible.text, "hidden=[REDACTED]");
+
+  const environment = redactor.redact(
+    "DB_PASSWORD=hunter2secret AWS_SECRET_ACCESS_KEY=synthetic-access-key-material",
+  );
+  assert.equal(
+    environment.text,
+    `${TRANSCRIPT_REDACTION_PLACEHOLDER} ${TRANSCRIPT_REDACTION_PLACEHOLDER}`,
+  );
+
+  const structured = redactor.redact('{"password":"json-only-secret","safe":true}');
+  assert.equal(structured.text, `{${TRANSCRIPT_REDACTION_PLACEHOLDER},"safe":true}`);
+  assert.doesNotMatch(structured.text, /json-only-secret/);
+  const basicAuthorization = redactor.redact("Authorization: Basic dXNlcjpwYXNz");
+  assert.equal(basicAuthorization.text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.doesNotMatch(basicAuthorization.text, /dXNlcjpwYXNz/);
+});
+
+test("keeps redaction mechanics runtime-private against consumer overrides", async (t) => {
+  assert.equal(Object.isFrozen(StreamRedactor.prototype), true);
+  assert.equal(Object.getOwnPropertyDescriptor(StreamRedactor.prototype, "ranges"), undefined);
+  assert.equal(Reflect.set(StreamRedactor.prototype, "ranges", () => []), false);
+
+  const redactor = new StreamRedactor({ policyId: "runtime-private-policy", sensitiveLiterals: [] });
+  assert.equal(Object.isFrozen(redactor), true);
+  assert.equal(Reflect.set(redactor, "redact", () => ({ text: "unsafe", redactionCount: 0 })), false);
+  assert.equal(redactor.redact("password=PROTOTYPE_DIRECT_CANARY").text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-runtime-private-redaction"));
+  const fragments = [writer.write("password=PROTOTYPE_STORE_CANARY")];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  assert.equal(liveText, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.doesNotMatch(store.inspect("operator").records[0]?.content ?? "", /PROTOTYPE_STORE_CANARY/);
+  await store.close();
+  assert.doesNotMatch(await allFileText(root), /PROTOTYPE_STORE_CANARY/);
+});
+
+test("holds a long quoted assignment until its quote or line boundary can be redacted", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const quotedSecret = `QUOTE_CANARY_${"q".repeat(5_000)}_END`;
+  const writer = store.beginRecord(request("record-long-quoted-assignment"));
+  const fragments = [
+    writer.write(`prefix password="A ${quotedSecret}`),
+    writer.write('" suffix'),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const mirrored = fragments.map((fragment) => fragment.text).join("");
+  assert.equal(mirrored, `prefix ${TRANSCRIPT_REDACTION_PLACEHOLDER} suffix`);
+  assert.doesNotMatch(mirrored, /QUOTE_CANARY/);
+  assert.doesNotMatch(mirrored, /q{256}/);
+  assert.equal(store.inspect("auditor").records[0]?.content, mirrored);
+
+  const lineTerminatedWriter = store.beginRecord(request("record-line-terminated-quoted-assignment"));
+  const lineFragments = [
+    lineTerminatedWriter.write(`prefix password="A ${quotedSecret}\nvisible`),
+  ];
+  const lineCommitted = await lineTerminatedWriter.commit();
+  lineFragments.push(lineCommitted.finalFragment);
+  const lineMirrored = lineFragments.map((fragment) => fragment.text).join("");
+  assert.equal(lineMirrored, `prefix ${TRANSCRIPT_REDACTION_PLACEHOLDER}\nvisible`);
+  assert.doesNotMatch(lineMirrored, /QUOTE_CANARY|q{256}/);
+  assert.equal(store.inspect("auditor").records[1]?.content, lineMirrored);
+
+  const escapedQuoteWriter = store.beginRecord(request("record-escaped-quote-assignment"));
+  const escapedFragments = [
+    escapedQuoteWriter.write(`prefix password="A \\"${quotedSecret}" suffix`),
+  ];
+  const escapedCommitted = await escapedQuoteWriter.commit();
+  escapedFragments.push(escapedCommitted.finalFragment);
+  const escapedMirrored = escapedFragments.map((fragment) => fragment.text).join("");
+  assert.equal(escapedMirrored, `prefix ${TRANSCRIPT_REDACTION_PLACEHOLDER} suffix`);
+  assert.doesNotMatch(escapedMirrored, /QUOTE_CANARY|q{256}/);
+  assert.equal(store.inspect("auditor").records[2]?.content, escapedMirrored);
+
+  const delayedValueWriter = store.beginRecord(request("record-delayed-assignment-value"));
+  const delayedFragments = [
+    delayedValueWriter.write(`prefix password${" ".repeat(2_500)}=${" ".repeat(2_500)}`),
+    delayedValueWriter.write(`${quotedSecret} suffix`),
+  ];
+  const delayedCommitted = await delayedValueWriter.commit();
+  delayedFragments.push(delayedCommitted.finalFragment);
+  const delayedMirrored = delayedFragments.map((fragment) => fragment.text).join("");
+  assert.equal(delayedMirrored, `prefix ${TRANSCRIPT_REDACTION_PLACEHOLDER} suffix`);
+  assert.doesNotMatch(delayedMirrored, /QUOTE_CANARY|q{256}/);
+  assert.equal(store.inspect("auditor").records[3]?.content, delayedMirrored);
+
+  await store.close();
+  assert.doesNotMatch(await allFileText(root), /QUOTE_CANARY|q{256}/);
+});
+
+test("redacts PowerShell quote escaping structurally across chunks and every transcript channel", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-powershell-escaped-quotes"));
+  const backtick = String.fromCharCode(96);
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} $pass`),
+    writer.write(`word = "alpha${backtick}`),
+    writer.write(`"POWERSHELL_BACKTICK_ESCAPE_CANARY omega"; $env:CLIENT_SE`),
+    writer.write(`CRET = 'alpha''POWERSHELL_DOUBLED_ESCAPE_CANARY omega'; `),
+    writer.write(`$clientSecretary = "public${backtick}"quoted"; $apiKeyboardLayout = 'public''quoted'`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /POWERSHELL_(?:BACKTICK|DOUBLED)_ESCAPE_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.ok(fragments.slice(0, -1).some((fragment) => fragment.text.length > 0));
+  assert.match(liveText, /clientSecretary = "public`"quoted"/);
+  assert.match(liveText, /apiKeyboardLayout = 'public''quoted'/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 2);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /public`"quoted|public''quoted/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /public`\\"quoted|public''quoted/);
+});
+
+test("redacts camelCase sensitive-key categories across chunks before live return and persistence", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-camel-case-assignments"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} {"clientSe`),
+    writer.write(`cret":"CAMEL_CLIENT_SECRET_CANARY","accessTo`),
+    writer.write(`ken":"CAMEL_ACCESS_TOKEN_CANARY","refreshToken":"CAMEL_REFRESH_TOKEN_CANARY",`),
+    writer.write(`"apiKey":"CAMEL_API_KEY_CANARY","serviceCredential":"CAMEL_CREDENTIAL_CANARY",`),
+    writer.write(`"clientSecretary":"public-secretary","accessTokenizer":"public-tokenizer",`),
+    writer.write(`"passwordlessMode":"enabled","credentialedUser":"public-user",`),
+    writer.write(`"apiKeyboardLayout":"public-layout"}`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  const sensitiveCanaries = /CAMEL_(?:CLIENT_SECRET|ACCESS_TOKEN|REFRESH_TOKEN|API_KEY|CREDENTIAL)_CANARY/;
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.ok(fragments.slice(0, -1).some((fragment) => fragment.text.length > 0));
+  assert.match(liveText, /visible-prefix-/);
+  assert.match(liveText, /public-secretary/);
+  assert.match(liveText, /public-tokenizer/);
+  assert.match(liveText, /"passwordlessMode":"enabled"/);
+  assert.match(liveText, /"credentialedUser":"public-user"/);
+  assert.match(liveText, /"apiKeyboardLayout":"public-layout"/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 5);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /public-secretary|public-tokenizer|public-layout/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /public-secretary/);
+  assert.match(disk, /public-tokenizer/);
+  assert.match(disk, /public-layout/);
+});
+
+test("redacts structurally sensitive CLI options across chunks before live return and persistence", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-cli-options"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} --pass`),
+    writer.write(`word=CLI_PASSWORD_EQUALS_CANARY --password CLI_PASSWORD_SPACE_CANARY --api-key=CLI_API_EQUALS_CANARY --api-key `),
+    writer.write("CLI_API_SPACE_CAN"),
+    writer.write(`ARY --client-se`),
+    writer.write(`cret=CLI_CLIENT_EQUALS_CANARY --client-secret CLI_CLIENT_SPACE_CANARY --client-secret "CLI_CLIENT_QUOTED_CANARY" `),
+    writer.write(`--access-token=CLI_ACCESS_CANARY --refresh-token=CLI_REFRESH_CANARY `),
+    writer.write("--client-secretary public --access-tokenizer public --passwordless-mode true --api-keyboard-layout us"),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /CLI_(?:PASSWORD_EQUALS|PASSWORD_SPACE|API_EQUALS|API_SPACE|CLIENT_EQUALS|CLIENT_SPACE|CLIENT_QUOTED|ACCESS|REFRESH)_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.match(liveText, /--client-secretary public/);
+  assert.match(liveText, /--access-tokenizer public/);
+  assert.match(liveText, /--passwordless-mode true/);
+  assert.match(liveText, /--api-keyboard-layout us/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 8);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /--client-secretary public/);
+  assert.match(disk, /--api-keyboard-layout us/);
+});
+
+test("preserves lexical assignment boundaries for acronyms, digits, and repeated delimiters", () => {
+  const redactor = new StreamRedactor({ policyId: "assignment-key-boundaries", sensitiveLiterals: [] });
+  const result = redactor.redact(
+    "APIKey=API_KEY_BOUNDARY_CANARY "
+      + "ClientSecret=CLIENT_SECRET_BOUNDARY_CANARY "
+      + "XMLHttpRequest=public-xml "
+      + "version2FA=public-version "
+      + "ABCD=public-acronym "
+      + "safe__--__field=public-delimiters",
+  );
+
+  assert.equal(
+    result.text,
+    `${TRANSCRIPT_REDACTION_PLACEHOLDER} ${TRANSCRIPT_REDACTION_PLACEHOLDER} `
+      + "XMLHttpRequest=public-xml version2FA=public-version "
+      + "ABCD=public-acronym safe__--__field=public-delimiters",
+  );
+  assert.equal(result.redactionCount, 2);
+});
+
+test("applies backspace semantics and fails closed on broader cursor rewrites before redaction", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-terminal-overwrite-assignments"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} passX`),
+    writer.write(`\bword=BACKSPACE_SECRET_CANARY versX\bion=1\n`),
+    writer.write(`passX\u001b[1Dword=CSI_SECRET_CANARY status=ok\rpassword=CR_SECRET_CANARY`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /(?:BACKSPACE|CSI|CR)_SECRET_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.ok(fragments.slice(0, -1).some((fragment) => fragment.text.length > 0));
+  assert.match(liveText, /visible-prefix-/);
+  assert.match(liveText, /version=1/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 2);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /version=1/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /version=1/);
+});
+
+test("red test: CSI REP can reconstruct a sensitive assignment outside the matcher", async (t) => {
+  const root = await makeRoot(t);
+  const redactor = new StreamRedactor({ policyId: "rep-red-test", sensitiveLiterals: [] });
+  const cases = [
+    "pas\u001b[1bword=VT_REPEAT_PASSWORD_CANARY",
+    "pas\u001b[bword=VT_REPEAT_DEFAULT_CANARY",
+    "acces\u001b[1bsToken=VT_REPEAT_ACCESS_TOKEN_CANARY",
+    "safe\u001b[2bline=VT_REPEAT_QUANTITY_CANARY",
+  ];
+  for (const input of cases) {
+    assert.equal(redactor.redact(input).text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  }
+  assert.equal(redactor.redact("safeField=public-value").text, "safeField=public-value");
+  assert.equal(redactor.redact("safe\u001b[2bline=public-value").text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+
+  const incomplete = redactor.start(16_384);
+  const incompleteFragments = [
+    incomplete.push("pas\u001b["),
+    incomplete.push("1bword=VT_REPEAT_INCOMPLETE_CANARY"),
+    incomplete.finish(),
+  ];
+  assert.doesNotMatch(
+    incompleteFragments.map((fragment) => fragment.text).join(""),
+    /VT_REPEAT_INCOMPLETE_CANARY/,
+  );
+  assert.equal(
+    redactor.redact("pas\u001b[1").text,
+    TRANSCRIPT_REDACTION_PLACEHOLDER,
+  );
+
+  const store = await PersistentTranscriptStore.open(configuration(root, () => baseTime, {
+    redaction: { policyId: "rep-red-test", sensitiveLiterals: [] },
+  }));
+  const writer = store.beginRecord(request("record-rep-red"));
+  const fragments = [
+    writer.write("pas\u001b[1"),
+    writer.write("bword=VT_REPEAT_PASSWORD_CANARY"),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  await store.close();
+  const disk = await allFileText(root);
+
+  assert.equal(liveText, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.equal(inspected, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.doesNotMatch(disk, /VT_REPEAT_PASSWORD_CANARY/);
+});
+
+test("red test: VT HPA plus DCH can reconstruct a sensitive assignment across chunks", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root, () => baseTime, {
+    redaction: { policyId: "hpa-dch-red-test", sensitiveLiterals: [] },
+  }));
+  const writer = store.beginRecord(request("record-hpa-dch-red"));
+  const fragments = [
+    writer.write("passX\u001b["),
+    writer.write("5"),
+    writer.write("`\u001b[1"),
+    writer.write("Pword=VT_HPA_DCH_CANARY"),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  await store.close();
+  const disk = await allFileText(root);
+
+  assert.equal(liveText, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.equal(inspected, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.doesNotMatch(disk, /VT_HPA_DCH_CANARY/);
+});
+
+test("allows only proven-inert SGR and fails closed for mutating, query, private, intermediate, and unknown CSI", () => {
+  const redactor = new StreamRedactor({ policyId: "csi-classification-matrix", sensitiveLiterals: [] });
+  const mutatingOrUnknown = [
+    ["HPA", "\u001b[5`"],
+    ["ICH", "\u001b[1@"],
+    ["DCH", "\u001b[1P"],
+    ["IL", "\u001b[1L"],
+    ["DL", "\u001b[1M"],
+    ["ECH", "\u001b[1X"],
+    ["CHT", "\u001b[1I"],
+    ["CBT", "\u001b[1Z"],
+    ["HPR", "\u001b[1a"],
+    ["VPA", "\u001b[1d"],
+    ["VPR", "\u001b[1e"],
+    ["REP", "\u001b[1b"],
+    ["save", "\u001b[s"],
+    ["restore", "\u001b[u"],
+    ["query", "\u001b[6n"],
+    ["unknown", "\u001b[1q"],
+    ["private-mode", "\u001b[?25l"],
+    ["intermediate", "\u001b[2 q"],
+    ["C1-HPA", "\u009b5`"],
+  ] as const;
+
+  for (const [name, sequence] of mutatingOrUnknown) {
+    assert.equal(
+      redactor.redact(`passX${sequence}word=${name.toUpperCase()}_CSI_CANARY`).text,
+      TRANSCRIPT_REDACTION_PLACEHOLDER,
+      name,
+    );
+  }
+
+  assert.equal(redactor.redact("\u001b[32mhello\u001b[0m").text, "hello");
+  assert.equal(redactor.redact("\u001b[38:2::255:0:0mhello\u001b[39m").text, "hello");
+  assert.equal(redactor.redact("safeField=public-value").text, "safeField=public-value");
+  assert.equal(redactor.redact("\u001b[?munknown-private-sgr").text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+});
+
+test("classifies the complete C0/C1 control class instead of dropping stateful controls", () => {
+  const redactor = new StreamRedactor({ policyId: "c0-c1-classification-matrix", sensitiveLiterals: [] });
+  const inert = [
+    ["NUL", "\u0000"],
+    ["BEL", "\u0007"],
+    ["DEL", "\u007f"],
+  ] as const;
+  for (const [name, control] of inert) {
+    assert.equal(redactor.redact(`safe${control}text`).text, "safetext", name);
+  }
+
+  const c0StatefulOrUnknown = [
+    ["HT", "\u0009"],
+    ["VT", "\u000b"],
+    ["FF", "\u000c"],
+    ["CR", "\u000d"],
+    ["SO", "\u000e"],
+    ["SI", "\u000f"],
+    ["DLE", "\u0010"],
+    ["DC1", "\u0011"],
+    ["CAN", "\u0018"],
+    ["SUB", "\u001a"],
+  ] as const;
+  for (const [name, control] of c0StatefulOrUnknown) {
+    assert.equal(redactor.redact(`safe${control}text`).text, TRANSCRIPT_REDACTION_PLACEHOLDER, name);
+  }
+
+  for (let code = 0x80; code <= 0x9f; code += 1) {
+    const control = String.fromCharCode(code);
+    assert.equal(
+      redactor.redact(`safe${control}text`).text,
+      TRANSCRIPT_REDACTION_PLACEHOLDER,
+      `C1-${code.toString(16)}`,
+    );
+  }
+
+  assert.equal(
+    redactor.redact(`pasX\u009Asword=C1_CCH_RECONSTRUCTION_CANARY`).text,
+    TRANSCRIPT_REDACTION_PLACEHOLDER,
+  );
+  assert.equal(redactor.redact("pasX\bsword=C0_BACKSPACE_CANARY").text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.equal(redactor.redact("left\r\nright").text, "left\nright");
+  assert.equal(redactor.redact("\u001b[32mordinary\u001b[0m").text, "ordinary");
+});
+
+test("keeps C0/C1 fail-closed security invariant across one, many, and one-byte chunks", () => {
+  const redactor = new StreamRedactor({ policyId: "c0-c1-chunk-equivalence", sensitiveLiterals: [] });
+  const input = "visible pasX\u009Asword=C1_CCH_CHUNK_CANARY\nsafeField=visible";
+  const chunkings = [
+    [input],
+    [input.slice(0, 12), input.slice(12, 27), input.slice(27)],
+    [...input],
+  ];
+  const outputs = chunkings.map((chunks) => {
+    const session = redactor.start(16_384);
+    const fragments = chunks.map((chunk) => session.push(chunk));
+    fragments.push(session.finish());
+    return fragments.map((fragment) => fragment.text).join("");
+  });
+
+  assert.equal(outputs[0], outputs[1]);
+  assert.equal(outputs[1], outputs[2]);
+  for (const output of outputs) assert.doesNotMatch(output, /C1_CCH_CHUNK_CANARY/);
+  assert.match(outputs[0]!, /\[REDACTED\]/);
+  assert.match(outputs[0]!, /safeField=visible/);
+});
+
+test("keeps C1 stateful controls redacted through live, inspect, persistence, and reopen", async (t) => {
+  const root = await makeRoot(t);
+  const redaction = { policyId: "c1-stateful-persistence", sensitiveLiterals: [] } as const;
+  const store = await PersistentTranscriptStore.open(configuration(root, () => baseTime, { redaction }));
+  const writer = store.beginRecord(request("record-c1-stateful"));
+  const fragments = [
+    writer.write("prefix pasX\u009A"),
+    writer.write("sword=C1_CCH_PERSISTED_CANARY\nsafeField=visible"),
+  ];
+  fragments.push(await writer.commit().then((committed) => committed.finalFragment));
+  const live = fragments.map((fragment) => fragment.text).join("");
+  assert.doesNotMatch(live, /C1_CCH_PERSISTED_CANARY/);
+  assert.match(live, /safeField=visible/);
+  assert.equal(store.inspect("operator").records[0]?.content, live);
+  assert.doesNotMatch(await allFileText(root), /C1_CCH_PERSISTED_CANARY/);
+  await store.close();
+
+  const reopened = await PersistentTranscriptStore.open(configuration(root, () => baseTime, { redaction }));
+  assert.doesNotMatch(reopened.inspect("operator").records[0]?.content ?? "", /C1_CCH_PERSISTED_CANARY/);
+  await reopened.close();
+  assert.doesNotMatch(await allFileText(root), /C1_CCH_PERSISTED_CANARY/);
+});
+
+test("amortizes one-byte release scans across and beyond holdback", () => {
+  const redactor = new StreamRedactor({ policyId: "fragmented-release-complexity", sensitiveLiterals: [] });
+  const scenarios = [
+    { name: "common", make: (size: number) => "x".repeat(size) },
+    { name: "assignment", make: (size: number) => `safeField=${"x".repeat(Math.max(0, size - 10))}` },
+    { name: "terminal", make: (size: number) => `safe${"\u001b[32m".repeat(Math.floor(size / 5))}x` },
+    {
+      name: "string-control",
+      make: (size: number) => `safe${"\u001b]0;x\u0007".repeat(Math.ceil(size / 7))}tail`,
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const timings: number[] = [];
+    for (const size of [2_000, 4_000, 8_000, 12_000, 16_000]) {
+      const input = scenario.make(size);
+      const session = redactor.start(100_000);
+      const started = performance.now();
+      const fragmented = [];
+      for (const character of input) fragmented.push(session.push(character));
+      fragmented.push(session.finish());
+      timings.push(performance.now() - started);
+
+      const oneChunk = redactor.start(100_000);
+      const oneChunkOutput = [oneChunk.push(input), oneChunk.finish()].map((fragment) => fragment.text).join("");
+      const fragmentedOutput = fragmented.map((fragment) => fragment.text).join("");
+      assert.equal(fragmentedOutput, oneChunkOutput, `${scenario.name}:${size}:chunk-equivalence`);
+    }
+    assert.ok(
+      timings[4]! < timings[0]! * 8 + 250,
+      `${scenario.name}:superlinear-growth:${timings.map((timing) => timing.toFixed(1)).join(",")}`,
+    );
+    assert.ok(
+      timings[4]! < 750,
+      `${scenario.name}:practical-do-s:${timings.map((timing) => timing.toFixed(1)).join(",")}`,
+    );
+  }
+});
+
+test("amortizes fragmented LF and CRLF release scans across multiple holdback windows", () => {
+  const redactor = new StreamRedactor({ policyId: "newline-release-complexity", sensitiveLiterals: [] });
+  const sizes = [2_000, 4_000, 8_000, 12_000, 16_000];
+  const makeInput = (size: number, lineEnding: "\n" | "\r\n") => {
+    const unit = `x${lineEnding}`;
+    return unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
+  };
+  const run = (input: string, chunkSize: number) => {
+    const session = redactor.start(100_000);
+    const fragments = [];
+    for (let offset = 0; offset < input.length; offset += chunkSize) {
+      fragments.push(session.push(input.slice(offset, offset + chunkSize)));
+    }
+    fragments.push(session.finish());
+    return fragments;
+  };
+
+  for (const lineEnding of ["\n", "\r\n"] as const) {
+    const timings: number[] = [];
+    for (const size of sizes) {
+      const input = makeInput(size, lineEnding);
+      const started = performance.now();
+      const oneByteFragments = run(input, 1);
+      timings.push(performance.now() - started);
+
+      const oneByteOutput = oneByteFragments.map((fragment) => fragment.text).join("");
+      for (const chunkSize of [input.length, 1_024]) {
+        const output = run(input, chunkSize).map((fragment) => fragment.text).join("");
+        assert.equal(output, oneByteOutput, `${JSON.stringify(lineEnding)}:${size}:${chunkSize}:chunk-equivalence`);
+      }
+
+      const nonEmptyReleases = oneByteFragments.filter((fragment) => fragment.text.length > 0).length;
+      assert.ok(
+        nonEmptyReleases <= Math.ceil(Buffer.byteLength(input, "utf8") / 4_096) + 2,
+        `${JSON.stringify(lineEnding)}:${size}:release-amortization:${nonEmptyReleases}`,
+      );
+    }
+
+    const first = timings[0]!;
+    const last = timings[timings.length - 1]!;
+    assert.ok(
+      last < first * 20 + 300,
+      `${JSON.stringify(lineEnding)}:superlinear-growth:${timings.map((timing) => timing.toFixed(1)).join(",")}`,
+    );
+  }
+});
+
+test("keeps multiline secrets fail-closed while newline batching crosses holdback boundaries", () => {
+  const redactor = new StreamRedactor({ policyId: "newline-multiline-security", sensitiveLiterals: [] });
+  const sensitiveCanaries = /NEWLINE_BATCH_(?:BLOCK|JSON|POWERSHELL)_CANARY/;
+  const makeInput = (size: number, lineEnding: "\n" | "\r\n") => {
+    const safeLine = `safeField: public${lineEnding}`;
+    const multiline = [
+      `password: |${lineEnding}`,
+      `  NEWLINE_BATCH_BLOCK_CANARY${lineEnding}`,
+      `safeSibling: visible${lineEnding}`,
+      `{"password":${lineEnding}`,
+      `  "NEWLINE_BATCH_JSON_CANARY",${lineEnding}`,
+      `  "safeField": "public"}${lineEnding}`,
+      `$env:NEWLINE_BATCH_SECRET = "NEWLINE_BATCH_POWERSHELL_CANARY${lineEnding}`,
+      `  continuation"${lineEnding}`,
+      `safeAfter: visible${lineEnding}`,
+    ].join("");
+    const padding = Math.max(0, size - multiline.length);
+    const prefix = safeLine.repeat(Math.floor(padding / 2 / safeLine.length));
+    const suffix = safeLine.repeat(Math.ceil((padding - prefix.length) / safeLine.length));
+    return `${prefix}${multiline}${suffix}`;
+  };
+  const run = (input: string, chunkSize: number) => {
+    const session = redactor.start(100_000);
+    const fragments = [];
+    for (let offset = 0; offset < input.length; offset += chunkSize) {
+      fragments.push(session.push(input.slice(offset, offset + chunkSize)));
+    }
+    fragments.push(session.finish());
+    return fragments;
+  };
+
+  for (const lineEnding of ["\n", "\r\n"] as const) {
+    for (const size of [2_000, 4_000, 8_000, 12_000, 16_000]) {
+      const input = makeInput(size, lineEnding);
+      const results = [run(input, input.length), run(input, 1_024), run(input, 1)];
+      const expected = results[0]!.map((fragment) => fragment.text).join("");
+      assert.doesNotMatch(expected, sensitiveCanaries, `${JSON.stringify(lineEnding)}:${size}:final-canary`);
+      assert.match(expected, /safeSibling: visible/);
+      assert.match(expected, /safeAfter: visible/);
+      for (const fragments of results) {
+        for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+        assert.equal(fragments.map((fragment) => fragment.text).join(""), expected);
+      }
+    }
+  }
+});
+
+test("does not release again for a newline just after an exact LF or CRLF batch boundary", () => {
+  const redactor = new StreamRedactor({ policyId: "newline-batch-boundary", sensitiveLiterals: [] });
+  const cases = [
+    { name: "LF", beforeBoundary: "y".repeat(4_095), boundary: "\n", afterBoundary: "\n" },
+    { name: "CRLF", beforeBoundary: "y".repeat(4_094), boundary: "\r\n", afterBoundary: "\r\n" },
+  ] as const;
+
+  for (const scenario of cases) {
+    const session = redactor.start(100_000);
+    const fragments = [
+      session.push("x".repeat(4_097)),
+      session.push(scenario.beforeBoundary),
+      session.push(scenario.boundary),
+      session.push(scenario.afterBoundary),
+      session.finish(),
+    ];
+    assert.equal(fragments[1]!.text, "", `${scenario.name}:before-boundary-release`);
+    assert.notEqual(fragments[2]!.text, "", `${scenario.name}:exact-boundary-release`);
+    assert.equal(fragments[3]!.text, "", `${scenario.name}:post-boundary-newline-release`);
+  }
+});
+
+test("preserves SGR-only output across chunks and every transcript channel", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-safe-sgr"));
+  const fragments = [
+    writer.write("\u001b[32mhel"),
+    writer.write("lo\u001b[0m"),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  await store.close();
+  const disk = await allFileText(root);
+
+  assert.equal(liveText, "hello");
+  assert.equal(inspected, "hello");
+  assert.equal(disk.includes("\u001b"), false);
+  assert.match(disk, /hello/);
+});
+
+test("drops complete 7-bit and C1 string controls with equivalent textual semantics", () => {
+  const redactor = new StreamRedactor({ policyId: "string-control-equivalence", sensitiveLiterals: [] });
+  const controls = [
+    ["OSC-7bit", "\u001b]0;STRING_CONTROL_PAYLOAD\u0007"],
+    ["OSC-7bit-ESC-ST", "\u001b]0;STRING_CONTROL_PAYLOAD\u001b\\"],
+    ["OSC-7bit-C1-ST", "\u001b]0;STRING_CONTROL_PAYLOAD\u009c"],
+    ["OSC-C1", "\u009d0;STRING_CONTROL_PAYLOAD\u0007"],
+    ["OSC-C1-ESC-ST", "\u009d0;STRING_CONTROL_PAYLOAD\u001b\\"],
+    ["OSC-C1-C1-ST", "\u009d0;STRING_CONTROL_PAYLOAD\u009c"],
+    ["APC-7bit", "\u001b_STRING_CONTROL_PAYLOAD\u001b\\"],
+    ["APC-C1", "\u009fSTRING_CONTROL_PAYLOAD\u009c"],
+    ["DCS-7bit", "\u001bPSTRING_CONTROL_PAYLOAD\u001b\\"],
+    ["DCS-C1", "\u0090STRING_CONTROL_PAYLOAD\u009c"],
+    ["PM-7bit", "\u001b^STRING_CONTROL_PAYLOAD\u001b\\"],
+    ["PM-C1", "\u009eSTRING_CONTROL_PAYLOAD\u009c"],
+    ["SOS-7bit", "\u001bXSTRING_CONTROL_PAYLOAD\u001b\\"],
+    ["SOS-C1", "\u0098STRING_CONTROL_PAYLOAD\u009c"],
+  ] as const;
+
+  for (const [name, sequence] of controls) {
+    const result = redactor.redact(`safe${sequence}text`);
+    assert.equal(result.text, "safetext", name);
+    assert.doesNotMatch(result.text, /STRING_CONTROL_PAYLOAD/);
+  }
+});
+
+test("fails closed for incomplete string controls and stateful or unknown ESC sequences", () => {
+  const redactor = new StreamRedactor({ policyId: "string-control-fail-closed", sensitiveLiterals: [] });
+  const incomplete = [
+    "\u001b]0;incomplete-osc",
+    "\u009d0;incomplete-osc",
+    "\u001b_incomplete-apc",
+    "\u009fincomplete-apc",
+    "\u001bPincomplete-dcs",
+    "\u001b^incomplete-pm",
+    "\u001bXincomplete-sos",
+  ] as const;
+  for (const sequence of incomplete) {
+    assert.equal(redactor.redact(`safe${sequence}text`).text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  }
+
+  const statefulOrUnknown = ["\u001b7", "\u001b8", "\u001bD", "\u001bM", "\u001b?", "\u001b(" ] as const;
+  for (const sequence of statefulOrUnknown) {
+    assert.equal(redactor.redact(`safe${sequence}text`).text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  }
+});
+
+test("tracks incomplete string-control payloads incrementally across tiny chunks", () => {
+  const redactor = new StreamRedactor({ policyId: "string-control-incremental-performance", sensitiveLiterals: [] });
+  const cases = [
+    { name: "OSC", start: "\u001b]", end: "\u0007" },
+    { name: "DCS", start: "\u001bP", end: "\u001b\\" },
+  ] as const;
+
+  for (const scenario of cases) {
+    const timings: number[] = [];
+    for (const size of [4_000, 8_000, 12_000, 16_000]) {
+      const session = redactor.start(20_000);
+      const started = performance.now();
+      const fragments = [session.push(scenario.start)];
+      for (let index = 0; index < size; index += 1) fragments.push(session.push("x"));
+      timings.push(performance.now() - started);
+      assert.ok(fragments.every((fragment) => fragment.text === ""), `${scenario.name}:${size}:premature-release`);
+      assert.equal(session.finish().text, TRANSCRIPT_REDACTION_PLACEHOLDER, `${scenario.name}:${size}:incomplete`);
+    }
+
+    assert.ok(timings[3]! < timings[0]! * 8 + 100, `${scenario.name}:superlinear-growth`);
+  }
+});
+
+test("keeps long string-control payload security invariant independent of chunk size", () => {
+  const redactor = new StreamRedactor({ policyId: "string-control-chunk-size", sensitiveLiterals: [] });
+  const controls = [
+    ["OSC", "\u001b]", "\u0007"],
+    ["DCS", "\u001bP", "\u001b\\"],
+  ] as const;
+
+  for (const [name, start, end] of controls) {
+    const sequence = `${start}${"payload".repeat(2_000)}${end}`;
+    const oneChunk = redactor.start(20_000);
+    const oneChunkOutput = [oneChunk.push(`safe${sequence}tail`), oneChunk.finish()]
+      .map((fragment) => fragment.text)
+      .join("");
+
+    const manyChunks = redactor.start(20_000);
+    const fragments = [manyChunks.push("safe"), manyChunks.push(start)];
+    for (const character of `${"payload".repeat(2_000)}${end}tail`) fragments.push(manyChunks.push(character));
+    fragments.push(manyChunks.finish());
+    const manyChunksOutput = fragments.map((fragment) => fragment.text).join("");
+
+    assert.equal(oneChunkOutput, "safetail", `${name}:one-chunk`);
+    assert.equal(manyChunksOutput, oneChunkOutput, `${name}:chunk-equivalence`);
+    assert.doesNotMatch(manyChunksOutput, /payload/);
+  }
+});
+
+test("keeps CSI classification and redaction near-linear under repeated controls and long input", () => {
+  const redactor = new StreamRedactor({ policyId: "csi-classification-performance", sensitiveLiterals: [] });
+  const cases = [
+    { name: "many-sgr", input: "\u001b[32m".repeat(4_000) + "hello", expected: "hello" },
+    {
+      name: "many-mutating",
+      input: "A".repeat(16_384) + "\u001b[1D".repeat(4_000),
+      expected: TRANSCRIPT_REDACTION_PLACEHOLDER,
+    },
+    {
+      name: "many-unknown",
+      input: "A".repeat(16_384) + "\u001b[1q".repeat(4_000),
+      expected: TRANSCRIPT_REDACTION_PLACEHOLDER,
+    },
+    {
+      name: "hpa-dch-repeated",
+      input: "A".repeat(16_384) + "\u001b[5`\u001b[1P".repeat(2_000),
+      expected: TRANSCRIPT_REDACTION_PLACEHOLDER,
+    },
+    {
+      name: "rep-repeated",
+      input: "A".repeat(16_384) + "\u001b[1b".repeat(4_000),
+      expected: TRANSCRIPT_REDACTION_PLACEHOLDER,
+    },
+    {
+      name: "long-assignment",
+      input: `safeField=${"x".repeat(24_000)}`,
+      expected: `safeField=${"x".repeat(24_000)}`,
+    },
+  ];
+
+  for (const scenario of cases) {
+    const started = performance.now();
+    const result = redactor.redact(scenario.input);
+    const elapsedMs = performance.now() - started;
+    assert.equal(result.text, scenario.expected, `${scenario.name}:semantic`);
+    assert.ok(elapsedMs < 750, `${scenario.name}:too_slow:${elapsedMs.toFixed(1)}ms`);
+  }
+});
+
+test("consumes terminal string controls and fail-closes the existing line on cursor rewrites", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-terminal-string-controls"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)}\npass\u001b_${"i".repeat(5_000)}\u001b`),
+    writer.write(`\\word=APC_CONTROL_CANARY\nclient\u001bPignored\u001b\\Secret=DCS_CONTROL_CANARY\n`),
+    writer.write(`api\u001b^ignored\u001b\\Key=PM_CONTROL_CANARY\naccess\u009fignored\u009cToken=C1_APC_CONTROL_CANARY\n`),
+    writer.write(`passxord=CURSOR_REWRITE_CANARY\u001b[5Gw\nsafeField=visible`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /(?:APC|DCS|PM|C1_APC)_CONTROL_CANARY|CURSOR_REWRITE_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.match(liveText, /visible-prefix-/);
+  assert.match(liveText, /safeField=visible/);
+  assert.equal(liveText.includes("ignored"), false);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /safeField=visible/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /safeField=visible/);
+});
+
+test("bounds repeated cursor-control normalization while fail-closing the affected line", () => {
+  const redactor = new StreamRedactor({ policyId: "cursor-control-complexity", sensitiveLiterals: [] });
+  const upperPrefix = "A".repeat(30_720);
+  const cursorSuffix = "\u001b[1D".repeat(7_680);
+  const cases = [
+    { name: "upper-prefix", input: upperPrefix, expected: upperPrefix },
+    { name: "upper-prefix-cursor", input: upperPrefix + cursorSuffix, expected: TRANSCRIPT_REDACTION_PLACEHOLDER },
+    {
+      name: "upper-prefix-rep",
+      input: upperPrefix + "\u001b[1b".repeat(7_680),
+      expected: TRANSCRIPT_REDACTION_PLACEHOLDER,
+    },
+  ];
+
+  redactor.redact("safe\u001b[1D".repeat(64));
+  for (const scenario of cases) {
+    const started = performance.now();
+    const result = redactor.redact(scenario.input);
+    const elapsedMs = performance.now() - started;
+
+    assert.equal(scenario.input.includes("\r") || scenario.input.includes("\n"), false);
+    assert.equal(result.text, scenario.expected, `${scenario.name}:semantic`);
+    assert.ok(elapsedMs < 750, `${scenario.name}:too_slow:${elapsedMs.toFixed(1)}ms`);
+  }
+});
+
+test("handles a long uppercase assignment key ending in lowercase without changing semantics", () => {
+  const redactor = new StreamRedactor({ policyId: "assignment-key-complexity", sensitiveLiterals: [] });
+  const input = `${"A".repeat(16_384)}a=public-long-uppercase-key`;
+
+  assert.equal(redactor.redact(input).text, input);
+});
+
+test("redacts sensitive components in quoted dotted keys across chunks without matching substrings", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-quoted-dotted-assignments"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} {"request.headers.author`),
+    writer.write(`ization":"Basic DOTTED_AUTH_CANARY","oauth.clientSe`),
+    writer.write(`cret":"DOTTED_SECRET_CANARY","request.headers.contentType":"public/type",`),
+    writer.write(`"meta.clientSecretary":"public-secretary","metrics.accessTokenizer":"public-tokenizer"}`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /DOTTED_(?:AUTH|SECRET)_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.ok(fragments.slice(0, -1).some((fragment) => fragment.text.length > 0));
+  assert.match(liveText, /"request\.headers\.contentType":"public\/type"/);
+  assert.match(liveText, /"meta\.clientSecretary":"public-secretary"/);
+  assert.match(liveText, /"metrics\.accessTokenizer":"public-tokenizer"/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 2);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /public\/type|public-secretary|public-tokenizer/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /public\/type/);
+  assert.match(disk, /public-secretary/);
+  assert.match(disk, /public-tokenizer/);
+});
+
+test("keeps multiline assignment values pending across structural whitespace and chunks", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-multiline-assignments"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} {"password":\r`),
+    writer.write(`\n  "MULTILINE_JSON_CANARY",\n  "oauth.apiKey":`),
+    writer.write(`\n  "MULTILINE_DOTTED_CANARY"}\nserviceCredential:`),
+    writer.write(`\n  MULTILINE_YAML_CANARY\nsafeField:\n  public-value`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /MULTILINE_(?:JSON|DOTTED|YAML)_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.match(liveText, /safeField:\n  public-value/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 3);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /safeField:\n  public-value/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /safeField:\\n  public-value/);
+});
+
+test("redacts JSON assignments with CRLF and LF whitespace before the colon across chunks", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-json-whitespace-before-colon"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} {"password"`),
+    writer.write("\n"),
+    writer.write(":\n"),
+    writer.write(`"JSON_NL_CANARY","clientSecret"\r\n`),
+    writer.write(` : \r\n"JSON_CRLF_CANARY","oauth.apiKey"\n:\n`),
+    writer.write(`"JSON_DOTTED_CANARY","safeField"\n:\n"public"}`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /JSON_(?:NL|CRLF|DOTTED)_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.match(liveText, /"safeField"\n:\n"public"/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 3);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /\\"safeField\\"/);
+});
+
+test("redacts multiline quoted and whitespace-containing YAML scalars without consuming safe fields", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-yaml-quoted-and-plain-scalars"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)}\npassword: "first`),
+    writer.write(`\n  YAML_MULTILINE_QUOTED_CANARY"\nclientSecret: 'alpha''YAML_DOUBLED_QUOTE_CANARY omega'\n`),
+    writer.write(`apiKey: correct horse YAML_PLAIN_SPACES_CANARY staple # synthetic comment\n`),
+    writer.write(`safeField: correct horse battery staple\nsafeQuoted: "first\n  public continuation"`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /YAML_(?:MULTILINE_QUOTED|DOUBLED_QUOTE|PLAIN_SPACES)_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.match(liveText, /# synthetic comment/);
+  assert.match(liveText, /safeField: correct horse battery staple/);
+  assert.match(liveText, /safeQuoted: "first\n  public continuation"/);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /safeField: correct horse battery staple/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /safeField: correct horse battery staple/);
+});
+
+test("redacts complete quoted space-delimited sensitive keys without matching similar phrases", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-space-delimited-keys"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} {"API `),
+    writer.write(`Key":"SPACE_API_KEY_CANARY","Client Se`),
+    writer.write(`cret":"SPACE_CLIENT_SECRET_CANARY","API Keyboard":"public-keyboard",`),
+    writer.write(`"Client Secretariat":"public-secretariat","Access Tokenizer":"public-tokenizer"}`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /SPACE_(?:API_KEY|CLIENT_SECRET)_CANARY/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.match(liveText, /"API Keyboard":"public-keyboard"/);
+  assert.match(liveText, /"Client Secretariat":"public-secretariat"/);
+  assert.match(liveText, /"Access Tokenizer":"public-tokenizer"/);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /public-keyboard|public-secretariat|public-tokenizer/);
+});
+
+test("keeps YAML block scalar contents inside the sensitive assignment across chunks", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-yaml-block-scalars"));
+  const fragments = [
+    writer.write(`visible-prefix-${"x".repeat(5_000)} password: |`),
+    writer.write(`- # synthetic fixture\n  BLOCK_LITERAL_CANARY_LINE_ONE\n`),
+    writer.write(`  BLOCK_LITERAL_CANARY_LINE_TWO\nsafeField: public-value\nclientSecret: >`),
+    writer.write(`\n  BLOCK_FOLDED_CANARY_LINE_ONE\n  BLOCK_FOLDED_CANARY_LINE_TWO\nsafeAfter: public-after`),
+    writer.write(`\nitems:\n  - password: |\n      BLOCK_SEQUENCE_CANARY\n    safeSequence: visible-sequence\nsafeAfterSequence: visible-root`),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+
+  const sensitiveCanaries = /BLOCK_(?:(?:LITERAL|FOLDED)_CANARY_LINE_(?:ONE|TWO)|SEQUENCE_CANARY)/;
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  for (const fragment of fragments) assert.doesNotMatch(fragment.text, sensitiveCanaries);
+  assert.doesNotMatch(liveText, sensitiveCanaries);
+  assert.match(liveText, /safeField: public-value/);
+  assert.match(liveText, /safeAfter: public-after/);
+  assert.match(liveText, /safeSequence: visible-sequence/);
+  assert.match(liveText, /safeAfterSequence: visible-root/);
+  assert.ok((liveText.match(/\[REDACTED\]/gu) ?? []).length >= 2);
+
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  assert.equal(inspected, liveText);
+  assert.doesNotMatch(inspected, sensitiveCanaries);
+  assert.match(inspected, /safeField: public-value|safeAfter: public-after|safeSequence: visible-sequence/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, sensitiveCanaries);
+  assert.match(disk, /safeField: public-value/);
+  assert.match(disk, /safeAfter: public-after/);
+  assert.match(disk, /safeSequence: visible-sequence/);
+  assert.match(disk, /safeAfterSequence: visible-root/);
+});
+
+test("persists and returns only redacted output while dropping terminal input by default", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root));
+  const writer = store.beginRecord(request("record-output"));
+  const mirrored = [
+    writer.write(`before ${syntheticSecret.slice(0, 10)}`),
+    writer.write(
+      `${syntheticSecret.slice(10)} after {"password":"json-persist-canary"} Authorization: Basic cGVyc2lzdC1jYW5hcnk=`,
+    ),
+  ];
+  const committed = await writer.commit();
+  mirrored.push(committed.finalFragment);
+  const mirrorText = mirrored.map((fragment) => fragment.text).join("");
+  assert.doesNotMatch(mirrorText, new RegExp(syntheticSecret));
+  assert.doesNotMatch(mirrorText, /json-persist-canary|cGVyc2lzdC1jYW5hcnk=/);
+  assert.match(mirrorText, /\[REDACTED\]/);
+
+  const inputWriter = store.beginRecord(request("record-input", "input"));
+  const inputMirror = inputWriter.write(`typed-${syntheticSecret}`);
+  assert.equal(inputMirror.text, SENSITIVE_INPUT_PLACEHOLDER);
+  await inputWriter.commit();
+
+  const view = store.inspect("operator");
+  assert.equal(view.records.length, 2);
+  assert.equal(view.records[0]?.content.includes(syntheticSecret), false);
+  assert.equal(view.records[1]?.content, SENSITIVE_INPUT_PLACEHOLDER);
+  assert.equal(Object.isFrozen(view), true);
+  assert.equal(Object.isFrozen(view.records), true);
+  assert.throws(() => store.inspect("intruder"), /transcript_read_not_authorized/);
+  await store.close();
+
+  const disk = await allFileText(root);
+  assert.doesNotMatch(disk, new RegExp(syntheticSecret));
+  assert.doesNotMatch(disk, /typed-MORROW_SYNTHETIC/);
+  assert.doesNotMatch(disk, /json-persist-canary|cGVyc2lzdC1jYW5hcnk=/);
+});
+
+test("enforces writer access, strict data-only requests and record limits before persistence", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(configuration(root, () => baseTime, {
+    retention: { maxAgeMs: 60_000, maxRecords: 4, maxTotalBytes: 64, maxRecordBytes: 32 },
+  }));
+  assert.throws(
+    () => store.beginRecord(request("unauthorized", "stdout", "intruder")),
+    /transcript_write_not_authorized/,
+  );
+  await assert.rejects(
+    store.commit({}, request("direct-input", "input"), syntheticSecret, 0, false),
+    /transcript_commit_not_authorized/,
+  );
+  assert.equal(Object.hasOwn(store, "state"), false);
+  assert.equal(Object.hasOwn(store, "redactor"), false);
+  const legitimateWriter = store.beginRecord(request("legitimate-writer"));
+  const WriterConstructor = legitimateWriter.constructor as new (...args: unknown[]) => unknown;
+  assert.throws(
+    () => new WriterConstructor({}, store, request("forged-writer", "stdout", "intruder"), {}),
+    /transcript_writer_not_authorized/,
+  );
+  legitimateWriter.abort();
+
+  let getterCalls = 0;
+  const hostile = { ...request("hostile") } as Record<string, unknown>;
+  Object.defineProperty(hostile, "recordId", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return "hostile";
+    },
+  });
+  assert.throws(() => store.beginRecord(hostile), /transcript_record_request_invalid/);
+  assert.equal(getterCalls, 0);
+
+  const oversized = store.beginRecord(request("oversized"));
+  assert.throws(() => oversized.write("x".repeat(33)), /transcript_record_too_large/);
+  assert.throws(() => oversized.write("later"), /transcript_writer_finished/);
+  assert.equal(store.inspect("auditor").records.length, 0);
+  await store.close();
+  assert.doesNotMatch(await allFileText(root), /xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/);
+});
+
+test("applies count, byte and age retention deterministically and reports evictions", async (t) => {
+  const root = await makeRoot(t);
+  let current = baseTime;
+  const store = await PersistentTranscriptStore.open(configuration(root, () => current, {
+    retention: { maxAgeMs: 1_000, maxRecords: 2, maxTotalBytes: 12, maxRecordBytes: 12 },
+  }));
+  await append(store, "record-1", "aaaaaa");
+  current += 100;
+  await append(store, "record-2", "bbbbbb");
+  current += 100;
+  const third = await append(store, "record-3", "cccccc");
+  assert.deepEqual(third.evictedRecordIds, ["record-1"]);
+  assert.deepEqual(store.inspect("operator").records.map((record) => record.recordId), ["record-2", "record-3"]);
+
+  current += 1_001;
+  assert.deepEqual(await store.sweepRetention("kernel"), ["record-2", "record-3"]);
+  assert.equal(store.inspect("operator").records.length, 0);
+  await store.close();
+});
+
+test("rehydrates sanitized records but refuses policy drift and corrupted snapshots", async (t) => {
+  const root = await makeRoot(t);
+  const first = await PersistentTranscriptStore.open(configuration(root));
+  await append(first, "record-restart", `safe ${syntheticSecret}`);
+  await first.close();
+
+  const reopened = await PersistentTranscriptStore.open(configuration(root));
+  assert.equal(reopened.inspect("operator").records[0]?.content, `safe ${TRANSCRIPT_REDACTION_PLACEHOLDER}`);
+  await reopened.close();
+
+  await assert.rejects(
+    PersistentTranscriptStore.open(configuration(root, () => baseTime, {
+      redaction: { policyId: "different-policy", sensitiveLiterals: [syntheticSecret] },
+    })),
+    /transcript_snapshot_invalid/,
+  );
+
+  const snapshot = join(root, "transcript-v1.json");
+  const parsed = JSON.parse(await readFile(snapshot, "utf8"));
+  parsed.records[0].content = syntheticSecret;
+  const { checksum: _checksum, ...tamperedState } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(tamperedState)).digest("hex");
+  await writeFile(snapshot, JSON.stringify(parsed), "utf8");
+  await assert.rejects(PersistentTranscriptStore.open(configuration(root)), /transcript_snapshot_invalid/);
+});
+
+test("refuses checksummed snapshots that violate record size or time ordering", async (t) => {
+  const root = await makeRoot(t);
+  let current = baseTime;
+  const strictConfiguration = configuration(root, () => current, {
+    retention: { maxAgeMs: 60_000, maxRecords: 4, maxTotalBytes: 128, maxRecordBytes: 32 },
+  });
+  const store = await PersistentTranscriptStore.open(strictConfiguration);
+  await append(store, "record-before-oversized-restart", "safe");
+  current += 100;
+  await append(store, "record-after-oversized-restart", "also-safe");
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const original = await readFile(snapshot, "utf8");
+  const parsed = JSON.parse(original);
+  parsed.records[0].content = "x".repeat(33);
+  const { checksum: _checksum, ...tamperedState } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(tamperedState)).digest("hex");
+  await writeFile(snapshot, JSON.stringify(parsed), "utf8");
+
+  await assert.rejects(
+    PersistentTranscriptStore.open(strictConfiguration),
+    /transcript_snapshot_invalid/,
+  );
+
+  const unauthorizedWriter = JSON.parse(original);
+  unauthorizedWriter.records[0].writerId = "intruder";
+  const { checksum: _writerChecksum, ...writerState } = unauthorizedWriter;
+  unauthorizedWriter.checksum = createHash("sha256").update(JSON.stringify(writerState)).digest("hex");
+  await writeFile(snapshot, JSON.stringify(unauthorizedWriter), "utf8");
+  await assert.rejects(
+    PersistentTranscriptStore.open(strictConfiguration),
+    /transcript_snapshot_invalid/,
+  );
+
+  const futureDated = JSON.parse(original);
+  futureDated.records[0].occurredAt = new Date(baseTime + 200).toISOString();
+  const { checksum: _futureChecksum, ...futureState } = futureDated;
+  futureDated.checksum = createHash("sha256").update(JSON.stringify(futureState)).digest("hex");
+  await writeFile(snapshot, JSON.stringify(futureDated), "utf8");
+  await assert.rejects(
+    PersistentTranscriptStore.open(strictConfiguration),
+    /transcript_snapshot_invalid/,
+  );
+
+  const outOfOrder = JSON.parse(original);
+  outOfOrder.records[1].occurredAt = new Date(baseTime - 100).toISOString();
+  const { checksum: _orderChecksum, ...orderedState } = outOfOrder;
+  outOfOrder.checksum = createHash("sha256").update(JSON.stringify(orderedState)).digest("hex");
+  await writeFile(snapshot, JSON.stringify(outOfOrder), "utf8");
+  await assert.rejects(
+    PersistentTranscriptStore.open(strictConfiguration),
+    /transcript_snapshot_invalid/,
+  );
+});
+
+test("allows only one active owner of a transcript root and releases it on orderly close", async (t) => {
+  const root = await makeRoot(t);
+  const first = await PersistentTranscriptStore.open(configuration(root));
+  await assert.rejects(PersistentTranscriptStore.open(configuration(root)), /transcript_store_already_active/);
+  const writer = first.beginRecord(request("record-before-close"));
+  writer.write("safe-before-close");
+  const committing = writer.commit();
+  const closing = first.close();
+  const closingAgain = first.close();
+  assert.equal((await committing).record.content, "safe-before-close");
+  await Promise.all([closing, closingAgain]);
+  assert.throws(() => first.beginRecord(request("record-after-close")), /transcript_store_closed/);
+  const staleTemp = "transcript-v1.json.123.00000000-0000-4000-8000-000000000000.tmp";
+  const unrelated = "transcript-v1.json.keep.tmp";
+  await writeFile(join(root, staleTemp), "sanitized-stale-temp", "utf8");
+  const replacement = await PersistentTranscriptStore.open(configuration(root));
+  assert.equal(replacement.inspect("operator").records[0]?.recordId, "record-before-close");
+  await replacement.close();
+  assert.deepEqual((await readdir(root)).sort(), [".morrow-transcript-root.json", "transcript-v1.json"]);
+
+  await writeFile(join(root, unrelated), "operator-owned-name", "utf8");
+  await assert.rejects(
+    PersistentTranscriptStore.open(configuration(root)),
+    /transcript_state_root_contains_foreign_entry/,
+  );
+  assert.equal(await readFile(join(root, unrelated), "utf8"), "operator-owned-name");
+});
+
+test("serializes concurrent stale lease recovery so only one store can acquire the root", async (t) => {
+  const root = await makeRoot(t);
+  const initialized = await PersistentTranscriptStore.open(configuration(root));
+  await initialized.close();
+  await writeFile(
+    join(root, ".transcript-v1.lock"),
+    JSON.stringify({ pid: 2_147_483_647, token: "synthetic-stale-owner" }),
+    "utf8",
+  );
+
+  const recoveryIdentity = createHash("sha256").update(await realpath(root)).digest("hex");
+  const recoveryEndpoint = `\\\\.\\pipe\\morrow-transcript-recovery-${recoveryIdentity}`;
+  const holder = spawn(process.execPath, [
+    "-e",
+    "const net=require('node:net');const server=net.createServer();server.listen(process.argv[1],()=>process.stdout.write('READY\\n'));setInterval(()=>{},1000);",
+    recoveryEndpoint,
+  ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  t.after(() => {
+    if (holder.exitCode === null) holder.kill();
+  });
+  await new Promise<void>((accept, reject) => {
+    let output = "";
+    holder.stdout.setEncoding("utf8");
+    holder.stdout.on("data", (chunk: string) => {
+      output += chunk;
+      if (output.includes("READY\n")) accept();
+    });
+    holder.once("error", reject);
+    holder.once("exit", (code) => {
+      if (!output.includes("READY\n")) reject(new Error(`recovery_holder_exited:${code}`));
+    });
+  });
+  await assert.rejects(
+    PersistentTranscriptStore.open(configuration(root)),
+    /transcript_lease_recovery_active/,
+  );
+  const holderExit = once(holder, "exit");
+  holder.kill();
+  await holderExit;
+
+  const results = await Promise.allSettled([
+    PersistentTranscriptStore.open(configuration(root)),
+    PersistentTranscriptStore.open(configuration(root)),
+  ]);
+  const acquired = results.filter(
+    (result): result is PromiseFulfilledResult<PersistentTranscriptStore> => result.status === "fulfilled",
+  );
+  const refused = results.filter((result) => result.status === "rejected");
+  assert.equal(acquired.length, 1);
+  assert.equal(refused.length, 1);
+  await acquired[0]!.value.close();
+  assert.deepEqual(await readdir(root), [".morrow-transcript-root.json"]);
+});
+
+test("fails closed on hostile policy collections without invoking accessors", () => {
+  for (const conflictingLiteral of ["REDACT", "SENSITIVE_INPUT", "prefix-[REDACTED]-suffix"]) {
+    assert.throws(
+      () => new StreamRedactor({
+        policyId: "placeholder-conflict-policy",
+        sensitiveLiterals: [conflictingLiteral],
+      }),
+      /redaction_literal_invalid/,
+    );
+  }
+
+  let getterCalls = 0;
+  const literals: string[] = [];
+  Object.defineProperty(literals, "0", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return syntheticSecret;
+    },
+  });
+  assert.throws(
+    () => new StreamRedactor({ policyId: "hostile-policy", sensitiveLiterals: literals }),
+    /data_array_element_invalid/,
+  );
+  assert.equal(getterCalls, 0);
+
+  const proxy = new Proxy({}, {
+    getPrototypeOf() {
+      throw new Error(syntheticSecret);
+    },
+  });
+  assert.throws(
+    () => new StreamRedactor(proxy as never),
+    /redaction_policy_inspection_failed/,
+  );
+
+  const redactor = new StreamRedactor({
+    policyId: "encapsulation-policy",
+    sensitiveLiterals: [syntheticSecret],
+  });
+  const session = redactor.start(16_384);
+  session.push(syntheticSecret.slice(0, 8));
+  assert.deepEqual(Object.getOwnPropertyNames(redactor), ["policyId"]);
+  assert.deepEqual(Object.getOwnPropertyNames(session), []);
+  session.abort();
+});
+
+test("refuses a symbolic snapshot and a junction ancestor without reading outside its canonical root", async (t) => {
+  const container = await makeRoot(t);
+  const root = join(container, "owned-state");
+  const initialized = await PersistentTranscriptStore.open(configuration(root));
+  await append(initialized, "record-before-symlink", "safe");
+  await initialized.close();
+  const controlledTarget = join(container, "controlled-target.json");
+  await writeFile(controlledTarget, "controlled-outside-snapshot", "utf8");
+  const snapshotLink = join(root, "transcript-v1.json");
+  await rm(snapshotLink);
+  try {
+    await symlink(controlledTarget, snapshotLink, "file");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EPERM") {
+      t.skip("symbolic links unavailable in this Windows environment");
+      return;
+    }
+    throw error;
+  }
+  await assert.rejects(
+    PersistentTranscriptStore.open(configuration(root)),
+    /transcript_snapshot_too_large_or_invalid/,
+  );
+  await rm(snapshotLink);
+
+  const actualParent = join(container, "actual-parent");
+  const junctionParent = join(container, "junction-parent");
+  await mkdir(actualParent);
+  await symlink(actualParent, junctionParent, "junction");
+  await assert.rejects(
+    PersistentTranscriptStore.open(configuration(join(junctionParent, "state"))),
+    /transcript_state_root_unsafe/,
+  );
+  assert.deepEqual(await readdir(actualParent), []);
+});

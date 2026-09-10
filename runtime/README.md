@@ -63,6 +63,8 @@ O multiplexer P3-PR04, a reserva concorrente de identidades/workspaces, o teto C
 
 O schema canônico e o projector mecânico do Live Activity Feed P4-PR01 estão em [`LIVE_ACTIVITY_FEED.md`](LIVE_ACTIVITY_FEED.md).
 
+O Stream Redactor fail-closed, a política explícita de acesso/retenção e o transcript atômico P4-PR02 estão em [`STREAM_REDACTION_TRANSCRIPT.md`](STREAM_REDACTION_TRANSCRIPT.md).
+
 Os registries versionados de Target/Role/Skill/Capability e a fronteira opaca do Secret Broker estão em [`GOVERNANCE_REGISTRIES.md`](GOVERNANCE_REGISTRIES.md).
 
 A resolução auditável de routing/access/model e as reservas determinísticas de cota e budget estão em [`ROUTING_GUARDS.md`](ROUTING_GUARDS.md).

@@ -27,6 +27,86 @@
 | `P3-PR03` | `1d40eb7` | kickoff `94ac853`; código/teste candidate `31d2104`; hardenings `e4243ba`, `4b197b0`, `1864852`; head remoto corrigido `adc87b8`; fechamento `ffe0cc4` | [`PR #13`](https://github.com/brunovasque/Morrow/pull/13), merge commit `5624e2a` em `phase-2/runtime-v0`; comentários P1 `3890154247` e P2 `3890154252` respondidos | adapter quota-session exige descriptor ConPTY completo; preflight confirma linha auth exata; `--` impede prompt-option injection; encoder compartilhado recusa spec longo antes de auth; execução read-only preserva stream/cwd/identidades; metadata efetiva CLI `0.147.0`/`gpt-5.6-sol`/`openai`; argumento sensível redigido; probes Codex/ConPTY e quota verdes; focados com backend `28/28`; ConPTY `5/5`; suíte `156/156`; diff check e reconciliador verdes; pós-merge `npm ci`, ambos probes quota, ConPTY `5/5` e suíte `156/156` | doze achados locais/remotos, incluindo TOCTOU, auth negativo, prompt-option injection e limite do launcher, foram corrigidos, contraprovados e integrados; Architect/Test Designer/Security Reviewer/Reviewer: `GREEN`; sem leitura de credencial, Enova ou target externo | `PROVEN` | 2026-08-30 |
 | `P3-PR04` | `5624e2a` | kickoff `325b08c`; candidates invalidados `ff744d2`/`62b06ff`; reentrância fatal `c62459f`; evidência vermelha `16a1756`; isolamento `c9ade54f`; docs runtime `1b50613`; IPC fail-closed `8698dd8`; head final `81dfa89` | [`PR #14`](https://github.com/brunovasque/Morrow/pull/14), merge commit `d4ccc73a91fa5267a23913c2ce4eb8906f128a44` em `phase-2/runtime-v0` | assertion `remove_pty_baton` diagnosticada no vetor global sem sincronização de `node-pty`; uma sessão/addon por host, factory nativo isolado, PID/IPC exatos e erro fatal irreversível; saídas simultâneas, crash e protocolo inválido contraprovados; candidate: ConPTY 11/11, suíte 164/164, soak 3 rodadas/12 sessões/12 hosts/51 eventos/noOrphans/fixture removida; pós-merge em `d4ccc73`: `npm ci`, ConPTY 11/11, suíte 164/164 e zero hosts/probes/filhos órfãos; 3 fixtures vermelhas originais preservadas | docs stale e janela pós-IPC inválido foram corrigidos/revalidados; remoto exato, corpo da PR e delta contratual final revisados `GREEN`; merge e regressão pós-merge confirmados sem tocar operador/target externo; Architect/Test Designer/Security Reviewer/Reviewer: `GREEN` | `PROVEN` | 2026-08-31 |
 | `P4-PR01` | `461bb40` | kickoff `aafb4af`; candidate `6bbe7cd`; hardening remoto `375da19`; head final `a8bcc6b` | [`PR #16`](https://github.com/brunovasque/Morrow/pull/16), `mvo/p4-pr01-live-activity-events`, merge commit `312bd90016931f7be76810a89e79d32043253dde` em `phase-2/runtime-v0` | schema JSON `morrow.live-activity/1.0`; decoder plain/exato; dez estados AC-21; sequência/tempo/event id; identidade/correlação/causalidade imutáveis; fonte vinculada ao estado; terminal sem continuação; cópia frozen; input vazio não fabrica feed; listas required alinhadas e coleção só aceita own data elements; candidate focados 8/8, suíte 172/172 e diff/reconciliador verdes; pós-merge em `312bd90`: `npm ci`, focados 8/8 e suíte 172/172 | source spoof, Proxy hostil, salto causal, drift de required e accessor de array corrigidos; diff/schema/código/docs/corpo remoto exato revalidados `GREEN`; merge e regressão pós-merge confirmados sem target externo, segredo, rede ou processo adicional | `PROVEN` | 2026-08-31 |
+| `P4-PR02` | `3657a07` | kickoff `45f32a8`; candidates/hardenings `5f9e523`/`69fce74`/`4773a5e`; heads revistos `e525eb8`/`dbcd790`/`80bd394`/`8d5f49f`/`7cde49e`/`0197429`/`65786cb`/`2934ed3`/`1d93161`; redaction fixes `2c781b6`/`3824d1a`/`004b0d9`/`778f6a5`/`35079ab`/`1b7a223`/`8819be7`/`c8465c2`/`024c5a9`/`79382d4`; trust fixes `07e1c25`; predecessors `a44daee`, `15e3ac7`, `ba350658`, `dc0bbaf`, `95e808` e `189c1ce` superseded/invalidated; current code candidate `76a41db64343131dfc20b699bedfae491859f88b` | [`PR #18`](https://github.com/brunovasque/Morrow/pull/18), `mvo/p4-pr02-stream-redaction-transcript` | A-001 completo do candidate `76a41db` passou como `GREEN_LOCAL_A-001`: focused `42/42`, `npm test` `214/214`, `git diff --check` GREEN, D-013 ausente, sem findings P1/P2/P3/informational e sem canário em live/inspect/disco/reopen. O candidate permanece não integrado e P4-PR02 não é `PROVEN`. Resolução específica: `b6ed5ebc6411dad07ef9193554db13e88790ccee` é o anchor pré-fechamento; o HEAD publicável é a ponta local validada por ancestry, delta somente documental autorizado, ausência de código, worktree/diff e divergência remota, capturada/registrada mecanicamente pelo Integrator imediatamente antes do push e comprovada no remoto; PR #18 permanece o veículo; merge commit sem squash/rebase; Auditor pré-merge emite `MERGE_READY`/`BLOCKED`, Integrator só então integra, e Auditor final emite `P4_PR02_PROVEN_READY`/`BLOCKED` após regressão no HEAD real e reconciliador; Scribe só então marca `PROVEN`. Acceptance não é gate desta PR; P4-PR03 proibida | `RUNNING` | 2026-09-10 |
+
+## A-001 — decisão do dono e reconciliação histórica anterior à revisão local
+
+- decisão autenticada do dono: substituir somente o gate externo indisponível de Security Review da P4-PR02 por revisão local independente de segurança;
+- limite da decisão: nenhuma equivalência com o serviço externo, nenhuma extensão para outra PR e nenhuma autorização de merge;
+- reconciliação em 2026-09-02 após `git fetch origin --prune`: branch local `mvo/p4-pr02-stream-redaction-transcript`; PR #18 `OPEN`, não draft, `MERGEABLE/CLEAN`; base remota `3657a070e5dc6b1e7b78fa1804761440c55efffc`; head remoto/documental pré-adendo `7fe28a32b597010cf4a869180ab640cfa2e2fb8e`; `HEAD` local e upstream idênticos; worktree limpa;
+- primeiro objeto revisado: delta de transcript/redaction `3657a070e5dc6b1e7b78fa1804761440c55efffc..79382d421a9a6e9df2956007fb701d32d00c5952`, bloqueado pelo P2 algorítmico;
+- objeto de re-review anterior, agora superseded/invalidated: base fixa `3657a070e5dc6b1e7b78fa1804761440c55efffc` e candidate de código `a44daee73ac6bb9b91523a947a6e0154397efcee`;
+- reancoragem factual histórica em 2026-09-09: o candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`; `15e3ac7` era o candidate de código então vigente;
+- provas locais atuais do candidate `15e3ac733fc295d4cff3762de957f348a6e02c01`: focal `24/24` e regressão completa `196/196`; a contraprova causal do prefixo de 30.720 maiúsculas mediu `1354,1 ms` RED contra teto de `750 ms` e aproximadamente `24,8 ms` GREEN;
+- o Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX` para o microfix; esse parecer cobre somente o microfix e não equivale ao A-001 completo;
+- o review que então estava pendente deveria fixar exatamente a base `3657a070e5dc6b1e7b78fa1804761440c55efffc` e o candidate `15e3ac733fc295d4cff3762de957f348a6e02c01`, em sessão independente somente-leitura;
+- prova ainda ausente: relatório por revisor/sessão distintos do Executor, em checkout somente-leitura, com cobertura, ferramenta, testes, achados, limites e veredito;
+- regra de bloqueio: qualquer P1/P2 impede integração e devolve a unidade ao ciclo; ausência de P1/P2 satisfaz apenas o gate local substituto, permanecendo merge e regressão pós-merge.
+
+## A-001 — segundo ciclo bloqueado e novo candidate
+
+- objeto revisado: base fixa `3657a070e5dc6b1e7b78fa1804761440c55efffc` contra candidate `15e3ac733fc295d4cff3762de957f348a6e02c01`;
+- Security Reviewer independente em nova sessão: GPT-5.6 Luna, effort `xhigh`, `quota-session`;
+- resultado: `BLOCKED` por P2 de bypass de redaction via VT CSI `b` / REP; o canário `pas<ESC>[1bword=VT_REPEAT_CANARY` foi reconstruído semanticamente como `pasword=VT_REPEAT_CANARY`, com `redactionCount: 0`, atravessando live, `inspect()` e `transcript-v1.json`;
+- o Executor reproduziu o RED antes da correção e tratou CSI REP como rewrite visual/cursor-changing fail-closed;
+- novo candidate criado pelo Executor: `ba350658a39f270cbc9ec559c193997a1a0db047`, parent `2258d6653b2028c94df144fd44ecae148f7e0a1e`;
+- provas reportadas do novo candidate: focused `25/25` GREEN, `npm test` `197/197` GREEN e `git diff --check` GREEN;
+- o candidate `15e3ac733fc295d4cff3762de957f348a6e02c01` está `SUPERSEDED`/`INVALIDATED`; o novo candidate ainda não possui A-001 válido;
+- P4-PR02 permanece `RUNNING` / `BLOCKED ON A-001`; merge continua proibido, P4-PR03 continua não autorizada e o próximo ator é Security Reviewer independente em nova sessão, revisando `3657a070e5dc6b1e7b78fa1804761440c55efffc..ba350658a39f270cbc9ec559c193997a1a0db047`.
+
+## A-001 — terceiro ciclo bloqueado e candidate real atual
+
+- objeto a ser revisado: base fixa `3657a070e5dc6b1e7b78fa1804761440c55efffc` contra candidate `dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`;
+- reconciliação Git: candidate real `dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`, parent `c8bb6afda8640bc11b9b82d36d931374fd725153`, mensagem `fix(p4-pr02): fail closed on untrusted terminal controls`, somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`, `2 files changed`, `192 insertions`, `10 deletions`, worktree limpa e branch `mvo/p4-pr02-stream-redaction-transcript` ahead 5;
+- finding anterior: A-001 de `ba350658a39f270cbc9ec559c193997a1a0db047` ficou `BLOCKED` por P2 de bypass HPA + DCH; o canário atravessou live, `inspect()` e `transcript-v1.json`. O problema foi diagnosticado como classificação CSI estruturalmente insegura, não apenas ausência de HPA/DCH;
+- remediação do candidate real: allowlist estrutural que descarta somente SGR numérico comprovadamente seguro e fail-closes CSI mutável, desconhecido ou não comprovado; string controls completos OSC/APC/DCS/PM/SOS foram separados do classificador CSI e consumidos/descartados com semântica equivalente 7-bit/C1; controles incompletos permanecem fail-closed. O efeito colateral 7-bit/C1 do primeiro diff foi detectado antes do commit e corrigido antes do congelamento;
+- controle independente final: focused `31/31` GREEN; `npm run probe:conpty-soak` GREEN, 3 rodadas/12 sessões, `completed: 6`, `timedOut: 3`, `stopped: 3`, `collisionRefusals: 12`, 12 PIDs distintos em root/descendant/native-host, `identityBoundEvents: 50`, `inputIsolation: true`, `noOrphans: true`, `fixtureRemoved: true`; `npm test` `203/203` GREEN; `git diff --check` GREEN;
+- `ba350658a39f270cbc9ec559c193997a1a0db047` está `SUPERSEDED`/`INVALIDATED`; D-013 permanece `OPEN_DEBT`, sem correção ou ocultação e sem alteração de ConPTY/P3; o candidate real ainda não possui A-001 válido; P4-PR02 permanece `RUNNING` / `BLOCKED ON A-001`, merge continua proibido e P4-PR03 não é autorizada;
+- próximo ator: Security Reviewer independente, GPT-5.6 Luna, effort `xhigh`, `quota-session`, nova sessão read-only, para revisar exatamente `3657a070e5dc6b1e7b78fa1804761440c55efffc..dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`;
+- external-equivalence disclaimer: esta prova local não equivale ao Security Review externo indisponível.
+
+## Reconciliação factual — candidate `95e808`
+
+- O candidate `dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf` foi posteriormente `SUPERSEDED`/`INVALIDATED`, antes de um novo A-001 sobre ele, depois que contraprovas adicionais encontraram superfícies ainda não cobertas; não houve novo A-001 sobre `dc0bbaf`.
+- REDs reproduzidos pelo Executor: opção CLI sensível; assignment JSON com whitespace multiline antes do separador; custo superlinear para string-control incompleto fragmentado; e terminador C1 incorreto em OSC, com over-redaction.
+- Causas: boundary genérico sem reconhecimento da chave sensível após opção CLI; whitespace anterior ao separador sem CR/LF; `release()` reprocessando o `pending` crescente; e `terminalOscEnd()` sem reconhecimento de C1-ST.
+- Correção: reconhecimento estrutural de opções CLI sensíveis; whitespace estrutural multiline; scanner incremental bounded de terminal/string-control entre chunks; reconhecimento de C1-ST em OSC; preservação das cercas CSI/VT estruturais já existentes.
+- O candidate `95e808294395449b46438b799c0b7d480cece52d` tem parent `84f095d87b6f3852d736f8cb11bbfa2d56efd2d6` e contém somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`.
+- Provas reportadas pelo Executor: focused `35/35` GREEN; primeira regressão `206/207`, com a única falha correspondente ao histórico `D-013`; `npm run probe:conpty-soak` posteriormente GREEN com 12 sessões, PIDs distintos, `noOrphans: true` e fixture removida; reexecução `207/207` GREEN; `git diff --check` GREEN. A medição de string-control incompleto caiu de segundos para poucos milissegundos no mesmo envelope de `4k/8k/12k/16k`.
+- D-013 permanece aberto e inalterado; ConPTY/P3 não foi alterado; não houve push, merge ou deploy. O candidate `95e808` ainda não possui A-001 válido, P4-PR02 continua `RUNNING` / `BLOCKED ON A-001`, merge continua proibido e P4-PR03 não é autorizada.
+- Próximo ator: Security Reviewer independente, nova sessão Luna `xhigh`, read-only, revisando `3657a070e5dc6b1e7b78fa1804761440c55efffc..95e808294395449b46438b799c0b7d480cece52d`.
+
+## A-001 — quinto ciclo: candidate `95e808` bloqueado
+
+- objeto revisado: `3657a070e5dc6b1e7b78fa1804761440c55efffc..95e808294395449b46438b799c0b7d480cece52d`; Security Reviewer independente, nova sessão Luna `xhigh`, read-only;
+- resultado: `BLOCKED` por dois P2. O primeiro foi controle C1 stateful não reconhecido, descartado genericamente pelo normalizador, capaz de alterar a apresentação visual e reconstruir chave sensível em live, `inspect()` e snapshot persistido;
+- o segundo foi custo superlinear sob fragmentação: `push()` mantinha `release()` recalculando `#ranges()` sobre `pending`; medições aproximadas do Reviewer: 1.024/82 ms, 2.048/255 ms, 4.096/957 ms, 8.192/2.633 ms e 16.384/6.014 ms, com assignments em aproximadamente 4.292 ms para 8.192 bytes;
+- focused `35/35` GREEN; primeira `npm test` `207/207`; `npm run probe:conpty-soak` falhou posteriormente somente em `D-013`; segunda `npm test` `206/207`, única falha também `D-013`; transcript/redaction verde; `git diff --check` GREEN; worktree final limpa;
+- `95e808` está `SUPERSEDED` / `INVALIDATED`, seu A-001 foi efetivamente executado e ficou `BLOCKED`, e não pode ser usado como prova de integração.
+
+## Correção posterior — candidate `189c1ce`
+
+- o Executor reproduziu os dois P2; corrigiu a classificação estrutural fechada C0/C1, mantendo descartáveis somente controles comprovadamente textualmente inertes e levando stateful, cursor/linha/tabulação/display/charset/flow-control/reservados ou desconhecidos a fail-closed;
+- na fragmentação, confirmou remainder próximo de 4096 bytes após o holdback e corrigiu a revarredura por byte com scans amortizados/batched; newline força reavaliação, `finish()` mantém classificação final, `pending` permanece bounded e nenhuma liberação ignora o redactor;
+- candidate: `189c1ced569489508ceb7d052f5e2b521cf085dd`, parent `b1a3bdedf2d6131702661403bf31251761e8602a6`, mensagem `fix(p4-pr02): harden terminal controls and amortize stream scans`, somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`;
+- provas reportadas: focused `39/39` GREEN, `npm test` `211/211` GREEN, `D-013` ausente nessa execução e `git diff --check` GREEN; conferência externa pré-commit confirmou fragmentação rápida além do holdback, texto comum `4.9 / 3.5 / 6.7 / 9.1 / 10.6 ms` e assignment seguro `1.4 / 1.6 / 3.9 / 6.2 / 7.5 ms` em 2k/4k/8k/12k/16k, focused independente `39/39` e somente os dois arquivos autorizados modificados;
+- estado: `189c1ce` ainda sem A-001 válido; P4-PR02 `RUNNING` / `BLOCKED ON A-001`; D-013 aberto e não corrigido; nenhum código P3/ConPTY alterado; nenhum push, merge ou deploy; próximo ator Security Reviewer independente, nova sessão Luna `xhigh`, read-only, no delta `3657a070e5dc6b1e7b78fa1804761440c55efffc..189c1ced569489508ceb7d052f5e2b521cf085dd`.
+
+## A-001 — candidate `189c1ce` — BLOCKED
+
+- objeto revisado: base `3657a070e5dc6b1e7b78fa1804761440c55efffc` contra candidate `189c1ced569489508ceb7d052f5e2b521cf085dd`; Security Reviewer independente Luna, nova sessão, effort `xhigh`, `quota-session`, read-only;
+- classes anteriores revalidadas como verdes: C0/C1, CSI/VT, OSC/APC/DCS/PM/SOS, assignments, CLI/JSON/YAML/PowerShell, live/`inspect()`/persistência/reopen e complexidade dos cenários comuns;
+- único finding bloqueante: P2 — DoS algorítmico por newline fragmentado. Newline furava a janela de amortização e forçava `#ranges()` repetidamente sobre aproximadamente o holdback; medições aproximadas: `8k 1,429s`, `12k 2,834s`, `16k 4,256s`;
+- resultados do Reviewer: focused `39/39` GREEN; primeira `npm test` `210/211`, única falha em `D-013`/ConPTY; `npm run probe:conpty-soak` somente com `D-013`; segunda `npm test` `211/211` GREEN; `git diff --check` GREEN; worktree final limpa;
+- o candidate `189c1ce` está `SUPERSEDED` / `INVALIDATED`; seu A-001 foi efetivamente executado e ficou `BLOCKED`, não sendo prova de integração;
+
+## Correção posterior — candidate atual `76a41db`
+
+- o Executor reproduziu RED, removeu a exceção que fazia newline furar batching e manteve newline pendente até janela amortizada ou `finish()`; não criou threshold artificial nem parser novo; CRLF, multiline, C0/C1, CSI/VT, string-controls e demais cercas foram preservados;
+- candidate: `76a41db64343131dfc20b699bedfae491859f88b`, parent `479f44d8ecfe9668ac64ff8a9d547f82caf81f7d`, mensagem `fix(p4-pr02): amortize newline stream scans`, somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`;
+- provas do Executor: focused `42/42` GREEN; `npm test` `214/214` GREEN; `git diff --check` GREEN; `D-013` não apareceu; somente os dois arquivos autorizados alterados;
+- conferência externa pré-commit: LF `2k/4k/8k/12k/16k` aproximadamente `2,34 / 3,46 / 7,54 / 8,17 / 9,06 ms`; CRLF aproximadamente `1,52 / 1,86 / 3,99 / 7,91 / 9,17 ms`; chunk único e 1-byte com saída equivalente; contraprova sensível sem canário; após controle ConPTY, regressão completa `214/214` GREEN;
+- estado: `76a41db` ainda sem A-001 válido; P4-PR02 `RUNNING` / `BLOCKED ON A-001`; `D-013` aberto; nenhum código P3/ConPTY alterado; nenhum push, merge ou deploy; próximo ator Security Reviewer independente, nova sessão Luna `xhigh`, read-only, no delta `3657a070e5dc6b1e7b78fa1804761440c55efffc..76a41db64343131dfc20b699bedfae491859f88b`.
 
 ## Registro obrigatório por PR futura
 
@@ -43,3 +123,17 @@ Cada linha nova deve incluir:
 - resultado `PROVEN | REJECTED | SUPERSEDED`.
 
 Mensagem de agente, merge ou build verde isolado não é evidência suficiente.
+
+## A-001 — candidate `76a41db` — GREEN_LOCAL_A-001
+
+- objeto revisado integralmente: `3657a070e5dc6b1e7b78fa1804761440c55efffc..76a41db64343131dfc20b699bedfae491859f88b`;
+- Security Reviewer independente: GPT-5.6 Luna, effort `xhigh`, `quota-session`, sem API, sessão nova e somente-leitura;
+- veredito: `GREEN_LOCAL_A-001`;
+- focused `42/42` GREEN; `npm test` `214/214` GREEN; `git diff --check` GREEN; `D-013` não ocorreu; probe ConPTY não foi necessário; worktree final limpa;
+- nenhum arquivo rastreado foi alterado pelo Reviewer; nenhum push, merge ou deploy;
+- cobertura independente: C0/C1; CSI, REP, movimentos, insert/delete/erase, queries/private/intermediates; SGR; OSC/APC/DCS/PM/SOS; formas 7-bit/C1 e incompletas; CR/LF/CRLF/backspace; assignments bare/camel/Pascal/snake/kebab/dotted/quoted; CLI; Authorization/Bearer/tokens/private keys; JSON/YAML/PowerShell e multiline; chunk único, chunks arbitrários e 1-byte; boundaries; live fragment por fragmento; `inspect()`/snapshot/reopen; abort/capacity; autorização; retenção; checksum; root safety; symlink/junction; getters/proxies/objetos hostis; frozen/detached;
+- nenhum canário alcançou live, `inspect()`, disco ou reopen; findings P1, P2, P3 e informational de segurança: nenhum;
+- medianas independentes em chunks de 1 byte para 2k/4k/8k/12k/16k: comum `1.591 / 1.617 / 4.745 / 5.668 / 7.213 ms`; assignment seguro `0.988 / 1.870 / 3.558 / 5.762 / 8.417 ms`; terminal `1.071 / 1.837 / 3.802 / 4.330 / 5.917 ms`; string-control `0.714 / 1.376 / 2.450 / 3.658 / 5.127 ms`; LF `0.774 / 1.530 / 3.733 / 6.203 / 9.835 ms`; CRLF `0.891 / 1.696 / 3.383 / 5.570 / 8.887 ms`; combinado adversarial `0.974 / 2.010 / 5.963 / 6.158 / 8.104 ms`;
+- fronteiras 4095/4096/4097/8191/8192/8193 passaram sem liberação de canário;
+- registro contratual: o gate A-001 exigido para o candidate atual passou, mas P4-PR02 não é promovida a `PROVEN`; integração/merge requerem etapa contratual posterior e não são autorizados por este registro;
+- `GREEN_LOCAL_A-001` não equivale ao Security Review externo indisponível e não cria precedente para outras PRs.
