@@ -81,7 +81,11 @@ base 3657a070e5dc6b1e7b78fa1804761440c55efffc
   → A-001 do candidate 15e3ac733fc295d4cff3762de957f348a6e02c01 executado: P2 de bypass por reconstrução VT CSI b / REP encontrado; BLOCKED
   → Executor reproduziu o RED e corrigiu o fail-closed para REP; novo candidate `ba350658a39f270cbc9ec559c193997a1a0db047`; 15e3ac7 superseded/invalidated
   → focused 25/25, regressão completa 197/197 e `git diff --check` GREEN no novo candidate, sem A-001 válido ainda
-  → nova sessão local independente, read-only, deve revisar exatamente `3657a070e5dc6b1e7b78fa1804761440c55efffc..ba350658a39f270cbc9ec559c193997a1a0db047`; merge e regressão pós-merge continuam proibidos/pendentes
+  → A-001 do candidate `ba350658a39f270cbc9ec559c193997a1a0db047` ficou BLOCKED por P2 de bypass HPA + DCH; o diagnóstico confirmou classificação CSI estruturalmente insegura
+  → Executor implementou allowlist CSI com SGR numérico comprovadamente inerte e fail-closed para demais CSI; separou string controls completos do classificador CSI e corrigiu antes do commit o efeito colateral 7-bit/C1 do primeiro diff; `ba350658` superseded/invalidated
+  → novo candidate real `dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`, parent `c8bb6afda8640bc11b9b82d36d931374fd725153`, somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`
+  → focused 31/31, controle ConPTY GREEN, regressão completa 203/203 e `git diff --check` GREEN; D-013 permanece aberto e não foi corrigido nem ocultado; sem A-001 válido ainda
+  → nova sessão local independente, read-only, deve revisar exatamente `3657a070e5dc6b1e7b78fa1804761440c55efffc..dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`; merge e regressão pós-merge continuam proibidos/pendentes
 ```
 
 O relatório deve declarar expressamente que essa prova local não equivale ao serviço externo indisponível e não mede superfícies fora de transcript/redaction. Reviews anteriores, a narrativa do Executor e os testes já registrados são entrada reproduzível, não substitutos da nova revisão independente.
