@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -92,10 +93,14 @@ test("D-015 RED: a concurrent snapshot replacement cannot change the object that
 
   const snapshot = join(root, "transcript-v1.json");
   const outside = join(resolve(root, ".."), `p4-pr03-outside-${randomUUID()}.json`);
+  const original = join(resolve(root, ".."), `p4-pr03-original-${randomUUID()}.json`);
+  t.after(async () => {
+    await unlink(outside).catch(() => undefined);
+    await unlink(original).catch(() => undefined);
+  });
   await writeFile(outside, await readFile(snapshot, "utf8"), "utf8");
   const replacement = join(root, "replacement.json");
   await symlink(outside, replacement);
-  const original = join(resolve(root, ".."), `p4-pr03-original-${randomUUID()}.json`);
   await rename(snapshot, original);
   await rename(replacement, snapshot);
 
@@ -105,6 +110,76 @@ test("D-015 RED: a concurrent snapshot replacement cannot change the object that
   );
   await unlink(snapshot).catch(() => undefined);
   await rename(original, snapshot);
+  await unlink(outside).catch(() => undefined);
+});
+
+test("D-015 counterproof: same-size replacement between path check and open is rejected", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  const writer = store.beginRecord(recordRequest("same-size-race"));
+  writer.write("safe output");
+  await writer.commit();
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const outside = join(resolve(root, ".."), `p4-pr03-same-size-${randomUUID()}.json`);
+  const original = join(resolve(root, ".."), `p4-pr03-original-${randomUUID()}.json`);
+  t.after(async () => {
+    await unlink(outside).catch(() => undefined);
+    await unlink(original).catch(() => undefined);
+  });
+  const parsed = JSON.parse(await readFile(snapshot, "utf8")) as { records: Array<{ occurredAt: string }>; checksum: string };
+  parsed.records[0]!.occurredAt = "2026-09-01T11:59:59.000Z";
+  const { checksum: _checksum, ...withoutChecksum } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+  await writeFile(outside, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+
+  const childCode = `
+    import fsp from "node:fs/promises";
+    import { syncBuiltinESMExports } from "node:module";
+    import { rename } from "node:fs/promises";
+    const [snapshot, outside, original, root] = process.argv.slice(1);
+    const realOpen = fsp.open;
+    fsp.open = async (...args) => {
+      if (String(args[0]) !== snapshot) return await realOpen(...args);
+      await rename(snapshot, original);
+      await rename(outside, snapshot);
+      try { return await realOpen(...args); }
+      finally { await rename(snapshot, outside); await rename(original, snapshot); }
+    };
+    syncBuiltinESMExports();
+    const { PersistentTranscriptStore } = await import("./src/stream-transcript.ts");
+    try {
+      const store = await PersistentTranscriptStore.open({
+        stateRoot: root,
+        retention: { maxAgeMs: 3600000, maxRecords: 16, maxTotalBytes: 65536, maxRecordBytes: 16384 },
+        access: { writerIds: ["kernel"], readerIds: ["operator"] },
+        redaction: { policyId: "p4-pr03", sensitiveLiterals: ["P4_PR03_SECRET"] },
+        clock: () => "2026-09-01T12:00:00.000Z",
+      });
+      await store.close();
+      process.stdout.write("ACCEPTED\\n");
+    } catch (error) {
+      process.stdout.write(String(error?.message ?? "unknown") + "\\n");
+    }
+  `;
+  const child = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", childCode, snapshot, outside, original, root], {
+    cwd: process.cwd(),
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let output = "";
+  let errors = "";
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => { output += chunk; });
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => { errors += chunk; });
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    child.once("error", rejectPromise);
+    child.once("exit", () => resolvePromise());
+  });
+  assert.doesNotMatch(output, /ACCEPTED/, `${output}${errors}`);
+  assert.match(output, /transcript_snapshot_/, `${output}${errors}`);
   await unlink(outside).catch(() => undefined);
 });
 
@@ -127,6 +202,52 @@ test("D-016 RED: a checksummed snapshot cannot trust arbitrary redactionCount me
     PersistentTranscriptStore.open(transcriptConfiguration(root)),
     /transcript_snapshot_(redaction_metadata_invalid|invalid)/,
   );
+});
+
+test("D-016 counterproof: an artificial placeholder without redactor provenance is rejected", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  const writer = store.beginRecord(recordRequest("artificial-placeholder"));
+  writer.write("ordinary output");
+  await writer.commit();
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const parsed = JSON.parse(await readFile(snapshot, "utf8")) as {
+    records: Array<{ content: string; redactionCount: number }>;
+    checksum: string;
+  };
+  parsed.records[0]!.content = TRANSCRIPT_REDACTION_PLACEHOLDER;
+  parsed.records[0]!.redactionCount = 1;
+  const { checksum: _checksum, ...withoutChecksum } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+  await writeFile(snapshot, `${JSON.stringify(parsed)}\n`, "utf8");
+
+  await assert.rejects(
+    PersistentTranscriptStore.open(transcriptConfiguration(root)),
+    /transcript_snapshot_invalid/,
+  );
+});
+
+test("P2-03 rejects transcript ordinal gaps and hostile cursor traps", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  for (const id of ["gap-1", "gap-2"]) {
+    const writer = store.beginRecord(recordRequest(id));
+    writer.write(id);
+    await writer.commit();
+  }
+  const hostile = new Proxy({}, { ownKeys: () => { throw new Error("CURSOR_SECRET"); } });
+  assert.equal(store.replay("operator", hostile).status, "invalid");
+  const snapshot = join(root, "transcript-v1.json");
+  const parsed = JSON.parse(await readFile(snapshot, "utf8")) as { records: Array<{ ordinal: number }>; nextOrdinal: number; checksum: string; };
+  parsed.records[1]!.ordinal = 3;
+  parsed.nextOrdinal = 4;
+  const { checksum: _checksum, ...withoutChecksum } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+  await store.close();
+  await writeFile(snapshot, `${JSON.stringify(parsed)}\n`, "utf8");
+  await assert.rejects(PersistentTranscriptStore.open(transcriptConfiguration(root)), /transcript_snapshot_invalid/);
 });
 
 test("D-017 counterproof: a stale lease with a reused PID is recoverable without stealing a live instance", async (t) => {
@@ -196,6 +317,30 @@ test("rejects invalid, foreign, stale and future event cursors", async (t) => {
   assert.deepEqual(retained.events.map((item) => item.eventId), ["event-3", "event-4"]);
 });
 
+test("P2-03 rejects event reorder, gap, duplicate and hostile cursor traps", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "events.jsonl");
+  const log = new JsonlEventLog(file);
+  for (let index = 1; index <= 3; index += 1) await log.append(event("C-P4-PR03", `integrity-${index}`));
+  const original = (await readFile(file, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+  const corruptions = [
+    (entries: Record<string, unknown>[]) => [entries[1], entries[0], entries[2]],
+    (entries: Record<string, unknown>[]) => entries.map((entry, index) => index === 1 ? { ...entry, sequence: 4 } : entry),
+    (entries: Record<string, unknown>[]) => [...entries.slice(0, 2), entries[1]],
+  ];
+  for (const corrupt of corruptions) {
+    await writeFile(file, `${corrupt(original).map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+    assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  }
+  await writeFile(file, "{malformed-json}\n", "utf8");
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  await writeFile(file, `${original.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  const current = await new JsonlEventLog(file).replay("C-P4-PR03");
+  const hostile = new Proxy({}, { getPrototypeOf: () => { throw new Error("CURSOR_SECRET"); } });
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03", hostile)).status, "invalid");
+  assert.equal(current.status, "ok");
+});
+
 test("transcript cursor is ordinal-based and survives restart independently from event cursor", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
@@ -234,6 +379,23 @@ test("live activity replay keeps its own sequence and identity cursor", () => {
   assert.deepEqual(tail.events.map((item) => item.eventId), ["live-1"]);
   assert.equal(replayLiveActivity("C-P4-PR03", inputs, { streamId: "transcript", sequence: 0 }).status, "invalid");
   assert.equal(replayLiveActivity("C-P4-PR03", inputs, { streamId: first.streamId, sequence: 99 }).status, "future");
+  const hostile = new Proxy({}, { ownKeys: () => { throw new Error("CURSOR_SECRET"); } });
+  assert.equal(replayLiveActivity("C-P4-PR03", inputs, hostile).status, "invalid");
+});
+
+test("P2-05 replays a large JSONL fixture with a small bounded result", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "large-events.jsonl");
+  const log = new JsonlEventLog(file);
+  const payload = "x".repeat(900);
+  for (let index = 1; index <= 2_000; index += 1) {
+    await log.append({ ...event("C-P4-PR03", `large-${index}`), payload });
+  }
+  const result = await new JsonlEventLog(file).replay("C-P4-PR03", undefined, 1);
+  assert.equal(result.status, "ok");
+  assert.equal(result.events.length, 1);
+  assert.equal(result.headSequence, 2_000);
+  assert.equal(result.events[0]!.eventId, "large-1");
 });
 
 function liveEvent(eventId: string, sequence: number, causationId: string | null, to: "dispatch" | "process"): LiveActivityEvent {

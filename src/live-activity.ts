@@ -258,15 +258,19 @@ function liveActivityStreamId(contractId: string): string {
 }
 
 function parseLiveActivityCursor(value: unknown, streamId: string): { ok: true; cursor: LiveActivityReplayCursor } | { ok: false } {
-  if (value === undefined) return { ok: true, cursor: { streamId, sequence: 0 } };
-  if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) return { ok: false };
-  const keys = Reflect.ownKeys(value);
-  if (keys.length !== 2 || !keys.every((key) => typeof key === "string" && (key === "streamId" || key === "sequence"))) return { ok: false };
-  const stream = Object.getOwnPropertyDescriptor(value, "streamId");
-  const sequence = Object.getOwnPropertyDescriptor(value, "sequence");
-  if (!stream || !sequence || !("value" in stream) || !("value" in sequence)
-    || stream.value !== streamId || !Number.isSafeInteger(sequence.value) || sequence.value < 0) return { ok: false };
-  return { ok: true, cursor: { streamId, sequence: sequence.value as number } };
+  try {
+    if (value === undefined) return { ok: true, cursor: { streamId, sequence: 0 } };
+    if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) return { ok: false };
+    const keys = Reflect.ownKeys(value);
+    if (keys.length !== 2 || !keys.every((key) => typeof key === "string" && (key === "streamId" || key === "sequence"))) return { ok: false };
+    const stream = Object.getOwnPropertyDescriptor(value, "streamId");
+    const sequence = Object.getOwnPropertyDescriptor(value, "sequence");
+    if (!stream || !sequence || !("value" in stream) || !("value" in sequence)
+      || stream.value !== streamId || !Number.isSafeInteger(sequence.value) || sequence.value < 0) return { ok: false };
+    return { ok: true, cursor: { streamId, sequence: sequence.value as number } };
+  } catch {
+    return { ok: false };
+  }
 }
 
 function liveReplayResult(

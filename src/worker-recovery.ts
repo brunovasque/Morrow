@@ -193,6 +193,7 @@ const terminalExecutionFailures = new Set([
   "CLEANUP_FAILED",
 ]);
 const unknownOutcomeReasons = new Set([
+  "attempt_result_invalid",
   "execution_outcome_unknown_after_restart",
   "attempt_outcome_unknown",
   "worker_disconnected_during_execution",
@@ -800,7 +801,7 @@ class AtomicWorkerRecoveryStore {
       if (entry.size > maxRecoverySnapshotBytes) throw new Error("worker_recovery_snapshot_too_large");
       handle = await open(this.filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
       const before = await handle.stat();
-      if (before.isSymbolicLink() || !before.isFile() || before.size !== entry.size) {
+      if (before.isSymbolicLink() || !before.isFile() || !sameSnapshotIdentity(entry, before)) {
         throw new Error("worker_recovery_snapshot_race_detected");
       }
       raw = await handle.readFile("utf8");
@@ -1298,10 +1299,10 @@ function deriveLiveness(
   connection: RecoveryConnectionState,
   dispatches: readonly RecoveryDispatchRecord[],
 ): WorkerLiveness {
-  if (connection.state !== "offline") return connection.state;
   if (dispatches.some((record) => record.status === "blocked" && record.reason !== null && unknownOutcomeReasons.has(record.reason))) {
     return "outcome_unknown";
   }
+  if (connection.state !== "offline") return connection.state;
   if (dispatches.some((record) => record.status === "failed")) return "failed";
   if (dispatches.some((record) => record.status === "blocked")) return "blocked";
   return "offline";
