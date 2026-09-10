@@ -196,7 +196,7 @@ export class StreamRedactor {
     if (!Number.isSafeInteger(maxPendingBytes) || maxPendingBytes < 1) {
       throw transcriptError("redaction_pending_limit_invalid");
     }
-    return new StreamRedactorSession(this, maxPendingBytes);
+    return new StreamRedactorSession(this, maxPendingBytes, this.#holdback);
   }
 
   redact(text: string): RedactedStreamFragment {
@@ -206,15 +206,15 @@ export class StreamRedactor {
   }
 
   release(pending: string, final: boolean): { released: RedactedStreamFragment; remainder: string } {
+    if (!final && pending.length <= this.#holdback) {
+      return { released: deepFreeze({ text: "", redactionCount: 0 }), remainder: pending };
+    }
     const ranges = this.#ranges(pending);
     if (final) {
       return {
         released: deepFreeze({ text: renderRedacted(pending, ranges), redactionCount: countRedactions(ranges) }),
         remainder: "",
       };
-    }
-    if (pending.length <= this.#holdback) {
-      return { released: deepFreeze({ text: "", redactionCount: 0 }), remainder: pending };
     }
     let cut = pending.length - this.#holdback;
     for (const range of ranges) {
@@ -254,14 +254,20 @@ Object.freeze(StreamRedactor.prototype);
 export class StreamRedactorSession {
   #redactor: StreamRedactor;
   #maxPendingBytes: number;
+  #holdback: number;
+  #releaseBatchBytes: number;
   #pending = "";
   #pendingBytes = 0;
+  #pendingSinceReleaseBytes = 0;
+  #releasedOnce = false;
   #finished = false;
   #terminalScanState: StreamTerminalScanState = { mode: "normal" };
 
-  constructor(redactor: StreamRedactor, maxPendingBytes: number) {
+  constructor(redactor: StreamRedactor, maxPendingBytes: number, holdback: number) {
     this.#redactor = redactor;
     this.#maxPendingBytes = maxPendingBytes;
+    this.#holdback = holdback;
+    this.#releaseBatchBytes = Math.max(1, Math.min(holdback, maxPendingBytes - holdback));
   }
 
   push(chunk: string): RedactedStreamFragment {
@@ -276,11 +282,21 @@ export class StreamRedactorSession {
     }
     this.#pending += chunk;
     this.#pendingBytes += chunkBytes;
+    this.#pendingSinceReleaseBytes += chunkBytes;
     this.#terminalScanState = scanTerminalChunk(this.#terminalScanState, chunk);
     if (this.#terminalScanState.mode === "string") {
       return deepFreeze({ text: "", redactionCount: 0 });
     }
+    const hasLineBoundary = chunk.includes("\n");
+    if (
+      this.#pending.length <= this.#holdback
+      || (this.#releasedOnce && !hasLineBoundary && this.#pendingSinceReleaseBytes < this.#releaseBatchBytes)
+    ) {
+      return deepFreeze({ text: "", redactionCount: 0 });
+    }
     const result = this.#redactor.release(this.#pending, false);
+    this.#releasedOnce = true;
+    this.#pendingSinceReleaseBytes = 0;
     this.#pending = result.remainder;
     this.#pendingBytes = Buffer.byteLength(this.#pending, "utf8");
     return result.released;
@@ -292,6 +308,7 @@ export class StreamRedactorSession {
     const result = this.#redactor.release(this.#pending, true).released;
     this.#pending = "";
     this.#pendingBytes = 0;
+    this.#pendingSinceReleaseBytes = 0;
     this.#terminalScanState = { mode: "normal" };
     return result;
   }
@@ -300,6 +317,7 @@ export class StreamRedactorSession {
     this.#finished = true;
     this.#pending = "";
     this.#pendingBytes = 0;
+    this.#pendingSinceReleaseBytes = 0;
     this.#terminalScanState = { mode: "normal" };
   }
 }
@@ -1599,12 +1617,22 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
     }
     const variationSelector = (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
       || (codePoint >= 0xe0100 && codePoint <= 0xe01ef);
-    if (
-      (code < 0x20 && code !== 0x0a && code !== 0x09)
-      || (code >= 0x7f && code <= 0x9f)
-      || unicodeFormatControlPattern.test(character)
-      || variationSelector
-    ) {
+    if (isTerminalControlCode(code) && code !== 0x0a) {
+      // Inventory of control handling is intentionally closed:
+      // LF/CRLF/backspace are emulated above; complete SGR and string-controls
+      // are handled by their dedicated branches. NUL, BEL and DEL are the only
+      // remaining controls treated as textually inert. Every other C0/C1
+      // control (including tab, line, cursor, display, charset, flow-control,
+      // and reserved values) fails closed for the affected line.
+      if (isTextuallyInertControl(code)) {
+        controlRanges.push({ start: index, end: index + codePointLength, replacement: "drop" });
+      } else {
+        failClosedLine = true;
+      }
+      index += codePointLength;
+      continue;
+    }
+    if (unicodeFormatControlPattern.test(character) || variationSelector) {
       controlRanges.push({ start: index, end: index + codePointLength, replacement: "drop" });
       index += codePointLength;
       continue;
@@ -1627,6 +1655,14 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
     controlRanges.push({ start: rawLineStart, end: text.length, replacement: "redact" });
   }
   return { visible: visible.join(""), rawStarts, rawEnds, controlRanges };
+}
+
+function isTerminalControlCode(code: number): boolean {
+  return code < 0x20 || code === 0x7f || (code >= 0x80 && code <= 0x9f);
+}
+
+function isTextuallyInertControl(code: number): boolean {
+  return code === 0x00 || code === 0x07 || code === 0x7f;
 }
 
 function terminalEscapeChangesCursor(sequence: string): boolean {

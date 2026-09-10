@@ -489,6 +489,135 @@ test("allows only proven-inert SGR and fails closed for mutating, query, private
   assert.equal(redactor.redact("\u001b[?munknown-private-sgr").text, TRANSCRIPT_REDACTION_PLACEHOLDER);
 });
 
+test("classifies the complete C0/C1 control class instead of dropping stateful controls", () => {
+  const redactor = new StreamRedactor({ policyId: "c0-c1-classification-matrix", sensitiveLiterals: [] });
+  const inert = [
+    ["NUL", "\u0000"],
+    ["BEL", "\u0007"],
+    ["DEL", "\u007f"],
+  ] as const;
+  for (const [name, control] of inert) {
+    assert.equal(redactor.redact(`safe${control}text`).text, "safetext", name);
+  }
+
+  const c0StatefulOrUnknown = [
+    ["HT", "\u0009"],
+    ["VT", "\u000b"],
+    ["FF", "\u000c"],
+    ["CR", "\u000d"],
+    ["SO", "\u000e"],
+    ["SI", "\u000f"],
+    ["DLE", "\u0010"],
+    ["DC1", "\u0011"],
+    ["CAN", "\u0018"],
+    ["SUB", "\u001a"],
+  ] as const;
+  for (const [name, control] of c0StatefulOrUnknown) {
+    assert.equal(redactor.redact(`safe${control}text`).text, TRANSCRIPT_REDACTION_PLACEHOLDER, name);
+  }
+
+  for (let code = 0x80; code <= 0x9f; code += 1) {
+    const control = String.fromCharCode(code);
+    assert.equal(
+      redactor.redact(`safe${control}text`).text,
+      TRANSCRIPT_REDACTION_PLACEHOLDER,
+      `C1-${code.toString(16)}`,
+    );
+  }
+
+  assert.equal(
+    redactor.redact(`pasX\u009Asword=C1_CCH_RECONSTRUCTION_CANARY`).text,
+    TRANSCRIPT_REDACTION_PLACEHOLDER,
+  );
+  assert.equal(redactor.redact("pasX\bsword=C0_BACKSPACE_CANARY").text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.equal(redactor.redact("left\r\nright").text, "left\nright");
+  assert.equal(redactor.redact("\u001b[32mordinary\u001b[0m").text, "ordinary");
+});
+
+test("keeps C0/C1 fail-closed security invariant across one, many, and one-byte chunks", () => {
+  const redactor = new StreamRedactor({ policyId: "c0-c1-chunk-equivalence", sensitiveLiterals: [] });
+  const input = "visible pasX\u009Asword=C1_CCH_CHUNK_CANARY\nsafeField=visible";
+  const chunkings = [
+    [input],
+    [input.slice(0, 12), input.slice(12, 27), input.slice(27)],
+    [...input],
+  ];
+  const outputs = chunkings.map((chunks) => {
+    const session = redactor.start(16_384);
+    const fragments = chunks.map((chunk) => session.push(chunk));
+    fragments.push(session.finish());
+    return fragments.map((fragment) => fragment.text).join("");
+  });
+
+  assert.equal(outputs[0], outputs[1]);
+  assert.equal(outputs[1], outputs[2]);
+  for (const output of outputs) assert.doesNotMatch(output, /C1_CCH_CHUNK_CANARY/);
+  assert.match(outputs[0]!, /\[REDACTED\]/);
+  assert.match(outputs[0]!, /safeField=visible/);
+});
+
+test("keeps C1 stateful controls redacted through live, inspect, persistence, and reopen", async (t) => {
+  const root = await makeRoot(t);
+  const redaction = { policyId: "c1-stateful-persistence", sensitiveLiterals: [] } as const;
+  const store = await PersistentTranscriptStore.open(configuration(root, () => baseTime, { redaction }));
+  const writer = store.beginRecord(request("record-c1-stateful"));
+  const fragments = [
+    writer.write("prefix pasX\u009A"),
+    writer.write("sword=C1_CCH_PERSISTED_CANARY\nsafeField=visible"),
+  ];
+  fragments.push(await writer.commit().then((committed) => committed.finalFragment));
+  const live = fragments.map((fragment) => fragment.text).join("");
+  assert.doesNotMatch(live, /C1_CCH_PERSISTED_CANARY/);
+  assert.match(live, /safeField=visible/);
+  assert.equal(store.inspect("operator").records[0]?.content, live);
+  assert.doesNotMatch(await allFileText(root), /C1_CCH_PERSISTED_CANARY/);
+  await store.close();
+
+  const reopened = await PersistentTranscriptStore.open(configuration(root, () => baseTime, { redaction }));
+  assert.doesNotMatch(reopened.inspect("operator").records[0]?.content ?? "", /C1_CCH_PERSISTED_CANARY/);
+  await reopened.close();
+  assert.doesNotMatch(await allFileText(root), /C1_CCH_PERSISTED_CANARY/);
+});
+
+test("amortizes one-byte release scans across and beyond holdback", () => {
+  const redactor = new StreamRedactor({ policyId: "fragmented-release-complexity", sensitiveLiterals: [] });
+  const scenarios = [
+    { name: "common", make: (size: number) => "x".repeat(size) },
+    { name: "assignment", make: (size: number) => `safeField=${"x".repeat(Math.max(0, size - 10))}` },
+    { name: "terminal", make: (size: number) => `safe${"\u001b[32m".repeat(Math.floor(size / 5))}x` },
+    {
+      name: "string-control",
+      make: (size: number) => `safe${"\u001b]0;x\u0007".repeat(Math.ceil(size / 7))}tail`,
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const timings: number[] = [];
+    for (const size of [2_000, 4_000, 8_000, 12_000, 16_000]) {
+      const input = scenario.make(size);
+      const session = redactor.start(100_000);
+      const started = performance.now();
+      const fragmented = [];
+      for (const character of input) fragmented.push(session.push(character));
+      fragmented.push(session.finish());
+      timings.push(performance.now() - started);
+
+      const oneChunk = redactor.start(100_000);
+      const oneChunkOutput = [oneChunk.push(input), oneChunk.finish()].map((fragment) => fragment.text).join("");
+      const fragmentedOutput = fragmented.map((fragment) => fragment.text).join("");
+      assert.equal(fragmentedOutput, oneChunkOutput, `${scenario.name}:${size}:chunk-equivalence`);
+    }
+    assert.ok(
+      timings[4]! < timings[0]! * 8 + 250,
+      `${scenario.name}:superlinear-growth:${timings.map((timing) => timing.toFixed(1)).join(",")}`,
+    );
+    assert.ok(
+      timings[4]! < 750,
+      `${scenario.name}:practical-do-s:${timings.map((timing) => timing.toFixed(1)).join(",")}`,
+    );
+  }
+});
+
 test("preserves SGR-only output across chunks and every transcript channel", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(configuration(root));
