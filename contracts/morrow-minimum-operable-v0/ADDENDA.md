@@ -81,7 +81,9 @@ Alterar objetivo mestre, critério de aceitação, exclusão, envelope operacion
 Esta resolução é específica da P4-PR02 e não altera a política global de merge das demais PRs:
 
 - `START_P4_PR02` é autorização coarse para continuar a unidade ativa; não equivale a autorização automática de merge.
-- O HEAD a publicar no PR #18 é exatamente `b6ed5ebc6411dad07ef9193554db13e88790ccee`.
+- `ANCHOR PRÉ-FECHAMENTO`: `b6ed5ebc6411dad07ef9193554db13e88790ccee` é o último HEAD documental anterior ao selamento deste protocolo.
+- `HEAD PUBLICÁVEL`: no momento da integração, o HEAD remoto da branch/PR #18 deve ser a ponta local da branch de P4-PR02 somente se for descendente do anchor pré-fechamento, mantiver `76a41db64343131dfc20b699bedfae491859f88b` como ancestral, tiver no delta `b6ed5eb..HEAD` somente documentação de fechamento da P4-PR02 autorizada, não tiver alteração posterior a `76a41db` em `src/`, `test/`, package files ou outro código, estiver com worktree limpa e `git diff --check` GREEN, e não houver divergência remota que exija force-push.
+- Imediatamente antes do push, o Integrator deve capturar e registrar mecanicamente o HEAD publicável efetivo e comprovar que o remoto ficou exatamente nesse SHA.
 - O PR #18 permanece o veículo de integração; não abrir nova PR.
 - A estratégia de integração desta PR é `merge commit`, sem squash e sem rebase, para preservar integralmente os SHAs já usados como objetos de evidência e A-001 e manter ancestry auditável.
 
