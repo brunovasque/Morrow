@@ -6,7 +6,8 @@
 - formato durável: `morrow.transcript/1.0`
 - implementação: `src/stream-transcript.ts`
 - candidate de código anterior `dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`: `SUPERSEDED`/`INVALIDATED` antes de novo A-001, após contraprovas adicionais encontrarem superfícies ainda não cobertas; não houve novo A-001 sobre `dc0bbaf`
-- candidate de código atual: `189c1ced569489508ceb7d052f5e2b521cf085dd`
+- candidate de código atual: `76a41db64343131dfc20b699bedfae491859f88b`
+- candidate anterior `189c1ced569489508ceb7d052f5e2b521cf085dd`: `SUPERSEDED`/`INVALIDATED` após A-001 `BLOCKED` por DoS algorítmico por newline fragmentado
 - candidate `95e808294395449b46438b799c0b7d480cece52d`: `SUPERSEDED`/`INVALIDATED` após A-001 `BLOCKED` por dois P2; não é prova de integração
 - candidate anterior `15e3ac733fc295d4cff3762de957f348a6e02c01`: `SUPERSEDED`/`INVALIDATED` após A-001 `BLOCKED` por reconstrução VT CSI `b` / REP
 - candidate predecessor `ba350658a39f270cbc9ec559c193997a1a0db047`: `SUPERSEDED`/`INVALIDATED` após A-001 `BLOCKED` por composição HPA + DCH
@@ -28,6 +29,18 @@ O Security Reviewer independente, nova sessão Luna `xhigh`, revisou `3657a070e5
 O Executor reproduziu os dois P2. A correção fechou estruturalmente C0/C1, mantendo descartáveis somente controles comprovadamente textualmente inertes e levando controles stateful, cursor/linha/tabulação/display/charset/flow-control/reservados ou desconhecidos a fail-closed. Na fragmentação, o primeiro cruzamento continua sendo redigido normalmente; scans seguintes são amortizados/batched; newline força reavaliação; `finish()` executa classificação final; `pending` continua bounded e nenhuma liberação ignora o redactor. O candidate `189c1ced569489508ceb7d052f5e2b521cf085dd`, parent `b1a3bdedf2d6131702661403bf31251761e8602a6`, tem a mensagem `fix(p4-pr02): harden terminal controls and amortize stream scans` e contém somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`.
 
 Conferência externa independente anterior ao commit confirmou fragmentação de 1 byte rápida além do holdback; texto comum em 2k/4k/8k/12k/16k aproximadamente `4.9 / 3.5 / 6.7 / 9.1 / 10.6 ms`; assignment seguro aproximadamente `1.4 / 1.6 / 3.9 / 6.2 / 7.5 ms`; focused independente `39/39` GREEN; somente os dois arquivos autorizados modificados. `189c1ce` ainda não possui A-001 válido; P4-PR02 permanece `RUNNING` / `BLOCKED ON A-001`; merge continua proibido; P4-PR03 continua não autorizada; `D-013` continua dívida histórica aberta e não foi corrigida; nenhum código P3/ConPTY foi alterado; nenhum push, merge ou deploy foi feito. Próximo ator: Security Reviewer independente, nova sessão Luna `xhigh`, read-only, revisando `3657a070e5dc6b1e7b78fa1804761440c55efffc..189c1ced569489508ceb7d052f5e2b521cf085dd`.
+
+## A-001 bloqueado do candidate `189c1ce`
+
+O A-001 completo do candidate `189c1ced569489508ceb7d052f5e2b521cf085dd` foi executado por Security Reviewer independente Luna `xhigh`, em nova sessão, e terminou `BLOCKED`. O review revalidou como verdes as classes anteriores C0/C1, CSI/VT, OSC/APC/DCS/PM/SOS, assignments, CLI/JSON/YAML/PowerShell, live/`inspect()`/persistência/reopen e complexidade dos cenários comuns. O único finding bloqueante foi P2 — DoS algorítmico por newline fragmentado: focused `39/39` GREEN; primeira `npm test` `210/211`, única falha em `D-013`/ConPTY; `npm run probe:conpty-soak` somente com `D-013`; segunda `npm test` `211/211` GREEN; `git diff --check` GREEN; worktree limpa; medições aproximadas `8k 1,429s`, `12k 2,834s`, `16k 4,256s`. A causa foi newline furar a janela de amortização e forçar `#ranges()` repetidamente sobre aproximadamente o holdback.
+
+`189c1ce` está `SUPERSEDED`/`INVALIDATED` e seu A-001 não é prova de integração. O Executor reproduziu RED e removeu a exceção que fazia newline furar batching: newline permanece pendente até janela amortizada ou `finish()`, sem threshold artificial ou parser novo. CRLF, multiline, C0/C1, CSI/VT, string-controls e demais cercas foram preservados.
+
+## Candidate atual `76a41db` — sem A-001 válido
+
+O candidate atual é `76a41db64343131dfc20b699bedfae491859f88b`, parent `479f44d8ecfe9668ac64ff8a9d547f82caf81f7d`, mensagem `fix(p4-pr02): amortize newline stream scans`, contendo somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`. Provas do Executor: focused `42/42` GREEN; `npm test` `214/214` GREEN; `git diff --check` GREEN; D-013 não apareceu; somente os dois arquivos autorizados foram alterados. Conferência externa pré-commit mediu LF `2k/4k/8k/12k/16k` em aproximadamente `2,34 / 3,46 / 7,54 / 8,17 / 9,06 ms` e CRLF em `1,52 / 1,86 / 3,99 / 7,91 / 9,17 ms`; chunk único e 1-byte produziram saída equivalente; contraprova sensível terminou sem canário; após controle ConPTY, regressão completa `214/214` GREEN.
+
+`76a41db` ainda não possui A-001 válido. P4-PR02 permanece `RUNNING` / `BLOCKED ON A-001`; merge continua proibido; P4-PR03 continua não autorizada; D-013 permanece aberto; nenhum código P3/ConPTY foi alterado; nenhum push, merge ou deploy foi realizado. Próximo ator: Security Reviewer independente, nova sessão Luna `xhigh`, read-only, revisando `3657a070e5dc6b1e7b78fa1804761440c55efffc..76a41db64343131dfc20b699bedfae491859f88b`.
 
 ## Fronteira obrigatória
 

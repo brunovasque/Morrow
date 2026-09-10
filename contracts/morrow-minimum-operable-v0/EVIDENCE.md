@@ -92,6 +92,22 @@
 - provas reportadas: focused `39/39` GREEN, `npm test` `211/211` GREEN, `D-013` ausente nessa execução e `git diff --check` GREEN; conferência externa pré-commit confirmou fragmentação rápida além do holdback, texto comum `4.9 / 3.5 / 6.7 / 9.1 / 10.6 ms` e assignment seguro `1.4 / 1.6 / 3.9 / 6.2 / 7.5 ms` em 2k/4k/8k/12k/16k, focused independente `39/39` e somente os dois arquivos autorizados modificados;
 - estado: `189c1ce` ainda sem A-001 válido; P4-PR02 `RUNNING` / `BLOCKED ON A-001`; D-013 aberto e não corrigido; nenhum código P3/ConPTY alterado; nenhum push, merge ou deploy; próximo ator Security Reviewer independente, nova sessão Luna `xhigh`, read-only, no delta `3657a070e5dc6b1e7b78fa1804761440c55efffc..189c1ced569489508ceb7d052f5e2b521cf085dd`.
 
+## A-001 — candidate `189c1ce` — BLOCKED
+
+- objeto revisado: base `3657a070e5dc6b1e7b78fa1804761440c55efffc` contra candidate `189c1ced569489508ceb7d052f5e2b521cf085dd`; Security Reviewer independente Luna, nova sessão, effort `xhigh`, `quota-session`, read-only;
+- classes anteriores revalidadas como verdes: C0/C1, CSI/VT, OSC/APC/DCS/PM/SOS, assignments, CLI/JSON/YAML/PowerShell, live/`inspect()`/persistência/reopen e complexidade dos cenários comuns;
+- único finding bloqueante: P2 — DoS algorítmico por newline fragmentado. Newline furava a janela de amortização e forçava `#ranges()` repetidamente sobre aproximadamente o holdback; medições aproximadas: `8k 1,429s`, `12k 2,834s`, `16k 4,256s`;
+- resultados do Reviewer: focused `39/39` GREEN; primeira `npm test` `210/211`, única falha em `D-013`/ConPTY; `npm run probe:conpty-soak` somente com `D-013`; segunda `npm test` `211/211` GREEN; `git diff --check` GREEN; worktree final limpa;
+- o candidate `189c1ce` está `SUPERSEDED` / `INVALIDATED`; seu A-001 foi efetivamente executado e ficou `BLOCKED`, não sendo prova de integração;
+
+## Correção posterior — candidate atual `76a41db`
+
+- o Executor reproduziu RED, removeu a exceção que fazia newline furar batching e manteve newline pendente até janela amortizada ou `finish()`; não criou threshold artificial nem parser novo; CRLF, multiline, C0/C1, CSI/VT, string-controls e demais cercas foram preservados;
+- candidate: `76a41db64343131dfc20b699bedfae491859f88b`, parent `479f44d8ecfe9668ac64ff8a9d547f82caf81f7d`, mensagem `fix(p4-pr02): amortize newline stream scans`, somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`;
+- provas do Executor: focused `42/42` GREEN; `npm test` `214/214` GREEN; `git diff --check` GREEN; `D-013` não apareceu; somente os dois arquivos autorizados alterados;
+- conferência externa pré-commit: LF `2k/4k/8k/12k/16k` aproximadamente `2,34 / 3,46 / 7,54 / 8,17 / 9,06 ms`; CRLF aproximadamente `1,52 / 1,86 / 3,99 / 7,91 / 9,17 ms`; chunk único e 1-byte com saída equivalente; contraprova sensível sem canário; após controle ConPTY, regressão completa `214/214` GREEN;
+- estado: `76a41db` ainda sem A-001 válido; P4-PR02 `RUNNING` / `BLOCKED ON A-001`; `D-013` aberto; nenhum código P3/ConPTY alterado; nenhum push, merge ou deploy; próximo ator Security Reviewer independente, nova sessão Luna `xhigh`, read-only, no delta `3657a070e5dc6b1e7b78fa1804761440c55efffc..76a41db64343131dfc20b699bedfae491859f88b`.
+
 ## Registro obrigatório por PR futura
 
 Cada linha nova deve incluir:
