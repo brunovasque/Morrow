@@ -123,3 +123,17 @@ Cada linha nova deve incluir:
 - resultado `PROVEN | REJECTED | SUPERSEDED`.
 
 Mensagem de agente, merge ou build verde isolado não é evidência suficiente.
+
+## A-001 — candidate `76a41db` — GREEN_LOCAL_A-001
+
+- objeto revisado integralmente: `3657a070e5dc6b1e7b78fa1804761440c55efffc..76a41db64343131dfc20b699bedfae491859f88b`;
+- Security Reviewer independente: GPT-5.6 Luna, effort `xhigh`, `quota-session`, sem API, sessão nova e somente-leitura;
+- veredito: `GREEN_LOCAL_A-001`;
+- focused `42/42` GREEN; `npm test` `214/214` GREEN; `git diff --check` GREEN; `D-013` não ocorreu; probe ConPTY não foi necessário; worktree final limpa;
+- nenhum arquivo rastreado foi alterado pelo Reviewer; nenhum push, merge ou deploy;
+- cobertura independente: C0/C1; CSI, REP, movimentos, insert/delete/erase, queries/private/intermediates; SGR; OSC/APC/DCS/PM/SOS; formas 7-bit/C1 e incompletas; CR/LF/CRLF/backspace; assignments bare/camel/Pascal/snake/kebab/dotted/quoted; CLI; Authorization/Bearer/tokens/private keys; JSON/YAML/PowerShell e multiline; chunk único, chunks arbitrários e 1-byte; boundaries; live fragment por fragmento; `inspect()`/snapshot/reopen; abort/capacity; autorização; retenção; checksum; root safety; symlink/junction; getters/proxies/objetos hostis; frozen/detached;
+- nenhum canário alcançou live, `inspect()`, disco ou reopen; findings P1, P2, P3 e informational de segurança: nenhum;
+- medianas independentes em chunks de 1 byte para 2k/4k/8k/12k/16k: comum `1.591 / 1.617 / 4.745 / 5.668 / 7.213 ms`; assignment seguro `0.988 / 1.870 / 3.558 / 5.762 / 8.417 ms`; terminal `1.071 / 1.837 / 3.802 / 4.330 / 5.917 ms`; string-control `0.714 / 1.376 / 2.450 / 3.658 / 5.127 ms`; LF `0.774 / 1.530 / 3.733 / 6.203 / 9.835 ms`; CRLF `0.891 / 1.696 / 3.383 / 5.570 / 8.887 ms`; combinado adversarial `0.974 / 2.010 / 5.963 / 6.158 / 8.104 ms`;
+- fronteiras 4095/4096/4097/8191/8192/8193 passaram sem liberação de canário;
+- registro contratual: o gate A-001 exigido para o candidate atual passou, mas P4-PR02 não é promovida a `PROVEN`; integração/merge requerem etapa contratual posterior e não são autorizados por este registro;
+- `GREEN_LOCAL_A-001` não equivale ao Security Review externo indisponível e não cria precedente para outras PRs.

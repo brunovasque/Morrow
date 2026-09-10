@@ -2,7 +2,7 @@
 
 - contract: `MORROW-MVO-001`
 - PR-ID: `P4-PR02`
-- estado: `BLOCKED_ON_A-001`
+- estado: `RUNNING (A-001 GREEN_LOCAL; integração pós-review pendente)`
 - formato durável: `morrow.transcript/1.0`
 - implementação: `src/stream-transcript.ts`
 - candidate de código anterior `dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`: `SUPERSEDED`/`INVALIDATED` antes de novo A-001, após contraprovas adicionais encontrarem superfícies ainda não cobertas; não houve novo A-001 sobre `dc0bbaf`
@@ -41,6 +41,16 @@ O A-001 completo do candidate `189c1ced569489508ceb7d052f5e2b521cf085dd` foi exe
 O candidate atual é `76a41db64343131dfc20b699bedfae491859f88b`, parent `479f44d8ecfe9668ac64ff8a9d547f82caf81f7d`, mensagem `fix(p4-pr02): amortize newline stream scans`, contendo somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`. Provas do Executor: focused `42/42` GREEN; `npm test` `214/214` GREEN; `git diff --check` GREEN; D-013 não apareceu; somente os dois arquivos autorizados foram alterados. Conferência externa pré-commit mediu LF `2k/4k/8k/12k/16k` em aproximadamente `2,34 / 3,46 / 7,54 / 8,17 / 9,06 ms` e CRLF em `1,52 / 1,86 / 3,99 / 7,91 / 9,17 ms`; chunk único e 1-byte produziram saída equivalente; contraprova sensível terminou sem canário; após controle ConPTY, regressão completa `214/214` GREEN.
 
 `76a41db` ainda não possui A-001 válido. P4-PR02 permanece `RUNNING` / `BLOCKED ON A-001`; merge continua proibido; P4-PR03 continua não autorizada; D-013 permanece aberto; nenhum código P3/ConPTY foi alterado; nenhum push, merge ou deploy foi realizado. Próximo ator: Security Reviewer independente, nova sessão Luna `xhigh`, read-only, revisando `3657a070e5dc6b1e7b78fa1804761440c55efffc..76a41db64343131dfc20b699bedfae491859f88b`.
+
+## A-001 GREEN_LOCAL do candidate `76a41db`
+
+O A-001 completo foi executado por Security Reviewer independente GPT-5.6 Luna, effort `xhigh`, `quota-session`, sem API, em sessão nova e somente-leitura, sobre o delta integral `3657a070e5dc6b1e7b78fa1804761440c55efffc..76a41db64343131dfc20b699bedfae491859f88b`. O veredito foi `GREEN_LOCAL_A-001`. Foram registrados focused `42/42` GREEN, `npm test` `214/214` GREEN, `git diff --check` GREEN, D-013 ausente, probe ConPTY desnecessário, worktree final limpa, nenhum arquivo rastreado alterado pelo Reviewer e nenhum push, merge ou deploy.
+
+A cobertura independente incluiu C0/C1; CSI, REP, movimentos, insert/delete/erase, queries/private/intermediates; SGR; OSC/APC/DCS/PM/SOS; formas 7-bit/C1 e incompletas; CR/LF/CRLF/backspace; assignments bare/camel/Pascal/snake/kebab/dotted/quoted; CLI; Authorization/Bearer/tokens/private keys; JSON/YAML/PowerShell e multiline; chunk único, chunks arbitrários e 1-byte; boundaries; live fragment por fragmento; `inspect()`/snapshot/reopen; abort/capacity; autorização; retenção; checksum; root safety; symlink/junction; getters/proxies/objetos hostis; frozen/detached. Nenhum canário alcançou live, `inspect()`, disco ou reopen; findings P1, P2, P3 e informational de segurança: nenhum. As fronteiras 4095/4096/4097/8191/8192/8193 passaram sem liberação de canário.
+
+As medianas independentes em chunks de 1 byte, para 2k/4k/8k/12k/16k, foram: comum `1.591 / 1.617 / 4.745 / 5.668 / 7.213 ms`; assignment seguro `0.988 / 1.870 / 3.558 / 5.762 / 8.417 ms`; terminal `1.071 / 1.837 / 3.802 / 4.330 / 5.917 ms`; string-control `0.714 / 1.376 / 2.450 / 3.658 / 5.127 ms`; LF `0.774 / 1.530 / 3.733 / 6.203 / 9.835 ms`; CRLF `0.891 / 1.696 / 3.383 / 5.570 / 8.887 ms`; combinado adversarial `0.974 / 2.010 / 5.963 / 6.158 / 8.104 ms`.
+
+Este registro cobre somente a passagem do gate A-001 exigido para o candidate atual. `GREEN_LOCAL_A-001` não equivale ao Security Review externo indisponível, não cria precedente para outras PRs, não torna P4-PR02 `PROVEN` e não autoriza por si só integração ou merge. P4-PR02 permanece `RUNNING`; integração e regressão pós-merge ainda requerem etapa contratual posterior. P4-PR03 não foi iniciada.
 
 ## Fronteira obrigatória
 

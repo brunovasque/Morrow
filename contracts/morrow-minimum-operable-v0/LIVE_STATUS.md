@@ -13,15 +13,15 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR02`
 - `active_route_node`: `STREAM_REDACTION_RETENTION_TRANSCRIPT`
-- `active_subaction`: `P4_PR02_LOCAL_INDEPENDENT_SECURITY_REREVIEW`
+- `active_subaction`: `P4_PR02_POST_A001_DOCUMENTAL_RECONCILIATION`
 - `expected_branch_prefix`: `mvo/p4-pr02-`
-- `write_execution_allowed`: `no for the next review; checkout must remain read-only`
+- `write_execution_allowed`: `no for integration/merge; this reconciliation only`
 - `next_authorized_action`: `START_P4_PR02`
-- `next_authorized_actor`: `Security Reviewer in a local session distinct from the Executor`
+- `next_authorized_actor`: `P4-PR02 integration stage under the contract; no merge authorization inferred here`
 
 ## Próxima ação exata
 
-Executar, em nova sessão e com revisor distinto do Executor, a re-revisão local independente de segurança autorizada por `A-001`. O checkout deve ser somente-leitura e fixado à base `3657a070e5dc6b1e7b78fa1804761440c55efffc` e ao novo head de código `76a41db64343131dfc20b699bedfae491859f88b`; o escopo é o delta completo de transcript/redaction, incluindo classificação C0/C1 fail-closed, fragmentação amortizada, preservação das rotas CSI/SGR, string-controls, backspace e CRLF, além das fronteiras live, `inspect()` e persistência. O relatório deve registrar cobertura, ferramenta, testes, achados, limites e veredito. Qualquer P1/P2 bloqueia e retorna P4-PR02 ao ciclo. Não fazer merge durante a revisão e não tratar a prova local como equivalente ao serviço externo indisponível.
+O A-001 completo do candidate `76a41db64343131dfc20b699bedfae491859f88b` passou com veredito `GREEN_LOCAL_A-001`; o gate A-001 exigido para o candidate atual está registrado. P4-PR02 permanece `RUNNING` e não é promovida a `PROVEN`. A projeção mecânica do pacote continua `next_authorized_action: START_P4_PR02`; a integração e a regressão pós-merge ainda requerem etapa contratual própria e não são autorizadas por esta reconciliação. Não iniciar P4-PR03 e não tratar a prova local como equivalente ao Security Review externo indisponível.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -33,7 +33,7 @@ Reconciliacao factual adicional de 2026-09-09: o A-001 do candidate `ba350658a39
 
 | id | tipo | motivo | resolução |
 |---|---|---|---|
-| `P4-PR02-P2-001` | A-001 security gate | O A-001 do candidate `189c1ce` foi executado por Security Reviewer independente Luna `xhigh` e ficou `BLOCKED` por P2 de DoS algorítmico por newline fragmentado; `189c1ce` está superseded/invalidated e o candidate `76a41db` ainda não tem A-001 válido | re-review independente, somente-leitura e fixado em `3657a070e5dc6b1e7b78fa1804761440c55efffc..76a41db64343131dfc20b699bedfae491859f88b`; não fazer merge antes de veredito sem P1/P2 |
+| `P4-PR02-P2-001` | A-001 security gate | Histórico encerrado no candidate `189c1ce`; o A-001 completo do candidate atual `76a41db` passou como `GREEN_LOCAL_A-001`, sem P1/P2 | nenhuma re-review A-001 aberta; integração/regressão pós-merge permanecem etapas contratuais posteriores |
 
 ## Status por fase
 
@@ -84,6 +84,14 @@ O A-001 completo do candidate `189c1ced569489508ceb7d052f5e2b521cf085dd` foi exe
 O Executor reproduziu RED e removeu a exceção que fazia newline furar batching. Newline permanece pendente até janela amortizada ou `finish()`; nenhum threshold artificial ou parser novo foi criado; CRLF, multiline, C0/C1, CSI/VT, string-controls e demais cercas foram preservados. O candidate atual é `76a41db64343131dfc20b699bedfae491859f88b`, parent `479f44d8ecfe9668ac64ff8a9d547f82caf81f7d`, mensagem `fix(p4-pr02): amortize newline stream scans`, somente `src/stream-transcript.ts` e `test/stream-transcript.test.ts`. Provas: focused `42/42`, `npm test` `214/214`, `git diff --check` GREEN; `D-013` não apareceu na execução do Executor; somente os dois arquivos autorizados mudaram. Conferência externa pré-commit: LF `2k/4k/8k/12k/16k` `2,34 / 3,46 / 7,54 / 8,17 / 9,06 ms`; CRLF `1,52 / 1,86 / 3,99 / 7,91 / 9,17 ms`; chunk único e 1-byte com saída equivalente; contraprova sensível sem canário; após controle ConPTY, regressão completa `214/214` GREEN.
 
 `76a41db` ainda não possui A-001 válido. P4-PR02 permanece `RUNNING` / `BLOCKED ON A-001`; merge continua proibido; P4-PR03 continua não autorizada; `D-013` permanece aberto; nenhum código P3/ConPTY foi alterado; nenhum push, merge ou deploy foi realizado. Próximo ator: Security Reviewer independente, nova sessão Luna `xhigh`, read-only, revisando `3657a070e5dc6b1e7b78fa1804761440c55efffc..76a41db64343131dfc20b699bedfae491859f88b`.
+
+## Reconciliação factual de 2026-09-10 — A-001 GREEN_LOCAL do candidate atual
+
+O A-001 completo foi executado por Security Reviewer independente GPT-5.6 Luna, effort `xhigh`, `quota-session`, sem API, em sessão nova e somente-leitura, sobre o objeto integral `3657a070e5dc6b1e7b78fa1804761440c55efffc..76a41db64343131dfc20b699bedfae491859f88b`. O veredito foi `GREEN_LOCAL_A-001`. A evidência registrou focused `42/42` GREEN, `npm test` `214/214` GREEN, `git diff --check` GREEN, ausência de D-013, probe ConPTY desnecessário, worktree final limpa, nenhum arquivo rastreado alterado pelo Reviewer e nenhum push, merge ou deploy.
+
+A cobertura incluiu C0/C1; CSI, REP, movimentos, insert/delete/erase, queries/private/intermediates; SGR; OSC/APC/DCS/PM/SOS; formas 7-bit/C1 e incompletas; CR/LF/CRLF/backspace; assignments bare/camel/Pascal/snake/kebab/dotted/quoted; CLI; Authorization/Bearer/tokens/private keys; JSON/YAML/PowerShell e multiline; chunk único, chunks arbitrários e 1-byte; boundaries; live fragment por fragmento; `inspect()`/snapshot/reopen; abort/capacity; autorização; retenção; checksum; root safety; symlink/junction; getters/proxies/objetos hostis; frozen/detached. Nenhum canário alcançou live, `inspect()`, disco ou reopen; findings P1, P2, P3 e informational de segurança foram nenhum. As fronteiras 4095/4096/4097/8191/8192/8193 passaram sem liberação de canário. As medianas independentes em chunks de 1 byte, para 2k/4k/8k/12k/16k, foram: comum `1.591 / 1.617 / 4.745 / 5.668 / 7.213 ms`; assignment seguro `0.988 / 1.870 / 3.558 / 5.762 / 8.417 ms`; terminal `1.071 / 1.837 / 3.802 / 4.330 / 5.917 ms`; string-control `0.714 / 1.376 / 2.450 / 3.658 / 5.127 ms`; LF `0.774 / 1.530 / 3.733 / 6.203 / 9.835 ms`; CRLF `0.891 / 1.696 / 3.383 / 5.570 / 8.887 ms`; combinado adversarial `0.974 / 2.010 / 5.963 / 6.158 / 8.104 ms`.
+
+Este registro atualiza somente o fato de que o gate A-001 exigido para o candidate passou. `GREEN_LOCAL_A-001` não equivale ao Security Review externo indisponível, não cria precedente para outras PRs, não torna P4-PR02 `PROVEN` e não autoriza por si só integração ou merge. P4-PR02 permanece `RUNNING`; a integração e a regressão pós-merge são etapas contratuais ainda requeridas. A projeção mecânica permanece `next_authorized_action: START_P4_PR02`.
 
 ## Algoritmo determinístico de próxima ação
 

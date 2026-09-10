@@ -63,3 +63,15 @@ Alterar objetivo mestre, critério de aceitação, exclusão, envelope operacion
 - Conferência externa pré-commit reproduziu fragmentação extrema: LF `2k/4k/8k/12k/16k` aproximadamente `2,34 / 3,46 / 7,54 / 8,17 / 9,06 ms`; CRLF aproximadamente `1,52 / 1,86 / 3,99 / 7,91 / 9,17 ms`. Chunk único e chunk de 1 byte produziram saída equivalente; a contraprova sensível terminou sem canário; após controle ConPTY, a regressão completa foi `214/214` GREEN.
 - `76a41db` ainda não possui A-001 válido. P4-PR02 permanece `RUNNING` / `BLOCKED ON A-001`; merge continua proibido; P4-PR03 continua não autorizada; `D-013` permanece aberto; nenhum código P3/ConPTY foi alterado; nenhum push, merge ou deploy foi realizado.
 - Próximo ator: Security Reviewer independente, nova sessão Luna `xhigh`, read-only, revisando exatamente `3657a070e5dc6b1e7b78fa1804761440c55efffc..76a41db64343131dfc20b699bedfae491859f88b`.
+
+## Estado factual atualizado — A-001 GREEN_LOCAL do candidate `76a41db`
+
+- O A-001 completo foi executado por Security Reviewer independente, em sessão nova e somente-leitura: GPT-5.6 Luna, effort `xhigh`, `quota-session`, sem API.
+- Objeto revisado integralmente: `3657a070e5dc6b1e7b78fa1804761440c55efffc..76a41db64343131dfc20b699bedfae491859f88b`.
+- Veredito: `GREEN_LOCAL_A-001`.
+- Evidências: focused `42/42` GREEN; `npm test` `214/214` GREEN; `git diff --check` GREEN; `D-013` não ocorreu; probe ConPTY não foi necessário; worktree final limpa; nenhum arquivo rastreado foi alterado pelo Reviewer; nenhum push, merge ou deploy.
+- A cobertura independente incluiu C0/C1; CSI, REP, movimentos, insert/delete/erase, queries/private/intermediates; SGR; OSC/APC/DCS/PM/SOS; formas 7-bit/C1 e incompletas; CR/LF/CRLF/backspace; assignments bare/camel/Pascal/snake/kebab/dotted/quoted; CLI; Authorization/Bearer/tokens/private keys; JSON/YAML/PowerShell e multiline; chunk único, chunks arbitrários e 1-byte; boundaries; live fragment por fragmento; `inspect()`/snapshot/reopen; abort/capacity; autorização; retenção; checksum; root safety; symlink/junction; getters/proxies/objetos hostis; frozen/detached.
+- Nenhum canário alcançou live, `inspect()`, disco ou reopen. Findings P1, P2, P3 e informational de segurança: nenhum.
+- Medianas independentes em chunks de 1 byte para 2k/4k/8k/12k/16k: comum `1.591 / 1.617 / 4.745 / 5.668 / 7.213 ms`; assignment seguro `0.988 / 1.870 / 3.558 / 5.762 / 8.417 ms`; terminal `1.071 / 1.837 / 3.802 / 4.330 / 5.917 ms`; string-control `0.714 / 1.376 / 2.450 / 3.658 / 5.127 ms`; LF `0.774 / 1.530 / 3.733 / 6.203 / 9.835 ms`; CRLF `0.891 / 1.696 / 3.383 / 5.570 / 8.887 ms`; combinado adversarial `0.974 / 2.010 / 5.963 / 6.158 / 8.104 ms`.
+- As fronteiras 4095/4096/4097/8191/8192/8193 também passaram sem liberação de canário.
+- `GREEN_LOCAL_A-001` registra somente a passagem do gate A-001 exigido para o candidate atual. Não torna P4-PR02 `PROVEN`, não autoriza por si só integração/merge e não cria precedente para outras PRs. Também não equivale ao Security Review externo indisponível.
