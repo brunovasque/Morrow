@@ -2,7 +2,7 @@
 
 - contract: `MORROW-MVO-001`
 - PR-ID: `P4-PR02`
-- estado: `PROVEN (PR #18 integrada; closure-record documental pendente de integração)`
+- estado: `PROVEN (PR #18 e closure-record PR #19 integradas; P4-PR03 é a próxima unidade)`
 - formato durável: `morrow.transcript/1.0`
 - implementação: `src/stream-transcript.ts`
 - candidate de código anterior `dc0bbafbcf5c5b2b07f6ccddec081a465f296fcf`: `SUPERSEDED`/`INVALIDATED` antes de novo A-001, após contraprovas adicionais encontrarem superfícies ainda não cobertas; não houve novo A-001 sobre `dc0bbaf`
@@ -113,6 +113,6 @@ O gate de segurança foi `GREEN_LOCAL_A-001`, explicitamente não equivalente ao
 
 O reconciliador da closure-record branch, após o commit e com worktree limpa, retornou exatamente `allowed: false`, `state: BLOCKED_STATE_DIVERGENCE`, `nextPrId: P4-PR03`, `nextAuthorizedAction: START_P4_PR03` e `reasons: [git_branch_mismatch:mvo/p4-pr02-proven-record]`. No checkout detached da conferência, a decisão auditada é `EXPECTED_DETACHED_CONTEXT_DIVERGENCE`, porque `git branch --show-current` é vazio e o reconciliador é branch-aware; isso não representa regressão do artefato integrado.
 
-PR #18 permaneceu o único veículo de integração do produto/código. Depois do merge, o registro final `PROVEN` não podia ser acrescentado nela; sob `write mode: pr-only`, esta closure-record será transportada por PR documental. Ela não é unidade contratual nova, não contém código/runtime/testes, não reinicia A-001, não reinicia regressão de produto e não constitui P4-PR03. P4-PR03 permanece proibida até o registro chegar à branch de integração.
+PR #18 permaneceu o único veículo de integração do produto/código. Depois do merge, o registro final `PROVEN` foi transportado por PR documental #19 e integrado no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A closure-record não é unidade contratual nova, não contém código/runtime/testes, não reinicia A-001, não reinicia regressão de produto e não constitui P4-PR03. P4-PR03 ainda não foi iniciada e não está bloqueada por essa closure-record.
 
 As provas desta PR usam apenas canários sintéticos e raízes temporárias sob `.morrow-test-tmp` no próprio repositório Morrow.

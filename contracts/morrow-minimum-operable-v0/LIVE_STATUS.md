@@ -13,15 +13,15 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR03`
 - `active_route_node`: `REPLAY_REHYDRATION_CURSORS_LIVENESS`
-- `active_subaction`: `P4_PR02_PROVEN_CLOSURE_RECORD_AWAITING_INTEGRATION`
+- `active_subaction`: `P4_PR03_PREFLIGHT`
 - `expected_branch_prefix`: `mvo/p4-pr03-`
 - `write_execution_allowed`: `no for integration/merge; START is coarse and not merge authorization`
 - `next_authorized_action`: `START_P4_PR03`
-- `next_authorized_actor`: `P4-PR03 permanece proibida até a closure-record documental de P4-PR02 chegar à branch de integração`
+- `next_authorized_actor`: `Orchestrator / Contract Engineer deve executar o preflight de P4-PR03; implementação somente após PRE_DISPATCH`
 
 ## Próxima ação exata
 
-P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com Auditor pré-merge `MERGE_READY`, regressão pós-merge verde e Auditor final `P4_PR02_PROVEN_READY`. A prova local `GREEN_LOCAL_A-001` não equivale ao Security Review externo indisponível e não cria precedente. A próxima unidade contratual identificada é P4-PR03, mas esta closure-record é somente documental e ainda aguarda integração; portanto P4-PR03 permanece proibida.
+P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com Auditor pré-merge `MERGE_READY`, regressão pós-merge verde e Auditor final `P4_PR02_PROVEN_READY`. A prova local `GREEN_LOCAL_A-001` não equivale ao Security Review externo indisponível e não cria precedente. A closure-record foi integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`; P4-PR03 é a próxima unidade contratual, não foi iniciada e não está mais bloqueada por essa pendência documental.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -43,7 +43,7 @@ Reconciliacao factual adicional de 2026-09-09: o A-001 do candidate `ba350658a39
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `PROVEN` | P4-PR02 `PROVEN` em PR #18 / merge `3738d787`; regressão pós-merge e Auditor final verdes; P4-PR03 é a próxima unidade, ainda proibida até a integração da closure-record |
+| P4 | `PROVEN` | P4-PR02 `PROVEN` em PR #18 / merge `3738d787`; closure-record da PR #19 integrada em `a7f0f49`; regressão pós-merge e Auditor final verdes; P4-PR03 é a próxima unidade e ainda não foi iniciada |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |
