@@ -1575,7 +1575,12 @@ function normalizeTerminalText(text: string): NormalizedTerminalText {
 }
 
 function terminalEscapeChangesCursor(sequence: string): boolean {
-  return /^\u001b\[[0-9;?]*[ABCDEFGHJKSTfnsu]$/u.test(sequence);
+  const match = /^\u001b\[[0-9;?]*([A-Za-z])$/u.exec(sequence);
+  if (!match) return false;
+  // REP (CSI Ps b) changes the rendered character stream by repeating the
+  // previous grapheme. It is intentionally fail-closed with cursor rewrites;
+  // this redactor does not emulate terminal display state.
+  return "ABCDEFGHJKSTbfnsu".includes(match[1]!);
 }
 
 function terminalEscapeEnd(text: string, start: number): number {

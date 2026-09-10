@@ -339,6 +339,56 @@ test("applies backspace semantics and fails closed on broader cursor rewrites be
   assert.match(disk, /version=1/);
 });
 
+test("red test: CSI REP can reconstruct a sensitive assignment outside the matcher", async (t) => {
+  const root = await makeRoot(t);
+  const redactor = new StreamRedactor({ policyId: "rep-red-test", sensitiveLiterals: [] });
+  const cases = [
+    "pas\u001b[1bword=VT_REPEAT_PASSWORD_CANARY",
+    "pas\u001b[bword=VT_REPEAT_DEFAULT_CANARY",
+    "acces\u001b[1bsToken=VT_REPEAT_ACCESS_TOKEN_CANARY",
+    "safe\u001b[2bline=VT_REPEAT_QUANTITY_CANARY",
+  ];
+  for (const input of cases) {
+    assert.equal(redactor.redact(input).text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  }
+  assert.equal(redactor.redact("safeField=public-value").text, "safeField=public-value");
+  assert.equal(redactor.redact("safe\u001b[2bline=public-value").text, TRANSCRIPT_REDACTION_PLACEHOLDER);
+
+  const incomplete = redactor.start(16_384);
+  const incompleteFragments = [
+    incomplete.push("pas\u001b["),
+    incomplete.push("1bword=VT_REPEAT_INCOMPLETE_CANARY"),
+    incomplete.finish(),
+  ];
+  assert.doesNotMatch(
+    incompleteFragments.map((fragment) => fragment.text).join(""),
+    /VT_REPEAT_INCOMPLETE_CANARY/,
+  );
+  assert.equal(
+    redactor.redact("pas\u001b[1").text,
+    TRANSCRIPT_REDACTION_PLACEHOLDER,
+  );
+
+  const store = await PersistentTranscriptStore.open(configuration(root, () => baseTime, {
+    redaction: { policyId: "rep-red-test", sensitiveLiterals: [] },
+  }));
+  const writer = store.beginRecord(request("record-rep-red"));
+  const fragments = [
+    writer.write("pas\u001b[1"),
+    writer.write("bword=VT_REPEAT_PASSWORD_CANARY"),
+  ];
+  const committed = await writer.commit();
+  fragments.push(committed.finalFragment);
+  const liveText = fragments.map((fragment) => fragment.text).join("");
+  const inspected = store.inspect("operator").records[0]?.content ?? "";
+  await store.close();
+  const disk = await allFileText(root);
+
+  assert.equal(liveText, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.equal(inspected, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.doesNotMatch(disk, /VT_REPEAT_PASSWORD_CANARY/);
+});
+
 test("consumes terminal string controls and fail-closes the existing line on cursor rewrites", async (t) => {
   const root = await makeRoot(t);
   const store = await PersistentTranscriptStore.open(configuration(root));
@@ -378,6 +428,11 @@ test("bounds repeated cursor-control normalization while fail-closing the affect
   const cases = [
     { name: "upper-prefix", input: upperPrefix, expected: upperPrefix },
     { name: "upper-prefix-cursor", input: upperPrefix + cursorSuffix, expected: TRANSCRIPT_REDACTION_PLACEHOLDER },
+    {
+      name: "upper-prefix-rep",
+      input: upperPrefix + "\u001b[1b".repeat(7_680),
+      expected: TRANSCRIPT_REDACTION_PLACEHOLDER,
+    },
   ];
 
   redactor.redact("safe\u001b[1D".repeat(64));
