@@ -283,3 +283,17 @@ deploy nem inicie P4-PR04.
 - este commit é somente `CONTROL_ROOT_DOCUMENTARY_RECONCILIATION`, descendente do Control Root anterior. `NEW_CONTROL_ROOT_SHA` é o SHA deste único commit documental, capturado após sua criação; não é novo candidate técnico e não substitui o `EXECUTION_ROOT_SHA`;
 - autorização exata: o Integrator pode somente fazer push da branch aprovada, abrir/atualizar PR contra `phase-2/runtime-v0`, capturar PR number/id, head/base SHA e URL/metadata factual disponível, executar os gates pós-abertura exigidos e retornar ao próximo gate. Merge não está autorizado; qualquer alteração técnica exige novo candidate e novo ciclo de review;
 - a sequência histórica fica preservada: Security GREEN → Reviewer GREEN → primeira auditoria `AUDIT_BLOCKED` por documentação → reconciliação documental → Auditor recheck `AUDIT_GREEN` → Integrator.
+
+## P4-PR03 — reconciliação documental da identidade da PR #21
+
+- `EXECUTION_ROOT_SHA`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`; permanece imutável e não é reidentificado pelo commit documental.
+- `OPENING_CONTROL_ROOT_SHA`: `de47fd7a3f919a7094a16c051548cef0a47bf51a`.
+- Identidade estável da PR: repositório `brunovasque/Morrow`; PR `#21`; URL `https://github.com/brunovasque/Morrow/pull/21`; head branch `mvo/p4-pr03-replay-rehydration`; base branch `phase-2/runtime-v0`.
+- Opening PR head SHA: `de47fd7a3f919a7094a16c051548cef0a47bf51a`; opening base SHA: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`.
+- Estado factual na abertura: PR `OPEN`, não draft, mergeable; branch remota criada; remote head na abertura igual a `de47fd7a3f919a7094a16c051548cef0a47bf51a`; PR criada contra `phase-2/runtime-v0`.
+- Gates frescos preservados: Security `GREEN`; Reviewer `GREEN` com `REVIEW_READY_FOR_AUDITOR`; Auditor `GREEN` com `AUDIT_GREEN — P4_PR03_READY_FOR_INTEGRATOR`; Integrator autorizado para a etapa pós-abertura.
+- Abertura registrou nenhum check automático reportado, diff de `16 paths`, zero workflow/package drift e `npm run contract:reconcile` como `allowed=true`, `READY_FOR_EXECUTION`, `START_P4_PR03`.
+- Merge está explicitamente proibido. O Integrator informou zero mutação local; o push autorizado é normal/fast-forward, sem force.
+- Estado documental: `PR_IDENTITY_VERSIONED`. Isso versiona a identidade estável e não autoriza merge, não cria unidade nova e não transforma o commit documental em requisito recursivo de conter seu próprio SHA como head atual da PR.
+- O novo commit será o novo Control Root documental, descendente do opening Control Root. Isso não cria nova Execution Root, não muda a unidade P4-PR03 e não exige re-review técnica apenas por esta reconciliação documental.
+- Próximo ator único: o mesmo Integrator persistente, somente para confirmar o novo Control Root, fazer push fast-forward normal da mesma branch, confirmar que a PR #21 continua a mesma PR e que o remote head é o novo Control Root, executar/observar gates pós-PR e retornar ao próximo gate canônico. P4-PR03 permanece `RUNNING` e não `PROVEN`; P4-PR04 permanece `PENDING`.
