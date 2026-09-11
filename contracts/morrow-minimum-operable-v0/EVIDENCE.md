@@ -270,3 +270,16 @@ deploy nem inicie P4-PR04.
 - causa exclusiva do bloqueio: `REVIEW_READY_FOR_AUDITOR` ainda não estava versionado e `LIVE_STATUS` ainda projetava `P4_PR03_INDEPENDENT_REVIEW_PENDING`;
 - esta reconciliação é o novo Control Root documental descendente de `02d64f74...`; `NEW_CONTROL_ROOT_SHA` é o SHA deste único commit documental, capturado após sua criação. Não é novo candidate técnico e não altera o `EXECUTION_ROOT_SHA`;
 - autorização: Auditor recheck pendente; `AUDIT_GREEN — P4_PR03_READY_FOR_INTEGRATOR` é obrigatório antes de qualquer push, abertura de PR, integração ou merge.
+
+## P4-PR03 — Auditor recheck GREEN
+
+- `EXECUTION_ROOT_SHA`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a` permanece imutável;
+- Control Root anterior: `c242c06a3cfa31f9b04ce28a325e4e434b4b0f17`;
+- Control Root auditado no recheck: `c242c06a3cfa31f9b04ce28a325e4e434b4b0f17`;
+- o Auditor independente revalidou os blockers anteriores — `documentation`, `independence evidence` e `authorization` — e confirmou que todos foram resolvidos;
+- confirmações do Auditor: genealogia GREEN; delta documental somente docs; zero mutação técnica; Reviewer versionado e independente; Security Review fresh; estado canônico coerente; reconciler `allowed=true`; zero mutação pelo Auditor;
+- resultado exato: `AUDIT_GREEN — P4_PR03_READY_FOR_INTEGRATOR`;
+- determinação do Auditor: `AUDIT_VERDICT_MUST_BE_VERSIONED_BEFORE_INTEGRATOR`;
+- este commit é somente `CONTROL_ROOT_DOCUMENTARY_RECONCILIATION`, descendente do Control Root anterior. `NEW_CONTROL_ROOT_SHA` é o SHA deste único commit documental, capturado após sua criação; não é novo candidate técnico e não substitui o `EXECUTION_ROOT_SHA`;
+- autorização exata: o Integrator pode somente fazer push da branch aprovada, abrir/atualizar PR contra `phase-2/runtime-v0`, capturar PR number/id, head/base SHA e URL/metadata factual disponível, executar os gates pós-abertura exigidos e retornar ao próximo gate. Merge não está autorizado; qualquer alteração técnica exige novo candidate e novo ciclo de review;
+- a sequência histórica fica preservada: Security GREEN → Reviewer GREEN → primeira auditoria `AUDIT_BLOCKED` por documentação → reconciliação documental → Auditor recheck `AUDIT_GREEN` → Integrator.
