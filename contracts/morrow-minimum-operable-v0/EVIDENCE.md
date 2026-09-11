@@ -470,3 +470,13 @@ com blocker arquitetural real ou candidate completo pronto para o próximo gate.
 - evidência do Executor preservada: focused P4-PR04 `5/5`, regressões das superfícies tocadas `156/156`, `npm test` `256/256`, focused P4-PR03 `29/29`, D-013 ausente e fora do escopo; falhas intermediárias foram ambientais/intermitentes pré-existentes e não alteraram o resultado final;
 - estado contratual: P4-PR04 permanece `RUNNING`; candidate está `FROZEN_FOR_INDEPENDENT_REVIEW`; não há autorização de integração/merge e nenhum PR foi aberto;
 - próximo ator único: Reviewer independente P4-PR04, sessão nova e read-only, conferindo candidate completo, Security Review, execution/control roots, escopo, cobertura, regressão e limites. Esta entrada não declara `PROVEN`.
+
+## P4-PR04 — Independent Reviewer BLOCKED e retorno ao Executor
+
+- objeto revisado: candidate `8c89bf7af2fc5609cc02acf70966098b3c6261e1`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, Control Root documental `d1c4242897540167211d7d850ecdad514e48053c`;
+- resultado recebido do Reviewer independente: `REVIEW_BLOCKED` por classes `technical`, `coverage` e `environment`; o Reviewer permaneceu read-only e não promoveu o candidate a `PROVEN`;
+- lacuna confirmada no disco: `src/worker-session-stream.ts` importa `TerminalSessionManager`, `StreamRedactor` e `JsonlEventLog`, mas não compõe `LiveActivity`, `PersistentTranscriptStore`, snapshot ou `WorkerRecoveryCoordinator`, exigidos pela TASK em `EVIDENCE.md:357-386` para live, replay, disco e reopen;
+- focused independente reportado: `1/5`; quatro casos falharam antes do harness por `EPERM` em `mkdtemp`/`TEMP`. A cobertura comportamental permanece inconclusiva e o resultado não é GREEN;
+- consequência: a Security Review GREEN anterior permanece evidência do escopo que revisou, mas não satisfaz a cobertura da unidade quando a composição exigida está ausente. O candidate permanece bloqueado, sem PR, push, merge ou deploy;
+- rota autorizada: `START_P4_PR04` continua coarse; o próximo ator único é o Executor P4-PR04 persistente, na mesma unidade e branch, para integrar somente as primitivas já provadas, criar RED/contraprovas, resolver o bloqueio ambiental sem mascará-lo e repetir as regressões antes de novo Reviewer;
+- nenhum owner decision é necessário: destino, escopo mestre, contrato e ordem das PRs não mudam. Esta reconciliação não altera `CONTRACT.md` ou `TARGET.md` e não é mudança técnica.
