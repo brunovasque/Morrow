@@ -174,3 +174,11 @@ O campo `next_authorized_action` de `LIVE_STATUS.md` é a projeção humana dess
 - Prova de conclusão: duas sessões reais distintas observadas incrementalmente antes do término e reconstruídas após restart, sem mistura, duplicação ou perda por sessão.
 - Próximo ator: Executor P4-PR04 persistente. `SESSION_REUSE_BY_DEFAULT`; sessões independentes somente para Security Reviewer e Reviewer/Auditor quando os gates exigirem.
 - P4-PR04 não inclui UI/P5, panes/xterm, chat, reunião, notifications, Nexus, deploy, refactors oportunistas, D-013, P4-PR03 ou Enova/outros repositórios.
+
+## Estado atual — P4-PR04 candidate congelado, Security GREEN
+
+- O candidate HEAD é `8c89bf7af2fc5609cc02acf70966098b3c6261e1`, na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`; o kickoff/control root de abertura é `6f593eab2b843220572d4849c6f1ff1ab8e3a6ee`.
+- A correção de durabilidade terminal foi validada: sem evento terminal durável, `completion` rejeita `worker_session_terminal_persistence_failed`; live fica `failed`, reopen fica `recoverable/offline`, replay não fabrica EXIT e a sessão B permanece isolada.
+- Security Review independente emitiu `SECURITY_REVIEW_GREEN — P4_PR04_READY_FOR_INDEPENDENT_REVIEW`; focused `5/5`, regressões relacionadas `121/121`, diff-check GREEN, reconciliador `allowed=true` e nenhum P1/P2. O Executor também registrou `156/156` nas regressões das superfícies tocadas e full `256/256`.
+- P4-PR04 continua `RUNNING`, candidate `FROZEN_FOR_INDEPENDENT_REVIEW`; não há PR, merge, deploy ou owner decision. `START_P4_PR04` permanece somente como a autorização coarse de unidade; não autoriza nova escrita técnica.
+- Próximo ator único: Reviewer independente, sessão nova e read-only. Deve conferir mecanicamente candidate/roots, delta e allowlist, Security Review, cobertura, regressão, limites e ausência de drift; não deve corrigir, commitar, abrir PR, fazer merge ou iniciar outra unidade.

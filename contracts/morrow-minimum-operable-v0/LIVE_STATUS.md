@@ -13,23 +13,24 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR04`
 - `active_route_node`: `MULTI_SESSION_STREAM_API_OBSERVABILITY`
-- `active_subaction`: `P4_PR04_KICKOFF_PRE_DISPATCH`
+- `active_subaction`: `P4_PR04_SECURITY_REVIEW_GREEN_HANDOFF`
 - `expected_branch_prefix`: `mvo/p4-pr04-`
-- `write_execution_allowed`: `yes for declared P4-PR04 Executor after PRE_DISPATCH; no push/PR/merge`
+- `write_execution_allowed`: `no technical writes; independent Reviewer is read-only; no push/PR/merge`
 - `next_authorized_action`: `START_P4_PR04`
-- `next_authorized_actor`: `Executor P4-PR04 persistente`
+- `next_authorized_actor`: `Independent Reviewer P4-PR04`
 - `p4_pr03_execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
 - `p4_pr04_base_sha`: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`
 - `p4_pr04_branch`: `mvo/p4-pr04-multi-session-stream`
-- `execution_root_sha`: `not_created_for_P4_PR04`
-- `opening_control_root_sha`: `captured_after_kickoff_commit`
+- `execution_root_sha`: `8c89bf7af2fc5609cc02acf70966098b3c6261e1`
+- `candidate_sha`: `8c89bf7af2fc5609cc02acf70966098b3c6261e1`
+- `opening_control_root_sha`: `6f593eab2b843220572d4849c6f1ff1ab8e3a6ee`
 - `pr_identity_state`: `NOT_OPEN`
 - `pr_number`: `none`
 - `pr_head_sha_at_opening`: `not_applicable`
 - `pr_base_sha_at_opening`: `not_applicable`
 - `pr_state_at_opening`: `not_applicable`
-- `merge_ready_state`: `NOT_APPLICABLE_BEFORE_CANDIDATE`
-- `merge_ready_reason`: `candidate_and_independent_gates_required`
+- `merge_ready_state`: `NOT_READY_BEFORE_INDEPENDENT_REVIEW`
+- `merge_ready_reason`: `independent_reviewer_and_auditor_required`
 - `merge_authorized`: `no`
 - `pre_merge_control_root_sha`: `not_applicable`
 - `integrated_merge_sha`: `not_applicable`
@@ -39,10 +40,12 @@
 - `final_audit_state`: `not_started`
 - `p4_pr03_state`: `PROVEN`
 - `p4_pr04_state`: `RUNNING`
+- `candidate_state`: `FROZEN_FOR_INDEPENDENT_REVIEW`
+- `security_review_state`: `SECURITY_REVIEW_GREEN`
 
 ## Próxima ação exata
 
-P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está `RUNNING` na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`, com PRE_DISPATCH e TASK registradas abaixo; próximo ator Executor P4-PR04 persistente.
+P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está `RUNNING` na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`, candidate congelado em `8c89bf7af2fc5609cc02acf70966098b3c6261e1`; Security Review independente está `GREEN`; próximo ator é o Reviewer independente read-only.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -176,3 +179,11 @@ Ao concluir uma PR:
 P4-PR04 está `RUNNING` na base integrada `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, na branch `mvo/p4-pr04-multi-session-stream`. P4-PR03 e P3-PR04 estão `PROVEN`; não há owner decision ou blocking question aberta. O próximo ator é o Executor P4-PR04 persistente, autorizado a executar a TASK versionada em `EVIDENCE.md`, sem push, PR, merge ou deploy.
 
 O núcleo é a composição local `WorkerSessionStream`: catálogo estável por sessão, fan-out incremental filtrado, cursor/replay por sessão e reconstrução após restart usando Event Log, transcript/redaction, Live Activity e recovery já provados. Não há UI, rede, socket externo, Nexus ou nova autoridade nesta unidade. Security Review normal independente será obrigatório sobre o candidate completo antes da integração; A-001 não se aplica.
+
+## Reconciliação factual de 2026-09-11 — P4-PR04 candidate congelado
+
+O candidate HEAD `8c89bf7af2fc5609cc02acf70966098b3c6261e1` foi congelado após a correção de persistência terminal. O Security Review independente revalidou o objeto completo e emitiu `SECURITY_REVIEW_GREEN — P4_PR04_READY_FOR_INDEPENDENT_REVIEW`: focused P4-PR04 `5/5`, regressões relacionadas `121/121`, `git diff --check` GREEN, `npm run contract:reconcile` `allowed=true`/`READY_FOR_EXECUTION`, nenhum finding P1/P2 e worktree do Reviewer limpa, sem mutação e sem alteração do HEAD.
+
+A contraprova de durabilidade reproduziu a indisponibilidade do append terminal: `completion` rejeitou com `worker_session_terminal_persistence_failed`; a sessão viva ficou `failed`, o reopen derivou `recoverable`/`offline`, o replay preservou somente `STARTED`, a sessão B permaneceu isolada e não houve unhandled rejection nem deadlock. O resultado não autoriza merge, PR ou integração.
+
+P4-PR04 continua `RUNNING`, com `candidate_state=FROZEN_FOR_INDEPENDENT_REVIEW`; `START_P4_PR04` permanece a autorização coarse de unidade no reconciliador, não uma nova autorização de escrita. O próximo ator único é o Reviewer independente, em sessão nova e read-only, para conferir candidate, Security Review, escopo, cobertura, regressão, roots e limites. Não há owner decision ou pergunta bloqueante aberta.
