@@ -11,6 +11,7 @@ import {
 } from "../src/local-worker-service.ts";
 import {
   assertManagedRootDisjointFromPrivateStateRegion,
+  WorkerPrivateStateRoot,
   workerPrivateStateRegionPath,
 } from "../src/worker-private-state.ts";
 
@@ -187,6 +188,29 @@ test("derives private state from the installation and reserves it across workers
     () => assertManagedRootDisjointFromPrivateStateRegion(privateRootRegion.toUpperCase()),
     /worker_managed_root_overlaps_private_state_region/,
   );
+});
+
+test("uses one workerId validator for Local Worker and private-state factory", async (t) => {
+  const { root } = await harness();
+  t.after(async () => await rm(root, { recursive: true, force: true }));
+  const validIds = ["worker-1", "Worker.A_2", "a", "A".repeat(64)];
+  for (const workerId of validIds) {
+    assert.doesNotThrow(() => new LocalWorkerService({ ...configuration(join(root, ".morrow", "workers", workerId)), workerId }));
+    assert.doesNotThrow(() => WorkerPrivateStateRoot.forWorker(workerId, []));
+  }
+  const invalidIds = ["a/b", "a\\b", "a/../../outside", "C:\\outside", "\\\\server\\share", "/absolute", "."];
+  for (const workerId of invalidIds) {
+    assert.throws(
+      () => WorkerPrivateStateRoot.forWorker(workerId, []),
+      /worker_id_invalid/,
+      `factory must reject ${workerId}`,
+    );
+    assert.throws(
+      () => new LocalWorkerService({ ...configuration(join(root, ".morrow", "workers", "valid")), workerId }),
+      /worker_id_invalid/,
+      `Local Worker must reject ${workerId}`,
+    );
+  }
 });
 
 test("refuses to adopt a nonempty or other-worker managed root", async () => {

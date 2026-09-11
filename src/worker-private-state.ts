@@ -16,6 +16,7 @@ import { dirname, join, parse, relative, resolve, sep } from "node:path";
 const privateRootFormat = "morrow.worker-private-state/v1" as const;
 const lockFormat = "morrow.worker-private-lock/v1" as const;
 const lockName = "event-log-anchor.lock";
+const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u;
 const installationRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const privateStateRegion = join(installationRoot, "private", "worker-installation");
@@ -46,6 +47,14 @@ export interface WorkerPrivateStateLock {
   release(): Promise<void>;
 }
 
+export function isValidWorkerId(value: unknown): value is string {
+  return typeof value === "string" && workerIdPattern.test(value);
+}
+
+export function assertValidWorkerId(value: unknown): asserts value is string {
+  if (!isValidWorkerId(value)) throw new Error("worker_id_invalid");
+}
+
 export class WorkerPrivateStateRoot {
   readonly workerId: string;
   readonly privateRoot: string;
@@ -68,8 +77,8 @@ export class WorkerPrivateStateRoot {
    * operational configuration can select the worker identity, but not a path.
    */
   static forWorker(workerId: string, managedRoots: readonly string[]): WorkerPrivateStateRoot {
-    if (typeof workerId !== "string" || !identifierPattern.test(workerId)
-      || !Array.isArray(managedRoots)
+    assertValidWorkerId(workerId);
+    if (!Array.isArray(managedRoots)
       || managedRoots.some((root) => typeof root !== "string" || !isAbsolute(root))) {
       throw new Error("worker_private_state_bootstrap_invalid");
     }
@@ -356,8 +365,7 @@ async function closeEndpoint(server: Server): Promise<void> {
 
 function assertBootstrap(configuration: WorkerPrivateStateBootstrap): void {
   if (!isDataRecord(configuration)
-    || typeof configuration.workerId !== "string"
-    || !identifierPattern.test(configuration.workerId)
+    || !isValidWorkerId(configuration.workerId)
     || typeof configuration.privateRoot !== "string"
     || !isAbsolute(configuration.privateRoot)
     || !Array.isArray(configuration.managedRoots)

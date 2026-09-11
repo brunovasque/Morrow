@@ -3,6 +3,7 @@ import { lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/pr
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { WORKER_PROTOCOL_VERSION } from "./worker-protocol.ts";
 import {
+  isValidWorkerId,
   assertManagedRootDisjointFromPrivateStateRegion,
   WorkerPrivateStateRoot,
 } from "./worker-private-state.ts";
@@ -47,7 +48,6 @@ interface ManagedRootMarker {
 }
 
 const markerName = ".morrow-local-worker-root.json";
-const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const protocolVersionPattern = /^\d+\.\d+$/;
 
 export class LocalWorkerService {
@@ -314,7 +314,7 @@ function assertConfiguration(configuration: LocalWorkerServiceConfiguration): vo
   const allowed = new Set(["workerId", "managedRoot", "operatorOwnedRoots", "supportedProtocolVersions"]);
   const unknown = Object.keys(configuration).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`worker_configuration_unknown_field:${unknown}`);
-  if (!workerIdPattern.test(configuration.workerId)) throw new Error("worker_id_invalid");
+  if (!isValidWorkerId(configuration.workerId)) throw new Error("worker_id_invalid");
   if (typeof configuration.managedRoot !== "string" || !isAbsolute(configuration.managedRoot)) {
     throw new Error("worker_managed_root_must_be_absolute");
   }
@@ -375,7 +375,7 @@ function isMarker(value: unknown): value is ManagedRootMarker {
     && Object.keys(value).length === 2
     && value.format === "morrow-local-worker-root/v1"
     && typeof value.workerId === "string"
-    && workerIdPattern.test(value.workerId);
+    && isValidWorkerId(value.workerId);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
