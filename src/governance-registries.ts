@@ -1,3 +1,8 @@
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { constants } from "node:fs";
+import { lstat, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+
 export interface RegistryRef {
   id: string;
   version: string;
@@ -162,6 +167,29 @@ export type SecretBrokerResult =
       | "SECRET_HANDLE_INVALID";
     detail: string;
   };
+
+export interface EventLogHeadAnchor {
+  authorityRef: string;
+  eventLogId: string;
+  contractId: string;
+  streamId: string;
+  generation: number;
+  sequence: number;
+  eventTag: string;
+  phase: "prepared" | "committed";
+  expectedPrevious: { generation: number; sequence: number; eventTag: string } | null;
+}
+
+export interface EventLogAuthorityCapability {
+  readonly authorityRef: string;
+  readonly eventLogId: string;
+  authenticateEvent(domain: string): Promise<string>;
+  verifyEvent(domain: string, tag: string): Promise<boolean>;
+  readAnchors(): Promise<readonly EventLogHeadAnchor[]>;
+  prepareHead(anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void>;
+  commitHead(anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void>;
+  abortHead(anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void>;
+}
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const versionPattern = /^\d+\.\d+\.\d+$/;
@@ -387,6 +415,18 @@ export class SecretBrokerBoundary {
     return issuance;
   }
 
+  /**
+   * Issues only the opaque Event Log capability. The authority material stays
+   * in the broker-owned store and is never returned to the consumer.
+   */
+  eventLogAuthority(
+    storageRoot: string,
+    eventLogId: string,
+    authorityRef = "morrow.event-log-root",
+  ): EventLogAuthorityCapability {
+    return new PersistentEventLogAuthority(storageRoot, authorityRef).capability(eventLogId);
+  }
+
   private async issueOnce(approved: ResolvedSecretAccess): Promise<SecretBrokerResult> {
     let issued: unknown;
     try {
@@ -409,6 +449,331 @@ export class SecretBrokerBoundary {
     this.issuedHandleOwners.set(handle.handleId, approved);
     return { ok: true, handle };
   }
+}
+
+const eventLogHeadFormat = "morrow.event-log-head/1" as const;
+const eventLogAuthorityKeyBytes = 32;
+const eventLogTagPattern = /^[0-9a-f]{64}$/u;
+const defaultEventLogAuthorityRoot = join(resolve(process.cwd()), "private", "morrow-event-authority-v1");
+const defaultEventLogAuthorities = new Map<string, PersistentEventLogAuthority>();
+
+interface StoredEventLogHeadState {
+  format: typeof eventLogHeadFormat;
+  authorityRef: string;
+  eventLogId: string;
+  anchors: Array<EventLogHeadAnchor & { authorityTag: string }>;
+}
+
+export class PersistentEventLogAuthority {
+  private readonly storageRoot: string;
+  private readonly authorityRef: string;
+  private readonly keyPath: string;
+  private readonly mutationTail: { current: Promise<void> } = { current: Promise.resolve() };
+  private authorityKey: Buffer | null = null;
+
+  constructor(storageRoot: string, authorityRef = "morrow.event-log-root") {
+    this.storageRoot = resolve(storageRoot);
+    this.authorityRef = authorityRef;
+    this.keyPath = join(this.storageRoot, "event-log-authority-v1.key");
+  }
+
+  capability(eventLogId: string): EventLogAuthorityCapability {
+    if (!eventLogTagPattern.test(eventLogId)) throw new Error("event_log_authority_binding_invalid");
+    const authority = this;
+    return Object.freeze({
+      authorityRef: this.authorityRef,
+      eventLogId,
+      authenticateEvent: async (domain: string) => await authority.authenticateEvent(domain),
+      verifyEvent: async (domain: string, tag: string) => await authority.verifyEvent(domain, tag),
+      readAnchors: async () => await authority.readAnchors(eventLogId),
+      prepareHead: async (anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null) => {
+        await authority.prepareHead(eventLogId, anchor, expectedPrevious);
+      },
+      commitHead: async (anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null) => {
+        await authority.commitHead(eventLogId, anchor, expectedPrevious);
+      },
+      abortHead: async (anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null) => {
+        await authority.abortHead(eventLogId, anchor, expectedPrevious);
+      },
+    });
+  }
+
+  private async authenticateEvent(domain: string): Promise<string> {
+    return createHmac("sha256", await this.loadAuthorityKey())
+      .update(`morrow.event-log/auth/v4|${domain}`, "utf8")
+      .digest("hex");
+  }
+
+  private async verifyEvent(domain: string, tag: string): Promise<boolean> {
+    if (!eventLogTagPattern.test(tag)) return false;
+    try {
+      const expected = createHmac("sha256", await this.loadAuthorityKey(false))
+        .update(`morrow.event-log/auth/v4|${domain}`, "utf8")
+        .digest("hex");
+      return constantTimeHexEqual(expected, tag);
+    } catch {
+      return false;
+    }
+  }
+
+  private async readAnchors(eventLogId: string): Promise<readonly EventLogHeadAnchor[]> {
+    const state = await this.readHeadState(eventLogId);
+    return state.anchors.map(({ authorityTag: _authorityTag, ...anchor }) => structuredClone(anchor));
+  }
+
+  private async prepareHead(eventLogId: string, anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void> {
+    await this.withMutation(async () => {
+      const state = await this.readHeadState(eventLogId);
+      const current = findAnchor(state.anchors, anchor);
+      assertAnchorBinding(anchor, this.authorityRef, eventLogId);
+      assertExpectedPrevious(current, expectedPrevious);
+      if (anchor.phase !== "prepared" || !eventLogTagPattern.test(anchor.eventTag)
+        || anchor.sequence !== (expectedPrevious?.sequence ?? 0) + 1
+        || anchor.generation !== (expectedPrevious?.generation ?? 0) + 1
+        || !sameAnchorSummary(anchor.expectedPrevious, expectedPrevious)) {
+        throw new Error("event_log_anchor_transition_invalid");
+      }
+      if (current?.phase === "prepared") throw new Error("event_log_anchor_prepared");
+      state.anchors = replaceAnchor(state.anchors, await this.withAuthorityTag(anchor));
+      await this.writeHeadState(eventLogId, state);
+    });
+  }
+
+  private async commitHead(eventLogId: string, anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void> {
+    await this.withMutation(async () => {
+      const state = await this.readHeadState(eventLogId);
+      const current = findAnchor(state.anchors, anchor);
+      assertAnchorBinding(anchor, this.authorityRef, eventLogId);
+      if (!current || current.phase !== "prepared" || anchor.phase !== "committed"
+        || !sameAnchorSummary(current, anchor) || !sameAnchorSummary(current.expectedPrevious, expectedPrevious)
+        || !sameAnchorSummary(anchor.expectedPrevious, expectedPrevious)) {
+        throw new Error("event_log_anchor_commit_invalid");
+      }
+      state.anchors = replaceAnchor(state.anchors, await this.withAuthorityTag(anchor));
+      await this.writeHeadState(eventLogId, state);
+    });
+  }
+
+  private async abortHead(eventLogId: string, anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void> {
+    await this.withMutation(async () => {
+      const state = await this.readHeadState(eventLogId);
+      const current = findAnchor(state.anchors, anchor);
+      assertAnchorBinding(anchor, this.authorityRef, eventLogId);
+      if (!current || current.phase !== "prepared" || !sameAnchorSummary(current, anchor)
+        || !sameAnchorSummary(anchor.expectedPrevious, expectedPrevious)) {
+        throw new Error("event_log_anchor_abort_invalid");
+      }
+      if (!expectedPrevious) {
+        state.anchors = state.anchors.filter((item) => !sameAnchorKey(item, anchor));
+      } else {
+        const restored: EventLogHeadAnchor = {
+          ...anchor,
+          generation: expectedPrevious.generation,
+          sequence: expectedPrevious.sequence,
+          eventTag: expectedPrevious.eventTag,
+          phase: "committed",
+          expectedPrevious: null,
+        };
+        state.anchors = replaceAnchor(state.anchors, await this.withAuthorityTag(restored));
+      }
+      await this.writeHeadState(eventLogId, state);
+    });
+  }
+
+  private async readHeadState(eventLogId: string): Promise<StoredEventLogHeadState> {
+    const path = join(this.storageRoot, `${eventLogId}.head.json`);
+    let value: unknown;
+    try {
+      value = JSON.parse(await readFile(path, "utf8"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { format: eventLogHeadFormat, authorityRef: this.authorityRef, eventLogId, anchors: [] };
+      }
+      throw new Error("event_log_anchor_invalid");
+    }
+    if (!isDataRecord(value) || exactKeys(value, ["format", "authorityRef", "eventLogId", "anchors"])
+      || value.format !== eventLogHeadFormat || value.authorityRef !== this.authorityRef || value.eventLogId !== eventLogId
+      || !Array.isArray(value.anchors)) throw new Error("event_log_anchor_invalid");
+    const anchors: Array<EventLogHeadAnchor & { authorityTag: string }> = [];
+    for (const raw of value.anchors) {
+      const anchor = parseStoredAnchor(raw, this.authorityRef, eventLogId);
+      if (anchors.some((item) => sameAnchorKey(item, anchor))) throw new Error("event_log_anchor_duplicate");
+      if (!await this.verifyHeadTag(anchor, raw.authorityTag)) throw new Error("event_log_anchor_auth_invalid");
+      anchors.push({ ...anchor, authorityTag: raw.authorityTag });
+    }
+    return { format: eventLogHeadFormat, authorityRef: this.authorityRef, eventLogId, anchors };
+  }
+
+  private async writeHeadState(eventLogId: string, state: StoredEventLogHeadState): Promise<void> {
+    await mkdir(this.storageRoot, { recursive: true });
+    const path = join(this.storageRoot, `${eventLogId}.head.json`);
+    const temp = `${path}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+    try {
+      await writeFile(temp, `${JSON.stringify(state)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      await rename(temp, path);
+    } catch {
+      await unlink(temp).catch(() => undefined);
+      throw new Error("event_log_anchor_write_failed");
+    }
+  }
+
+  private async withAuthorityTag(anchor: EventLogHeadAnchor): Promise<EventLogHeadAnchor & { authorityTag: string }> {
+    return { ...anchor, authorityTag: await this.authorityTag(anchor) };
+  }
+
+  private async authorityTag(anchor: EventLogHeadAnchor, createIfMissing = true): Promise<string> {
+    return createHmac("sha256", await this.loadAuthorityKey(createIfMissing))
+      .update(`morrow.event-log/head/v1|${JSON.stringify({
+        authorityRef: anchor.authorityRef,
+        eventLogId: anchor.eventLogId,
+        contractId: anchor.contractId,
+        streamId: anchor.streamId,
+        generation: anchor.generation,
+        sequence: anchor.sequence,
+        eventTag: anchor.eventTag,
+        phase: anchor.phase,
+        expectedPrevious: anchor.expectedPrevious,
+      })}`, "utf8")
+      .digest("hex");
+  }
+
+  private async verifyHeadTag(anchor: EventLogHeadAnchor, tag: string): Promise<boolean> {
+    if (!eventLogTagPattern.test(tag)) return false;
+    try {
+      return constantTimeHexEqual(await this.authorityTag(anchor, false), tag);
+    } catch {
+      return false;
+    }
+  }
+
+  private async loadAuthorityKey(createIfMissing = true): Promise<Buffer> {
+    if (this.authorityKey) return Buffer.from(this.authorityKey);
+    if (!createIfMissing) return await readKeyFile(this.keyPath);
+    await mkdir(this.storageRoot, { recursive: true });
+    try {
+      this.authorityKey = await readKeyFile(this.keyPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      try {
+        await writeFile(this.keyPath, randomBytes(eventLogAuthorityKeyBytes), { flag: "wx", mode: 0o600 });
+      } catch (createError) {
+        if ((createError as NodeJS.ErrnoException).code !== "EEXIST") throw new Error("event_log_authority_unavailable");
+      }
+      this.authorityKey = await readKeyFile(this.keyPath);
+    }
+    return Buffer.from(this.authorityKey);
+  }
+
+  private async withMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.mutationTail.current;
+    let release: () => void = () => undefined;
+    this.mutationTail.current = new Promise<void>((resolvePromise) => { release = resolvePromise; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+}
+
+export function defaultEventLogAuthority(eventLogId: string): EventLogAuthorityCapability {
+  let authority = defaultEventLogAuthorities.get(defaultEventLogAuthorityRoot);
+  if (!authority) {
+    authority = new PersistentEventLogAuthority(defaultEventLogAuthorityRoot);
+    defaultEventLogAuthorities.set(defaultEventLogAuthorityRoot, authority);
+  }
+  return authority.capability(eventLogId);
+}
+
+function assertAnchorBinding(anchor: EventLogHeadAnchor, authorityRef: string, eventLogId: string): void {
+  if (anchor.authorityRef !== authorityRef || anchor.eventLogId !== eventLogId
+    || !isIdentifier(anchor.contractId) || !eventLogTagPattern.test(anchor.streamId)) {
+    throw new Error("event_log_anchor_binding_invalid");
+  }
+}
+
+function assertExpectedPrevious(current: EventLogHeadAnchor | null, expectedPrevious: EventLogHeadAnchor | null): void {
+  if ((current === null) !== (expectedPrevious === null)
+    || (current && expectedPrevious && !sameAnchorSummary(current, expectedPrevious))) {
+    throw new Error("event_log_anchor_cas_conflict");
+  }
+}
+
+function parseStoredAnchor(value: unknown, authorityRef: string, eventLogId: string): EventLogHeadAnchor & { authorityTag: string } {
+  if (!isDataRecord(value) || exactKeys(value, ["authorityRef", "eventLogId", "contractId", "streamId", "generation", "sequence", "eventTag", "phase", "expectedPrevious", "authorityTag"])) {
+    throw new Error("event_log_anchor_invalid");
+  }
+  if (value.authorityRef !== authorityRef || value.eventLogId !== eventLogId
+    || typeof value.contractId !== "string" || typeof value.streamId !== "string"
+    || !isIdentifier(value.contractId) || !eventLogTagPattern.test(value.streamId)
+    || !Number.isSafeInteger(value.generation) || value.generation < 1
+    || !Number.isSafeInteger(value.sequence) || value.sequence < 1
+    || !eventLogTagPattern.test(value.eventTag)
+    || (value.phase !== "prepared" && value.phase !== "committed")
+    || (value.expectedPrevious !== null && (!isDataRecord(value.expectedPrevious)
+      || exactKeys(value.expectedPrevious, ["generation", "sequence", "eventTag"])
+      || !Number.isSafeInteger(value.expectedPrevious.generation) || value.expectedPrevious.generation < 1
+      || !Number.isSafeInteger(value.expectedPrevious.sequence) || value.expectedPrevious.sequence < 1
+      || !eventLogTagPattern.test(value.expectedPrevious.eventTag)))
+    || !eventLogTagPattern.test(value.authorityTag)) throw new Error("event_log_anchor_invalid");
+  return {
+    authorityRef: value.authorityRef,
+    eventLogId: value.eventLogId,
+    contractId: value.contractId,
+    streamId: value.streamId,
+    generation: value.generation,
+    sequence: value.sequence,
+    eventTag: value.eventTag,
+    phase: value.phase,
+    expectedPrevious: value.expectedPrevious,
+    authorityTag: value.authorityTag,
+  };
+}
+
+function findAnchor(anchors: readonly EventLogHeadAnchor[], target: EventLogHeadAnchor): EventLogHeadAnchor | null {
+  return anchors.find((item) => sameAnchorKey(item, target)) ?? null;
+}
+
+function replaceAnchor(anchors: readonly (EventLogHeadAnchor & { authorityTag: string })[], replacement: EventLogHeadAnchor & { authorityTag: string }): Array<EventLogHeadAnchor & { authorityTag: string }> {
+  return [...anchors.filter((item) => !sameAnchorKey(item, replacement)), replacement];
+}
+
+function sameAnchorKey(left: EventLogHeadAnchor, right: EventLogHeadAnchor): boolean {
+  return left.contractId === right.contractId && left.streamId === right.streamId;
+}
+
+function sameAnchorSummary(left: EventLogHeadAnchor | { generation: number; sequence: number; eventTag: string } | null, right: EventLogHeadAnchor | { generation: number; sequence: number; eventTag: string } | null): boolean {
+  if (left === null || right === null) return left === right;
+  return left.generation === right.generation && left.sequence === right.sequence
+    && constantTimeHexEqual(left.eventTag, right.eventTag);
+}
+
+async function readKeyFile(path: string): Promise<Buffer> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || before.isSymbolicLink() || before.size !== eventLogAuthorityKeyBytes) throw new Error("event_log_authority_key_invalid");
+    const key = await handle.readFile();
+    const after = await handle.stat();
+    const pathAfter = await lstat(path);
+    if (!after.isFile() || after.isSymbolicLink() || key.length !== eventLogAuthorityKeyBytes
+      || !sameFileMetadata(before, after) || !sameFileMetadata(before, pathAfter)) throw new Error("event_log_authority_key_invalid");
+    return key;
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
+function sameFileMetadata(left: { dev: number; ino: number; size: number; mtimeMs: number }, right: { dev: number; ino: number; size: number; mtimeMs: number }): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size && left.mtimeMs === right.mtimeMs;
+}
+
+function constantTimeHexEqual(expected: string, actual: string): boolean {
+  if (!eventLogTagPattern.test(expected) || !eventLogTagPattern.test(actual)) return false;
+  const expectedBytes = Buffer.from(expected, "hex");
+  const actualBytes = Buffer.from(actual, "hex");
+  return expectedBytes.length === actualBytes.length && timingSafeEqual(expectedBytes, actualBytes);
 }
 
 function parseWorkAuthorityRequest(value: unknown): WorkAuthorityRequest | null {

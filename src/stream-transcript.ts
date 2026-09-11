@@ -993,6 +993,29 @@ function pathsReferToSameLocation(left: string, right: string): boolean {
   return left === right;
 }
 
+/**
+ * Validates the nearest existing ancestor before a caller creates anything
+ * below it. Callers must invoke this before and after creating descendants.
+ */
+export async function assertCanonicalDirectoryPath(path: string): Promise<void> {
+  const requested = resolve(path);
+  let probe = requested;
+  while (true) {
+    try {
+      await validateCanonicalDirectory(probe);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        if (isTranscriptError(error)) throw error;
+        throw transcriptError("transcript_state_root_unsafe");
+      }
+      const parent = dirname(probe);
+      if (parent === probe) throw transcriptError("transcript_state_root_unsafe");
+      probe = parent;
+    }
+  }
+}
+
 function sameFileIdentity(left: { dev: number; ino: number; size: number; mtimeMs: number }, right: { dev: number; ino: number; size: number; mtimeMs: number }): boolean {
   return left.dev === right.dev && left.ino === right.ino
     && left.size === right.size && left.mtimeMs === right.mtimeMs;

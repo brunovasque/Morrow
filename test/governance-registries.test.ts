@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import {
   CapabilityRegistry,
   GovernanceResolver,
+  PersistentEventLogAuthority,
   RoleRegistry,
   SecretBrokerBoundary,
   SecretPolicyRegistry,
@@ -501,4 +504,56 @@ test("registry snapshots are detached and frozen against later configuration mut
   assert.equal(Object.isFrozen(resolved), true);
   assert.equal(Object.isFrozen(resolved.allowedPaths), true);
   assert.equal(registry.resolve("mutated"), null);
+});
+
+test("Secret Broker owns a persistent opaque Event Log authority and authenticates the external head", async (t) => {
+  const parent = join(process.cwd(), ".morrow-test-tmp");
+  const authorityRoot = await mkdtemp(join(parent, "authority-"));
+  t.after(async () => await rm(authorityRoot, { recursive: true, force: true }));
+  const eventLogId = "a".repeat(64);
+  const streamId = "b".repeat(64);
+  const authority = new PersistentEventLogAuthority(authorityRoot, "authority-one");
+  const capability = authority.capability(eventLogId);
+  const prepared = {
+    authorityRef: "authority-one",
+    eventLogId,
+    contractId: "contract-fixture",
+    streamId,
+    generation: 1,
+    sequence: 1,
+    eventTag: "c".repeat(64),
+    phase: "prepared" as const,
+    expectedPrevious: null,
+  };
+  await capability.prepareHead(prepared, null);
+  await capability.commitHead({ ...prepared, phase: "committed" }, null);
+  const anchors = await capability.readAnchors();
+  assert.equal(anchors.length, 1);
+  assert.equal(anchors[0]!.phase, "committed");
+  const state = await readFile(join(authorityRoot, eventLogId + ".head.json"), "utf8");
+  const key = await readFile(join(authorityRoot, "event-log-authority-v1.key"), "hex");
+  assert.equal(state.includes(key), false);
+  assert.equal("key" in capability, false);
+  await assert.rejects(
+    capability.prepareHead({ ...prepared, sequence: 2, generation: 2 }, null),
+    /event_log_anchor_cas_conflict/,
+  );
+
+  await writeFile(join(authorityRoot, "event-log-authority-v1.key"), Buffer.alloc(31));
+  await assert.rejects(
+    new PersistentEventLogAuthority(authorityRoot, "authority-one").capability(eventLogId).readAnchors(),
+    /event_log_anchor_(invalid|auth_invalid)/,
+  );
+  await writeFile(join(authorityRoot, "event-log-authority-v1.key"), Buffer.alloc(32, 4));
+  await assert.rejects(
+    new PersistentEventLogAuthority(authorityRoot, "authority-one").capability(eventLogId).readAnchors(),
+    /event_log_anchor_(invalid|auth_invalid)/,
+  );
+  const otherRoot = await mkdtemp(join(parent, "authority-other-"));
+  t.after(async () => await rm(otherRoot, { recursive: true, force: true }));
+  await writeFile(join(otherRoot, eventLogId + ".head.json"), state, "utf8");
+  await assert.rejects(
+    new PersistentEventLogAuthority(otherRoot, "authority-other").capability(eventLogId).readAnchors(),
+    /event_log_anchor_(invalid|auth_invalid)/,
+  );
 });
