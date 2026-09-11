@@ -257,3 +257,16 @@ deploy nem inicie P4-PR04.
 - resultados fresh: governance/private state `23/23`; Local Worker `12/12`; P4-PR03 `29/29`; transcript `42/42`; recovery `21/21`; Live Activity `8/8`; bootstrap multiprocessado `10 × 8` sem flakiness; CAS `1 winner / 1 event_log_anchor_cas_conflict`; `npm test` final `251/251`; `git diff --check` GREEN; `npm run contract:reconcile` `allowed=true`;
 - a primeira full regression teve EBUSY isolado em ConPTY; o retry integral passou `251/251`, sem reprodução causal; o evento foi classificado como não bloqueante sob D-013 e nenhuma alteração P3/ConPTY foi feita;
 - este commit é somente `CONTROL_ROOT_DOCUMENTARY_RECONCILIATION`; `CONTROL_ROOT_SHA` é o SHA deste commit documental, capturado após sua criação. Ele não substitui nem reidentifica o `EXECUTION_CANDIDATE_SHA`; Reviewer/Auditor devem comparar ambos mecanicamente e confirmar zero mudança em `src/`, `test/` e package files após o Execution Root.
+
+## P4-PR03 — Independent Reviewer Gate e primeira auditoria
+
+- `EXECUTION_ROOT_SHA`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`;
+- Control Root revisado pelo Reviewer: `02d64f74ebff46bb8f79e545bcc60f6666f8da2c`;
+- Reviewer Independent Gate: sessão independente do Executor, modo read-only, Execution Root `d63a19c2...`, Control Root `02d64f74...`, genealogia GREEN, delta documental somente nos quatro documentos canônicos, Security Review fresh, cobertura contratual fresh, scope GREEN, reconciler `allowed=true`, zero mutação;
+- resultado factual do Reviewer: `REVIEW_READY_FOR_AUDITOR`;
+- Auditor independente executado depois do Reviewer: `AUDIT_BLOCKED`;
+- classificação do bloqueio da primeira auditoria: `documentation`, `independence evidence`, `authorization`;
+- confirmações do Auditor: Execution Root correto, Control Root correto, genealogia GREEN, delta técnico GREEN, Security Review fresh, cobertura/regressão suficiente, scope GREEN, EBUSY/D-013 não bloqueante, P3 conhecidos não bloqueantes e zero mutação;
+- causa exclusiva do bloqueio: `REVIEW_READY_FOR_AUDITOR` ainda não estava versionado e `LIVE_STATUS` ainda projetava `P4_PR03_INDEPENDENT_REVIEW_PENDING`;
+- esta reconciliação é o novo Control Root documental descendente de `02d64f74...`; `NEW_CONTROL_ROOT_SHA` é o SHA deste único commit documental, capturado após sua criação. Não é novo candidate técnico e não altera o `EXECUTION_ROOT_SHA`;
+- autorização: Auditor recheck pendente; `AUDIT_GREEN — P4_PR03_READY_FOR_INTEGRATOR` é obrigatório antes de qualquer push, abertura de PR, integração ou merge.
