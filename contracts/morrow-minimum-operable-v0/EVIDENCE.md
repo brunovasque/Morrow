@@ -339,3 +339,111 @@ deploy nem inicie P4-PR04.
 ## P4-PR03 — entrada final na tabela de evidências
 
 | `P4-PR03` | `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` | `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a` | [`PR #21`](https://github.com/brunovasque/Morrow/pull/21), merge `b95b15a61b549eaa779b26b034cea4d57adf9e74`; closure PR #22 | `npm ci` GREEN; P4-PR03 `29/29`; transcript `42/42`; retry `251/251`; `git diff --check` GREEN; `REGRESSION_VETO` `PASS`; zero drift | Security `GREEN`; Reviewer `GREEN`; Auditor pré-merge `MERGE_READY`; Auditor final `FINAL_AUDIT_GREEN` | `PROVEN` | 2026-09-11 |
+
+## START_P4_PR04 — kickoff, PRE_DISPATCH e TASK
+
+- estado atual: `P4-PR04 = RUNNING`; `P4-PR03 = PROVEN`; `P3-PR04 = PROVEN`;
+- base integrada fixada: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f` em `phase-2/runtime-v0`;
+- branch de execução criada diretamente da base: `mvo/p4-pr04-multi-session-stream`;
+- objetivo único: expor stream/API local de múltiplas sessões e provar observabilidade ponta a ponta do Worker;
+- prova de conclusão: duas sessões reais vistas ao vivo de forma incremental e reidratadas após restart;
+- A-001 não se aplica a P4-PR04; D-013 permanece fora do escopo salvo regressão causal nova;
+- não há owner decision ou blocking question aberta; `QUESTIONS.md` permanece com `blocking_question_count: 0`;
+- Security Review normal independente é obrigatório antes da integração porque a unidade toca processo, stream, transcript/redaction, persistência e superfície consumível pelo Worker. Não há execução de Security Review nesta etapa e A-001 não é herdado;
+- PRE_DISPATCH: base correta, dependências `PROVEN`, branch dedicada, target `morrow-core`, scope/allowed paths/forbidden paths, critérios e regressão herdada foram fixados; nenhum drift foi introduzido.
+
+### Decisão técnica mínima
+
+As primitivas já provadas são suficientes e devem ser compostas, não redesenhadas:
+
+- `TerminalSessionManager` já fornece sessões reais isoladas por `terminalSessionId`, `agentInstanceId`, `workspaceId`, fan-out incremental via `subscribe()`, `list()`, `snapshot()` e `history()`; o teto ConPTY provado de duas sessões permanece;
+- `LiveActivityEvent` já fixa `terminalSessionId`, `agentInstanceId`, `workspaceId`, causalidade e ordem; o projector/replay existente deve ser filtrado por sessão sem alterar P4-PR01;
+- `JsonlEventLog` já fornece Event Log autenticado, ordenado e reidratável por contrato; `PersistentTranscriptStore` já fornece redaction, retenção, identidade da sessão e replay/cursor; `WorkerRecoveryCoordinator` já distingue offline/recovery/resultado desconhecido;
+- a lacuna é uma composição `WorkerSessionStream` estreita que vincule essas fontes por sessão, publique somente eventos após persistência autorizada, forneça cursor/replay por `terminalSessionId` e reconstitua o catálogo após restart. Não criar socket, rede, UI, dashboard ou autoridade paralela nesta unidade;
+- output bruto nunca atravessa a API: `TERMINAL_OUTPUT` passa pelo `StreamRedactorSession` e pelo transcript existente antes de persistência/publicação. Eventos de input carregam apenas metadados permitidos;
+- sessão `running` encontrada sem fechamento após restart não volta a ser `running` por suposição: deve ser `recovering`, `offline` ou `outcome_unknown` conforme `WorkerRecoveryCoordinator`; somente nova sessão/heartbeat/reattach comprovado pode publicar liveness viva.
+
+### TASK — EXECUTOR P4-PR04
+
+```text
+Base: 78e1bfdc7d32f2e150d03aaee80b62514c446d4f
+Branch: mvo/p4-pr04-multi-session-stream
+Target: morrow-core; integration branch phase-2/runtime-v0
+Objetivo único: expor stream/API local de múltiplas sessões e provar observabilidade ponta a ponta do Worker.
+Prova: duas sessões reais simultâneas, com identidade inequívoca, eventos incrementais antes do término,
+isolamento A/B e reconstrução correta das duas após restart.
+
+Comportamento mínimo da superfície:
+- criar/listar/consultar sessões por contractId + terminalSessionId, preservando agentInstanceId,
+  workspaceId, roleId, runtimeId, backend/protocol/capabilities e estado mecânico;
+- subscribe(contractId, terminalSessionId) entrega somente eventos dessa sessão e só depois da
+  persistência autorizada; unsubscribe não altera o Worker;
+- replay/reconnect usa cursor vinculado ao contractId + terminalSessionId + streamId e retorna
+  ok/invalid/stale/future sem duplicar nem perder registros; ordem e causalidade são preservadas;
+- a reconstrução após restart lê Event Log/transcript/recovery duráveis, restaura catálogo e cursor
+  por sessão, mantém sessão encerrada terminal e não inventa sessão viva;
+- Live Activity e transcript continuam ligados à identidade original; redaction e segredos permanecem
+  preservados em live, replay, disco e reopen.
+
+Allowed paths — somente estes, com a justificativa causal:
+- src/worker-session-stream.ts — nova composição/API estreita de catálogo, fan-out, cursor e replay por sessão;
+- src/event-log.ts — somente se uma primitiva de replay/session-sequence segura for necessária; não alterar
+  root of trust, capability, CAS ou formato autenticado já provado;
+- src/local-worker-service.ts — somente para ownership/lifecycle do stream no Worker, se a composição não
+  puder ser ligada fora do serviço;
+- src/local-worker-host.ts — somente para expor o control surface local e provar restart do processo real;
+- schema/worker-session-stream.v1.schema.json — contrato wire/API versionado, se o envelope público exigir schema;
+- runtime/MULTI_SESSION_STREAM_API.md — contrato factual da API e semântica de restart/cursor;
+- test/worker-session-stream.test.ts — focused tests da API, duas sessões, fan-out, replay e restart;
+- test/fixtures/worker-session-stream-child.ts — somente se o teste de restart exigir processo Worker filho real;
+- test/event-log.test.ts, test/terminal-session.test.ts, test/live-activity.test.ts,
+  test/stream-transcript.test.ts, test/worker-recovery.test.ts, test/local-worker-service.test.ts — somente
+  contraprovas diretamente causais e mínimas nas primitivas tocadas.
+
+Forbidden:
+- src/stream-transcript.ts, src/worker-recovery.ts, src/live-activity.ts e src/terminal-session.ts não
+  devem ser alterados inicialmente; só entram se uma lacuna causal comprovada impedir a composição, com
+  regressão específica e sem redesenhar a superfície GREEN;
+- P4-PR03, D-014..D-017, D-013, P3/ConPTY, P4-PR02/redaction, P4-PR01 schema, salvo regressão causal;
+- P5/UI/dashboard/panes/xterm/chat/reunião/notifications/Nexus;
+- package files, workflows, deploy, rede, sockets externos, cloud, Enova ou qualquer outro repositório;
+- API multi-operator/multi-tenant, aumento do teto ConPTY acima de duas sessões e refactors oportunistas;
+- push, abertura/atualização de PR, merge ou deploy pelo Executor.
+
+REDs obrigatórios antes das correções:
+1. duas sessões reais simultâneas com tokens A/B distintos: output/evento atribuído à sessão errada;
+2. subscribe tardio perde evento inicial ou não recebe atividade incremental antes do término;
+3. cursor A reaparece com evento duplicado, perde evento, aceita streamId/sessionId/contractId de B,
+   ou classifica cursor stale/future/invalid como ok;
+4. restart/reopen reconstrói somente A, troca identidades, reinicia sessão terminada como viva,
+   ou fabrica atividade sem evento durável;
+5. processo/Worker offline, waiting, recovering, failed e done são colapsados em um único estado;
+6. output secreto aparece no stream live, Event Log, transcript, replay, snapshot ou após reopen;
+7. evento de Live Activity/transcript de A cruza o filtro de B, ou causalidade/ordem quebra após replay;
+8. erro de persistência publica evento live mesmo sem durable commit, ou subscriber hostil altera a prova;
+9. restart durante duas sessões deixa processo/host/fixture órfão, duplica registro ou permite rebind
+   para workspace/agent/session diferente.
+
+GREEN criteria:
+- prova real com duas sessões simultâneas no backend aprovado, workspaces distintos e tokens exclusivos;
+- eventos incrementais observados antes dos dois términos, com identidade e ordering verificáveis;
+- zero cross-session leakage, zero duplicação e zero perda em live, replay e reconexão;
+- replay por sessão cobre início, cursor intermediário, limite, cursor stale/future/invalid e restart;
+- restart do Worker/control surface reconstitui as duas sessões pelo estado durável existente;
+- sessão terminada permanece terminal; sessão sem fechamento não é marcada concluída nem viva por suposição;
+- redaction/segredos preservados em live, Event Log, transcript, snapshot, replay e reopen;
+- `git diff --check`, `npm test`, focused P4-PR04 e focused regressions das superfícies tocadas GREEN;
+- regressão herdada obrigatória: focused P4-PR01 Live Activity, P4-PR02 transcript/redaction,
+  P4-PR03 replay/recovery/cursor/liveness, P3-PR04 terminal/multiplexing e Local Worker;
+- repetir `npm ci` quando o target/lockfile exigir, `npm run contract:reconcile` na branch dedicada,
+  e contraprovas fora do harness puramente simulado no Windows;
+- Security Review independente GREEN sobre o candidate completo antes de qualquer integração;
+- congelar candidate somente após diagnóstico → RED → correção → contraprova → regressão completa.
+
+Continuidade: SESSION_REUSE_BY_DEFAULT. O Executor Luna high permanece na mesma sessão durante
+diagnóstico, implementação, correções e congelamento. Sessão nova somente para Security Reviewer
+independente e Reviewer/Auditor independentes quando o contrato exigir. O Executor retorna apenas
+com blocker arquitetural real ou candidate completo pronto para o próximo gate.
+```
+
+- resultado PRE_DISPATCH: autorizado para handoff ao Executor persistente nesta branch, com `nextPrId=P4-PR04`, `nextAuthorizedAction=START_P4_PR04`, worktree limpa e dependências satisfeitas.

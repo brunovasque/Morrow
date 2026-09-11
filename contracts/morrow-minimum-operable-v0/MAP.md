@@ -165,3 +165,12 @@ O campo `next_authorized_action` de `LIVE_STATUS.md` é a projeção humana dess
 - P4-PR03 está canonicamente `PROVEN`. P4-PR04 está autorizada porque P4-PR03 e P3-PR04 estão `PROVEN`; nenhuma dependência contratual adicional está faltando.
 - Próximo ator único: Orchestrator / Contract Engineer persistente. Próximo PR: P4-PR04. Objetivo: expor stream/API de múltiplas sessões e provar observabilidade ponta a ponta do Worker. Prova: duas sessões reais vistas ao vivo e reidratadas após restart.
 - Handoff obrigatório: usar base integrada exata `phase-2/runtime-v0` após a closure merge; iniciar kickoff/PRE_DISPATCH/TASK do Executor para P4-PR04; não reabrir P4-PR03, não repetir seus reviews/regressão sem causa, não alterar D-014..D-017 oportunisticamente, não iniciar P4-PR04 nesta sessão e não fazer deploy.
+
+## Estado atual — P4-PR04 `RUNNING` após kickoff
+
+- P4-PR03 e P3-PR04 estão `PROVEN`; P4-PR04 foi iniciada na base integrada exata `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`.
+- Branch dedicada: `mvo/p4-pr04-multi-session-stream`. O estado técnico novo ainda não tem candidate; este commit é kickoff/control-plane documental.
+- Objetivo único: expor stream/API local de múltiplas sessões e provar observabilidade ponta a ponta do Worker.
+- Prova de conclusão: duas sessões reais distintas observadas incrementalmente antes do término e reconstruídas após restart, sem mistura, duplicação ou perda por sessão.
+- Próximo ator: Executor P4-PR04 persistente. `SESSION_REUSE_BY_DEFAULT`; sessões independentes somente para Security Reviewer e Reviewer/Auditor quando os gates exigirem.
+- P4-PR04 não inclui UI/P5, panes/xterm, chat, reunião, notifications, Nexus, deploy, refactors oportunistas, D-013, P4-PR03 ou Enova/outros repositórios.

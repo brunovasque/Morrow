@@ -5,7 +5,7 @@
 - `snapshot_version`: `1.0`
 - `updated_at`: `2026-09-11`
 - `contract_version`: `1.0`
-- `effective_addenda`: `A-001`
+- `effective_addenda`: `none_for_P4_PR04; A-001 historical only for P4-PR02`
 - `contract_state`: `READY_FOR_EXECUTION`
 - `target_id`: `morrow-core`
 - `integration_branch`: `phase-2/runtime-v0`
@@ -13,33 +13,36 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR04`
 - `active_route_node`: `MULTI_SESSION_STREAM_API_OBSERVABILITY`
-- `active_subaction`: `P4_PR03_PROVEN_P4_PR04_AUTHORIZED`
+- `active_subaction`: `P4_PR04_KICKOFF_PRE_DISPATCH`
 - `expected_branch_prefix`: `mvo/p4-pr04-`
-- `write_execution_allowed`: `no implementation yet; P4-PR04 kickoff/PRE_DISPATCH/TASK authorized`
+- `write_execution_allowed`: `yes for declared P4-PR04 Executor after PRE_DISPATCH; no push/PR/merge`
 - `next_authorized_action`: `START_P4_PR04`
-- `next_authorized_actor`: `Orchestrator / Contract Engineer persistente`
-- `execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
-- `opening_control_root_sha`: `de47fd7a3f919a7094a16c051548cef0a47bf51a`
-- `pr_identity_state`: `PR_IDENTITY_VERSIONED`
-- `pr_number`: `21`
-- `pr_head_sha_at_opening`: `de47fd7a3f919a7094a16c051548cef0a47bf51a`
-- `pr_base_sha_at_opening`: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`
-- `pr_state_at_opening`: `OPEN; não draft; mergeable`
-- `merge_ready_state`: `MERGE_READY`
-- `merge_ready_reason`: `MERGE_READY_MUST_BE_VERSIONED_BEFORE_MERGE`
-- `merge_authorized`: `yes`
-- `pre_merge_control_root_sha`: `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`
-- `integrated_merge_sha`: `b95b15a61b549eaa779b26b034cea4d57adf9e74`
-- `integrated_merge_parents`: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`, `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`
-- `post_merge_regression_state`: `GREEN_AFTER_IMMEDIATE_RETRY; FIRST_RUN_ISOLATED_EBADF_RECORDED_FOR_FINAL_AUDITOR`
-- `regression_veto`: `PASS`
-- `final_audit_state`: `FINAL_AUDIT_GREEN`
+- `next_authorized_actor`: `Executor P4-PR04 persistente`
+- `p4_pr03_execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
+- `p4_pr04_base_sha`: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`
+- `p4_pr04_branch`: `mvo/p4-pr04-multi-session-stream`
+- `execution_root_sha`: `not_created_for_P4_PR04`
+- `opening_control_root_sha`: `captured_after_kickoff_commit`
+- `pr_identity_state`: `NOT_OPEN`
+- `pr_number`: `none`
+- `pr_head_sha_at_opening`: `not_applicable`
+- `pr_base_sha_at_opening`: `not_applicable`
+- `pr_state_at_opening`: `not_applicable`
+- `merge_ready_state`: `NOT_APPLICABLE_BEFORE_CANDIDATE`
+- `merge_ready_reason`: `candidate_and_independent_gates_required`
+- `merge_authorized`: `no`
+- `pre_merge_control_root_sha`: `not_applicable`
+- `integrated_merge_sha`: `not_applicable`
+- `integrated_merge_parents`: `not_applicable`
+- `post_merge_regression_state`: `not_started`
+- `regression_veto`: `not_started`
+- `final_audit_state`: `not_started`
 - `p4_pr03_state`: `PROVEN`
-- `p4_pr04_state`: `AUTHORIZED_AFTER_CLOSURE_INTEGRATION`
+- `p4_pr04_state`: `RUNNING`
 
 ## Próxima ação exata
 
-P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está autorizada após esta closure, com dependências P4-PR03 e P3-PR04 `PROVEN`; próxima ação `START_P4_PR04` e próximo ator Orchestrator / Contract Engineer persistente.
+P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está `RUNNING` na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`, com PRE_DISPATCH e TASK registradas abaixo; próximo ator Executor P4-PR04 persistente.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -61,7 +64,7 @@ Reconciliacao factual adicional de 2026-09-09: o A-001 do candidate `ba350658a39
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR02 `PROVEN` em PR #18 / merge `3738d787`; closure-record da PR #19 integrada em `a7f0f49`; P4-PR03 `RUNNING` na branch `mvo/p4-pr03-replay-rehydration`, base `cd7113f`, rota replay/reidratação/cursor/liveness; P4-PR04 permanece fora de escopo |
+| P4 | `RUNNING` | P4-PR02 e P4-PR03 `PROVEN`; closure-records integradas; P4-PR04 `RUNNING` na branch `mvo/p4-pr04-multi-session-stream`, base `78e1bfd`, rota multi-session stream/API/observability |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |
@@ -167,3 +170,9 @@ Ao concluir uma PR:
 ## Instrução curta para nova aba
 
 > Continue `MORROW-MVO-001`. Leia integralmente `contracts/morrow-minimum-operable-v0/README.md` e o pacote na ordem indicada. Reconcile Git com `LIVE_STATUS.md`; execute apenas `next_authorized_action`. Não use a conversa como fonte canônica e não toque em Enova/outros targets.
+
+## START_P4_PR04 — kickoff e PRE_DISPATCH
+
+P4-PR04 está `RUNNING` na base integrada `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, na branch `mvo/p4-pr04-multi-session-stream`. P4-PR03 e P3-PR04 estão `PROVEN`; não há owner decision ou blocking question aberta. O próximo ator é o Executor P4-PR04 persistente, autorizado a executar a TASK versionada em `EVIDENCE.md`, sem push, PR, merge ou deploy.
+
+O núcleo é a composição local `WorkerSessionStream`: catálogo estável por sessão, fan-out incremental filtrado, cursor/replay por sessão e reconstrução após restart usando Event Log, transcript/redaction, Live Activity e recovery já provados. Não há UI, rede, socket externo, Nexus ou nova autoridade nesta unidade. Security Review normal independente será obrigatório sobre o candidate completo antes da integração; A-001 não se aplica.
