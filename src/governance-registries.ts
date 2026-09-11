@@ -198,6 +198,7 @@ export interface EventLogRecord {
 export interface EventLogStreamCapability {
   readonly authorityRef: string;
   readonly eventLogId: string;
+  readonly epoch: string;
   readonly contractId: string;
   readonly streamId: string;
   authenticateRecord(record: EventLogRecord): Promise<string>;
@@ -552,6 +553,7 @@ export class PersistentEventLogAuthority {
     return Object.freeze({
       authorityRef: this.authorityRef,
       eventLogId,
+      epoch: this.epoch,
       contractId,
       streamId,
       authenticateRecord: async (record: EventLogRecord) => await authority.authenticateRecord(eventLogId, contractId, streamId, record),
