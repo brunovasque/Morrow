@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { createReadStream } from "node:fs";
 import { lstat, mkdir, open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { defaultEventLogAuthority, type EventLogAuthorityCapability, type EventLogHeadAnchor } from "./governance-registries.ts";
+import { defaultEventLogAuthority, type EventLogAuthorityCapability, type EventLogHeadAnchor, type EventLogRecord, type EventLogStreamCapability } from "./governance-registries.ts";
 import { assertCanonicalDirectoryPath } from "./stream-transcript.ts";
 import type { MorrowEvent } from "./types.ts";
 
@@ -97,7 +97,7 @@ export class JsonlEventLog implements EventLog {
         eventHash: zeroEventHash,
         event,
       };
-      envelope.eventHash = await this.authority.authenticateEvent(eventAuthDomain(envelope, this.streamIdentity));
+      envelope.eventHash = await this.streamAuthority(event.contractId).authenticateRecord(this.recordFor(envelope));
       const serialized = `${JSON.stringify(envelope)}\n`;
       const serializedBytes = Buffer.byteLength(serialized, "utf8");
       if (serializedBytes > maximumEventLineBytes
@@ -119,10 +119,10 @@ export class JsonlEventLog implements EventLog {
           eventTag: previousAnchor.eventTag,
         } : null,
       };
-      await this.authority.prepareHead(prepared, previousAnchor);
+      await this.streamAuthority(event.contractId).prepareHead(prepared, previousAnchor);
       scan.fileIdentity = await this.writeEnvelope(serialized, scan.fileIdentity);
       const committed = { ...prepared, phase: "committed" as const };
-      await this.authority.commitHead(committed, previousAnchor);
+      await this.streamAuthority(event.contractId).commitHead(committed, previousAnchor);
       scan.eventIds.add(eventKey);
       scan.heads.set(event.contractId, sequence);
       scan.lastHashes.set(event.contractId, envelope.eventHash);
@@ -226,7 +226,7 @@ export class JsonlEventLog implements EventLog {
       if (envelope.sequence !== previousSequence + 1 || !constantTimeHexEqual(envelope.previousHash, previousHash)) {
         throw new Error("morrow_event_log_sequence_invalid");
       }
-      if (!await this.authority.verifyEvent(eventAuthDomain(envelope, this.streamIdentity), envelope.eventHash)) {
+      if (!await this.streamAuthority(event.contractId).verifyRecord(this.recordFor(envelope), envelope.eventHash)) {
         throw new Error("morrow_event_log_integrity_invalid");
       }
       const key = eventIdKey(event.contractId, event.eventId);
@@ -279,7 +279,7 @@ export class JsonlEventLog implements EventLog {
         if (anchors.size === 0) return { bytes: 0, records: 0, heads, lastHashes, eventIds, anchors };
         const prepared = [...anchors.values()].filter((anchor) => anchor.phase === "prepared");
         if (prepared.length === anchors.size) {
-          for (const anchor of prepared) await this.authority.abortHead(anchor, anchorPrevious(anchor));
+          for (const anchor of prepared) await this.streamAuthority(anchor.contractId).abortHead(anchor, anchorPrevious(anchor));
           return { bytes: 0, records: 0, heads, lastHashes, eventIds, anchors: new Map() };
         }
         throw new Error("morrow_event_log_missing");
@@ -331,6 +331,23 @@ export class JsonlEventLog implements EventLog {
       await handle?.close().catch(() => undefined);
     }
   }
+
+  private streamAuthority(contractId: string): EventLogStreamCapability {
+    return this.authority.bindStream(contractId, this.streamIdFor(contractId));
+  }
+
+  private recordFor(envelope: PersistedEventEnvelope): EventLogRecord {
+    return {
+      format: envelope.format,
+      eventLogId: this.eventLogId,
+      streamId: this.streamIdFor(envelope.event.contractId),
+      contractId: envelope.event.contractId,
+      sequence: envelope.sequence,
+      eventId: envelope.event.eventId,
+      previousAuthenticatedTag: envelope.previousHash,
+      event: envelope.event,
+    };
+  }
 }
 
 export function eventLogIdForPath(filePath: string): string {
@@ -350,19 +367,6 @@ function parseEnvelope(value: unknown): PersistedEventEnvelope {
     eventHash: value.eventHash,
     event: value.event,
   };
-}
-
-function eventAuthDomain(envelope: PersistedEventEnvelope, streamIdentity: string): string {
-  return JSON.stringify({
-    purpose: "morrow.event-log/auth/v4",
-    format: envelope.format,
-    streamIdentity,
-    contractId: envelope.event.contractId,
-    sequence: envelope.sequence,
-    eventId: envelope.event.eventId,
-    previousAuthenticatedTag: envelope.previousHash,
-    event: envelope.event,
-  });
 }
 
 function sameFileIdentity(left: { dev: number; ino: number }, right: { dev: number; ino: number }): boolean {
@@ -408,10 +412,10 @@ async function reconcileAnchors(
     if (anchor.phase === "prepared") {
       if (matchesCurrent) {
         const committed = { ...anchor, phase: "committed" as const };
-        await authority.commitHead(committed, previous);
+        await authority.bindStream(anchor.contractId, anchor.streamId).commitHead(committed, previous);
         result.set(anchor.contractId, committed);
       } else if (matchesPrevious) {
-        await authority.abortHead(anchor, previous);
+        await authority.bindStream(anchor.contractId, anchor.streamId).abortHead(anchor, previous);
         if (previous) result.set(anchor.contractId, previous);
       } else {
         throw new Error("morrow_event_log_anchor_divergent");

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { WORKER_PROTOCOL_VERSION } from "./worker-protocol.ts";
+import { WorkerPrivateStateRoot } from "./worker-private-state.ts";
 
 export type LocalWorkerServiceState = "stopped" | "starting" | "ready" | "stopping" | "failed";
 
@@ -10,6 +11,7 @@ export interface LocalWorkerServiceConfiguration {
   managedRoot: string;
   operatorOwnedRoots: string[];
   supportedProtocolVersions: string[];
+  privateStateRoot?: string;
 }
 
 export interface LocalWorkerLayout {
@@ -56,6 +58,7 @@ export class LocalWorkerService {
   private layout: LocalWorkerLayout | null = null;
   private startOperation: Promise<LocalWorkerServiceStatus> | null = null;
   private dispatchAttachment: symbol | null = null;
+  private privateStateRoot: WorkerPrivateStateRoot | null = null;
 
   constructor(configuration: LocalWorkerServiceConfiguration) {
     assertConfiguration(configuration);
@@ -87,6 +90,7 @@ export class LocalWorkerService {
     this.stoppedAt = new Date().toISOString();
     this.instanceId = null;
     this.dispatchAttachment = null;
+    this.privateStateRoot = null;
     return this.status();
   }
 
@@ -161,10 +165,23 @@ export class LocalWorkerService {
     return deepFreeze({ status: this.status(), checks });
   }
 
+  privateState(): WorkerPrivateStateRoot {
+    if (!this.privateStateRoot) throw new Error("worker_private_state_not_ready");
+    return this.privateStateRoot;
+  }
+
   private async startInternal(): Promise<LocalWorkerServiceStatus> {
     try {
       const layout = await initializeOwnedLayout(this.configuration);
+      const privateStateRoot = WorkerPrivateStateRoot.bootstrap({
+        workerId: this.configuration.workerId,
+        privateRoot: this.configuration.privateStateRoot
+          ?? join(resolve(this.configuration.managedRoot), "..", "private-state", this.configuration.workerId),
+        managedRoots: [layout.managedRoot, ...this.configuration.operatorOwnedRoots],
+      });
+      await privateStateRoot.ensure();
       this.layout = layout;
+      this.privateStateRoot = privateStateRoot;
       this.instanceId = randomUUID();
       this.startedAt = new Date().toISOString();
       this.stoppedAt = null;
@@ -292,12 +309,16 @@ async function inspectManagedChild(root: string, name: "state" | "workspaces" | 
 
 function assertConfiguration(configuration: LocalWorkerServiceConfiguration): void {
   if (!isPlainObject(configuration)) throw new Error("worker_configuration_invalid");
-  const allowed = new Set(["workerId", "managedRoot", "operatorOwnedRoots", "supportedProtocolVersions"]);
+  const allowed = new Set(["workerId", "managedRoot", "operatorOwnedRoots", "supportedProtocolVersions", "privateStateRoot"]);
   const unknown = Object.keys(configuration).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`worker_configuration_unknown_field:${unknown}`);
   if (!workerIdPattern.test(configuration.workerId)) throw new Error("worker_id_invalid");
   if (typeof configuration.managedRoot !== "string" || !isAbsolute(configuration.managedRoot)) {
     throw new Error("worker_managed_root_must_be_absolute");
+  }
+  if (configuration.privateStateRoot !== undefined
+    && (typeof configuration.privateStateRoot !== "string" || !isAbsolute(configuration.privateStateRoot))) {
+    throw new Error("worker_private_state_root_must_be_absolute");
   }
   if (!containsMorrowSegment(resolve(configuration.managedRoot))) {
     throw new Error("worker_managed_root_requires_morrow_segment");

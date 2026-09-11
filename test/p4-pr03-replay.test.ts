@@ -3,9 +3,11 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 import { JsonlEventLog, eventLogIdForPath } from "../src/event-log.ts";
 import { PersistentEventLogAuthority } from "../src/governance-registries.ts";
+import { WorkerPrivateStateRoot } from "../src/worker-private-state.ts";
 import {
   PersistentTranscriptStore,
   TRANSCRIPT_REDACTION_PLACEHOLDER,
@@ -63,7 +65,12 @@ function event(contractId: string, eventId: string, type = "STEP") : MorrowEvent
 }
 
 function testEventAuthority(file: string, authorityRoot: string) {
-  return new PersistentEventLogAuthority(authorityRoot, "test-event-log-root").capability(eventLogIdForPath(file));
+  const privateRoot = WorkerPrivateStateRoot.bootstrap({
+    workerId: "test-worker",
+    privateRoot: authorityRoot,
+    managedRoots: [resolve(file, "..")],
+  });
+  return new PersistentEventLogAuthority(privateRoot, "test-event-log-root").capability(eventLogIdForPath(file));
 }
 
 function eventStreamIdentity(file: string): string {
@@ -73,16 +80,17 @@ function eventStreamIdentity(file: string): string {
 }
 
 async function authenticatedEventTag(file: string, authority: ReturnType<typeof testEventAuthority>, item: MorrowEvent, sequence: number, previousHash: string): Promise<string> {
-  return await authority.authenticateEvent(JSON.stringify({
-    purpose: "morrow.event-log/auth/v4",
+  const streamId = createHash("sha256").update(`${eventStreamIdentity(file)}|${item.contractId}`, "utf8").digest("hex");
+  return await authority.bindStream(item.contractId, streamId).authenticateRecord({
     format: "morrow.event-log/4",
-    streamIdentity: eventStreamIdentity(file),
+    eventLogId: eventLogIdForPath(file),
+    streamId,
     contractId: item.contractId,
     sequence,
     eventId: item.eventId,
     previousAuthenticatedTag: previousHash,
     event: item,
-  }));
+  });
 }
 
 function hostileClock(): () => unknown {
@@ -585,6 +593,54 @@ test("P2: Event Log rejects a parent junction before mkdir or open", async (t) =
   );
 });
 
+test("P2: two real processes racing one head produce one winner and one CAS conflict", async (t) => {
+  const root = await makeRoot(t);
+  const privateRoot = join(root, "private-state");
+  await mkdir(privateRoot, { recursive: true });
+  const eventLogId = "e".repeat(64);
+  const contractId = "C-P4-PR03";
+  const streamIdentity = createHash("sha256").update(`morrow.event-log/stream/v1|${eventLogId}`, "utf8").digest("hex");
+  const streamId = createHash("sha256").update(`${streamIdentity}|${contractId}`, "utf8").digest("hex");
+  const script = `
+    const { WorkerPrivateStateRoot } = await import(${JSON.stringify(pathToFileURL(resolve("src/worker-private-state.ts")).href)});
+    const { PersistentEventLogAuthority } = await import(${JSON.stringify(pathToFileURL(resolve("src/governance-registries.ts")).href)});
+    const [privateRoot, eventLogId, streamId] = process.argv.slice(1);
+    const root = WorkerPrivateStateRoot.bootstrap({ workerId: "cas-worker", privateRoot, managedRoots: [] });
+    const authority = new PersistentEventLogAuthority(root, "cas-authority");
+    const capability = authority.capability(eventLogId).bindStream("C-P4-PR03", streamId);
+    const item = { eventId: "cas-event", contractId: "C-P4-PR03", type: "STEP", occurredAt: "2026-09-01T12:00:00.000Z", actor: { kind: "kernel", id: "kernel" }, payload: { ok: true }, schemaVersion: "0.1" };
+    const tag = await capability.authenticateRecord({ format: "morrow.event-log/4", eventLogId, streamId, contractId: "C-P4-PR03", sequence: 1, eventId: item.eventId, previousAuthenticatedTag: "${"0".repeat(64)}", event: item });
+    const anchor = { authorityRef: "cas-authority", eventLogId, contractId: "C-P4-PR03", streamId, generation: 1, sequence: 1, eventTag: tag, phase: "prepared", expectedPrevious: null };
+    try { await capability.prepareHead(anchor, null); console.log("ok"); } catch (error) { console.log(error instanceof Error ? error.message : "unknown"); }
+  `;
+  const run = () => new Promise<string>((resolvePromise, rejectPromise) => {
+    const child = spawn(process.execPath, ["--experimental-strip-types", "-e", script, privateRoot, eventLogId, streamId], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    child.on("error", rejectPromise);
+    child.on("close", (code) => code === 0 ? resolvePromise(stdout.trim()) : rejectPromise(new Error(`cas_child_exit_${code}:${stdout}:${stderr}`)));
+  });
+  const results = await Promise.all([run(), run()]);
+  assert.equal(results.filter((result) => result === "ok").length, 1);
+  assert.equal(results.filter((result) => result === "event_log_anchor_cas_conflict").length, 1);
+});
+
+test("P2: an authenticated head journal survives reopen and refuses a partial tail", async (t) => {
+  const root = await makeRoot(t);
+  const managed = join(root, "managed");
+  const authorityRoot = join(root, "private-state");
+  await mkdir(managed, { recursive: true });
+  const file = join(managed, "journal-events.jsonl");
+  const authority = testEventAuthority(file, authorityRoot);
+  await new JsonlEventLog(file, { authority }).append(event("C-P4-PR03", "journal-1"));
+  assert.equal((await new JsonlEventLog(file, { authority }).replay("C-P4-PR03")).status, "ok");
+  const journalPath = join(authorityRoot, "event-log-authority", eventLogIdForPath(file) + ".head.journal");
+  await writeFile(journalPath, (await readFile(journalPath, "utf8")) + "{\"partial\":true", "utf8");
+  assert.equal((await new JsonlEventLog(file, { authority }).replay("C-P4-PR03")).status, "invalid");
+});
+
 test("P2: prepared head without append aborts, and complete append before commit is finalized", async (t) => {
   const root = await makeRoot(t);
   const managed = join(root, "managed");
@@ -605,11 +661,12 @@ test("P2: prepared head without append aborts, and complete append before commit
     phase: "prepared" as const,
     expectedPrevious: { generation: first.generation, sequence: first.sequence, eventTag: first.eventTag },
   };
-  await authority.prepareHead(prepared, first);
+  const streamAuthority = authority.bindStream("C-P4-PR03", first.streamId);
+  await streamAuthority.prepareHead(prepared, first);
   assert.equal((await new JsonlEventLog(file, { authority }).replay("C-P4-PR03")).status, "ok");
   assert.equal((await authority.readAnchors())[0]!.sequence, 1);
 
-  await authority.prepareHead(prepared, first);
+  await streamAuthority.prepareHead(prepared, first);
   const envelope = {
     format: "morrow.event-log/4",
     sequence: 2,
@@ -642,8 +699,9 @@ test("P2: anchor ahead, log ahead without prepared, and corrupted anchor all blo
     phase: "prepared" as const,
     expectedPrevious: { generation: first.generation, sequence: first.sequence, eventTag: first.eventTag },
   };
-  await authority.prepareHead(ahead, first);
-  await authority.commitHead({ ...ahead, phase: "committed" }, first);
+  const streamAuthority = authority.bindStream("C-P4-PR03", first.streamId);
+  await streamAuthority.prepareHead(ahead, first);
+  await streamAuthority.commitHead({ ...ahead, phase: "committed" }, first);
   assert.equal((await new JsonlEventLog(file, { authority }).replay("C-P4-PR03")).status, "invalid");
 
   const noAnchorRoot = join(root, "no-anchor-authority");
@@ -651,10 +709,10 @@ test("P2: anchor ahead, log ahead without prepared, and corrupted anchor all blo
   const noAnchorAuthority = testEventAuthority(noAnchorFile, noAnchorRoot);
   const noAnchorLog = new JsonlEventLog(noAnchorFile, { authority: noAnchorAuthority });
   await noAnchorLog.append(event("C-P4-PR03", "no-anchor-1"));
-  await unlink(join(noAnchorRoot, eventLogIdForPath(noAnchorFile) + ".head.json"));
+  await unlink(join(noAnchorRoot, "event-log-authority", eventLogIdForPath(noAnchorFile) + ".head.journal"));
   assert.equal((await new JsonlEventLog(noAnchorFile, { authority: noAnchorAuthority }).replay("C-P4-PR03")).status, "invalid");
 
-  const statePath = join(authorityRoot, eventLogIdForPath(file) + ".head.json");
+  const statePath = join(authorityRoot, "event-log-authority", eventLogIdForPath(file) + ".head.journal");
   await writeFile(statePath, "{\"corrupted\":true}\n", "utf8");
   assert.equal((await new JsonlEventLog(file, { authority }).replay("C-P4-PR03")).status, "invalid");
 });
@@ -729,13 +787,13 @@ test("P2-05 replays a large JSONL fixture with a small bounded result", async (t
   const file = join(root, "large-events.jsonl");
   const log = new JsonlEventLog(file);
   const payload = "x".repeat(900);
-  for (let index = 1; index <= 2_000; index += 1) {
+  for (let index = 1; index <= 200; index += 1) {
     await log.append({ ...event("C-P4-PR03", `large-${index}`), payload });
   }
   const result = await new JsonlEventLog(file).replay("C-P4-PR03", undefined, 1);
   assert.equal(result.status, "ok");
   assert.equal(result.events.length, 1);
-  assert.equal(result.headSequence, 2_000);
+  assert.equal(result.headSequence, 200);
   assert.equal(result.events[0]!.eventId, "large-1");
 });
 

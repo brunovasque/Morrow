@@ -1,7 +1,11 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { lstat, mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  defaultWorkerPrivateStateRoot,
+  WorkerPrivateStateRoot,
+} from "./worker-private-state.ts";
 
 export interface RegistryRef {
   id: string;
@@ -180,15 +184,35 @@ export interface EventLogHeadAnchor {
   expectedPrevious: { generation: number; sequence: number; eventTag: string } | null;
 }
 
-export interface EventLogAuthorityCapability {
+export interface EventLogRecord {
+  format: string;
+  eventLogId: string;
+  streamId: string;
+  contractId: string;
+  sequence: number;
+  eventId: string;
+  previousAuthenticatedTag: string;
+  event: unknown;
+}
+
+export interface EventLogStreamCapability {
   readonly authorityRef: string;
   readonly eventLogId: string;
-  authenticateEvent(domain: string): Promise<string>;
-  verifyEvent(domain: string, tag: string): Promise<boolean>;
-  readAnchors(): Promise<readonly EventLogHeadAnchor[]>;
+  readonly contractId: string;
+  readonly streamId: string;
+  authenticateRecord(record: EventLogRecord): Promise<string>;
+  verifyRecord(record: EventLogRecord, tag: string): Promise<boolean>;
   prepareHead(anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void>;
   commitHead(anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void>;
   abortHead(anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void>;
+}
+
+export interface EventLogAuthorityCapability {
+  readonly authorityRef: string;
+  readonly eventLogId: string;
+  readonly epoch: string;
+  readAnchors(): Promise<readonly EventLogHeadAnchor[]>;
+  bindStream(contractId: string, streamId: string): EventLogStreamCapability;
 }
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
@@ -420,11 +444,11 @@ export class SecretBrokerBoundary {
    * in the broker-owned store and is never returned to the consumer.
    */
   eventLogAuthority(
-    storageRoot: string,
+    privateStateRoot: WorkerPrivateStateRoot,
     eventLogId: string,
     authorityRef = "morrow.event-log-root",
   ): EventLogAuthorityCapability {
-    return new PersistentEventLogAuthority(storageRoot, authorityRef).capability(eventLogId);
+    return new PersistentEventLogAuthority(privateStateRoot, authorityRef).capability(eventLogId);
   }
 
   private async issueOnce(approved: ResolvedSecretAccess): Promise<SecretBrokerResult> {
@@ -451,30 +475,63 @@ export class SecretBrokerBoundary {
   }
 }
 
-const eventLogHeadFormat = "morrow.event-log-head/1" as const;
 const eventLogAuthorityKeyBytes = 32;
 const eventLogTagPattern = /^[0-9a-f]{64}$/u;
-const defaultEventLogAuthorityRoot = join(resolve(process.cwd()), "private", "morrow-event-authority-v1");
+const eventLogJournalFormat = "morrow.event-log-head-journal/1" as const;
+const eventLogBindingFormat = "morrow.event-log-authority-binding/1" as const;
+const zeroJournalTag = "0".repeat(64);
+const eventLogAuthDomain = "morrow.event-log/auth/v4" as const;
+const eventLogHeadDomain = "morrow.event-log/head/v1" as const;
+const eventLogBindingDomain = "morrow.event-log/binding/v1" as const;
+const maximumJournalRecordBytes = 65_536;
 const defaultEventLogAuthorities = new Map<string, PersistentEventLogAuthority>();
 
-interface StoredEventLogHeadState {
-  format: typeof eventLogHeadFormat;
+interface StoredHeadState {
+  anchors: Array<EventLogHeadAnchor>;
+  tailTag: string;
+}
+
+interface JournalRecord {
+  format: typeof eventLogJournalFormat;
+  kind: "PREPARE" | "COMMIT" | "ABORT";
   authorityRef: string;
   eventLogId: string;
-  anchors: Array<EventLogHeadAnchor & { authorityTag: string }>;
+  contractId: string;
+  streamId: string;
+  generation: number;
+  sequence: number;
+  eventTag: string;
+  phase: "prepared" | "committed";
+  expectedPrevious: { generation: number; sequence: number; eventTag: string } | null;
+  previousJournalTag: string;
+  journalTag: string;
+}
+
+interface AuthorityBinding {
+  format: typeof eventLogBindingFormat;
+  authorityRef: string;
+  eventLogId: string;
+  historyStarted: boolean;
+  bindingTag: string;
 }
 
 export class PersistentEventLogAuthority {
-  private readonly storageRoot: string;
+  private readonly privateStateRoot: WorkerPrivateStateRoot;
   private readonly authorityRef: string;
+  private readonly authorityRoot: string;
   private readonly keyPath: string;
-  private readonly mutationTail: { current: Promise<void> } = { current: Promise.resolve() };
+  private readonly epoch: string;
   private authorityKey: Buffer | null = null;
 
-  constructor(storageRoot: string, authorityRef = "morrow.event-log-root") {
-    this.storageRoot = resolve(storageRoot);
+  constructor(privateStateRoot: WorkerPrivateStateRoot, authorityRef = "morrow.event-log-root") {
+    if (!(privateStateRoot instanceof WorkerPrivateStateRoot)) throw new Error("event_log_authority_private_root_required");
+    this.privateStateRoot = privateStateRoot;
     this.authorityRef = authorityRef;
-    this.keyPath = join(this.storageRoot, "event-log-authority-v1.key");
+    this.authorityRoot = join(privateStateRoot.privateRoot, "event-log-authority");
+    this.keyPath = join(this.authorityRoot, "event-log-authority-v4.key");
+    this.epoch = createHash("sha256")
+      .update(`morrow.event-log/epoch/v1|${privateStateRoot.workerId}|${privateStateRoot.privateRoot}|${authorityRef}`, "utf8")
+      .digest("hex");
   }
 
   capability(eventLogId: string): EventLogAuthorityCapability {
@@ -483,34 +540,44 @@ export class PersistentEventLogAuthority {
     return Object.freeze({
       authorityRef: this.authorityRef,
       eventLogId,
-      authenticateEvent: async (domain: string) => await authority.authenticateEvent(domain),
-      verifyEvent: async (domain: string, tag: string) => await authority.verifyEvent(domain, tag),
+      epoch: this.epoch,
       readAnchors: async () => await authority.readAnchors(eventLogId),
+      bindStream: (contractId: string, streamId: string) => authority.bindStream(eventLogId, contractId, streamId),
+    });
+  }
+
+  private bindStream(eventLogId: string, contractId: string, streamId: string): EventLogStreamCapability {
+    if (!isIdentifier(contractId) || streamId !== eventStreamIdFor(eventLogId, contractId)) throw new Error("event_log_stream_binding_invalid");
+    const authority = this;
+    return Object.freeze({
+      authorityRef: this.authorityRef,
+      eventLogId,
+      contractId,
+      streamId,
+      authenticateRecord: async (record: EventLogRecord) => await authority.authenticateRecord(eventLogId, contractId, streamId, record),
+      verifyRecord: async (record: EventLogRecord, tag: string) => await authority.verifyRecord(eventLogId, contractId, streamId, record, tag),
       prepareHead: async (anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null) => {
-        await authority.prepareHead(eventLogId, anchor, expectedPrevious);
+        await authority.prepareHead(eventLogId, contractId, streamId, anchor, expectedPrevious);
       },
       commitHead: async (anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null) => {
-        await authority.commitHead(eventLogId, anchor, expectedPrevious);
+        await authority.commitHead(eventLogId, contractId, streamId, anchor, expectedPrevious);
       },
       abortHead: async (anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null) => {
-        await authority.abortHead(eventLogId, anchor, expectedPrevious);
+        await authority.abortHead(eventLogId, contractId, streamId, anchor, expectedPrevious);
       },
     });
   }
 
-  private async authenticateEvent(domain: string): Promise<string> {
-    return createHmac("sha256", await this.loadAuthorityKey())
-      .update(`morrow.event-log/auth/v4|${domain}`, "utf8")
-      .digest("hex");
+  private async authenticateRecord(eventLogId: string, contractId: string, streamId: string, record: EventLogRecord): Promise<string> {
+    assertRecordBinding(record, eventLogId, contractId, streamId);
+    return hmacHex(await this.loadAuthorityKey(), eventLogAuthDomain, canonicalRecord(record));
   }
 
-  private async verifyEvent(domain: string, tag: string): Promise<boolean> {
+  private async verifyRecord(eventLogId: string, contractId: string, streamId: string, record: EventLogRecord, tag: string): Promise<boolean> {
     if (!eventLogTagPattern.test(tag)) return false;
     try {
-      const expected = createHmac("sha256", await this.loadAuthorityKey(false))
-        .update(`morrow.event-log/auth/v4|${domain}`, "utf8")
-        .digest("hex");
-      return constantTimeHexEqual(expected, tag);
+      assertRecordBinding(record, eventLogId, contractId, streamId);
+      return constantTimeHexEqual(await this.authenticateRecord(eventLogId, contractId, streamId, record), tag);
     } catch {
       return false;
     }
@@ -518,179 +585,254 @@ export class PersistentEventLogAuthority {
 
   private async readAnchors(eventLogId: string): Promise<readonly EventLogHeadAnchor[]> {
     const state = await this.readHeadState(eventLogId);
-    return state.anchors.map(({ authorityTag: _authorityTag, ...anchor }) => structuredClone(anchor));
+    return state.anchors.map((anchor) => structuredClone(anchor));
   }
 
-  private async prepareHead(eventLogId: string, anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void> {
-    await this.withMutation(async () => {
-      const state = await this.readHeadState(eventLogId);
+  private async prepareHead(eventLogId: string, contractId: string, streamId: string, anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void> {
+    await this.withMutation(eventLogId, async (state) => {
+      assertAnchorBinding(anchor, this.authorityRef, eventLogId, contractId, streamId);
       const current = findAnchor(state.anchors, anchor);
-      assertAnchorBinding(anchor, this.authorityRef, eventLogId);
-      assertExpectedPrevious(current, expectedPrevious);
+      if (current?.phase === "prepared") throw new Error("event_log_anchor_cas_conflict");
+      assertExpectedPrevious(current?.phase === "committed" ? current : null, expectedPrevious);
       if (anchor.phase !== "prepared" || !eventLogTagPattern.test(anchor.eventTag)
         || anchor.sequence !== (expectedPrevious?.sequence ?? 0) + 1
         || anchor.generation !== (expectedPrevious?.generation ?? 0) + 1
         || !sameAnchorSummary(anchor.expectedPrevious, expectedPrevious)) {
         throw new Error("event_log_anchor_transition_invalid");
       }
-      if (current?.phase === "prepared") throw new Error("event_log_anchor_prepared");
-      state.anchors = replaceAnchor(state.anchors, await this.withAuthorityTag(anchor));
-      await this.writeHeadState(eventLogId, state);
+      await this.appendJournal(eventLogId, {
+        kind: "PREPARE", anchor, expectedPrevious, previousJournalTag: state.tailTag,
+      });
     });
   }
 
-  private async commitHead(eventLogId: string, anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void> {
-    await this.withMutation(async () => {
-      const state = await this.readHeadState(eventLogId);
+  private async commitHead(eventLogId: string, contractId: string, streamId: string, anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void> {
+    await this.withMutation(eventLogId, async (state) => {
+      assertAnchorBinding(anchor, this.authorityRef, eventLogId, contractId, streamId);
       const current = findAnchor(state.anchors, anchor);
-      assertAnchorBinding(anchor, this.authorityRef, eventLogId);
       if (!current || current.phase !== "prepared" || anchor.phase !== "committed"
         || !sameAnchorSummary(current, anchor) || !sameAnchorSummary(current.expectedPrevious, expectedPrevious)
-        || !sameAnchorSummary(anchor.expectedPrevious, expectedPrevious)) {
-        throw new Error("event_log_anchor_commit_invalid");
-      }
-      state.anchors = replaceAnchor(state.anchors, await this.withAuthorityTag(anchor));
-      await this.writeHeadState(eventLogId, state);
+        || !sameAnchorSummary(anchor.expectedPrevious, expectedPrevious)) throw new Error("event_log_anchor_commit_invalid");
+      await this.appendJournal(eventLogId, {
+        kind: "COMMIT", anchor, expectedPrevious, previousJournalTag: state.tailTag,
+      });
     });
   }
 
-  private async abortHead(eventLogId: string, anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void> {
-    await this.withMutation(async () => {
-      const state = await this.readHeadState(eventLogId);
+  private async abortHead(eventLogId: string, contractId: string, streamId: string, anchor: EventLogHeadAnchor, expectedPrevious: EventLogHeadAnchor | null): Promise<void> {
+    await this.withMutation(eventLogId, async (state) => {
+      assertAnchorBinding(anchor, this.authorityRef, eventLogId, contractId, streamId);
       const current = findAnchor(state.anchors, anchor);
-      assertAnchorBinding(anchor, this.authorityRef, eventLogId);
       if (!current || current.phase !== "prepared" || !sameAnchorSummary(current, anchor)
-        || !sameAnchorSummary(anchor.expectedPrevious, expectedPrevious)) {
-        throw new Error("event_log_anchor_abort_invalid");
-      }
-      if (!expectedPrevious) {
-        state.anchors = state.anchors.filter((item) => !sameAnchorKey(item, anchor));
-      } else {
-        const restored: EventLogHeadAnchor = {
-          ...anchor,
-          generation: expectedPrevious.generation,
-          sequence: expectedPrevious.sequence,
-          eventTag: expectedPrevious.eventTag,
-          phase: "committed",
-          expectedPrevious: null,
-        };
-        state.anchors = replaceAnchor(state.anchors, await this.withAuthorityTag(restored));
-      }
-      await this.writeHeadState(eventLogId, state);
+        || !sameAnchorSummary(anchor.expectedPrevious, expectedPrevious)) throw new Error("event_log_anchor_abort_invalid");
+      await this.appendJournal(eventLogId, {
+        kind: "ABORT", anchor, expectedPrevious, previousJournalTag: state.tailTag,
+      });
     });
   }
 
-  private async readHeadState(eventLogId: string): Promise<StoredEventLogHeadState> {
-    const path = join(this.storageRoot, `${eventLogId}.head.json`);
-    let value: unknown;
+  private async readHeadState(eventLogId: string): Promise<StoredHeadState> {
+    await this.ensureAuthorityBinding(eventLogId);
+    const path = this.journalPath(eventLogId);
+    let text: string;
     try {
-      value = JSON.parse(await readFile(path, "utf8"));
+      const pathBefore = await lstat(path);
+      if (!pathBefore.isFile() || pathBefore.isSymbolicLink()) throw new Error("event_log_anchor_path_unsafe");
+      const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const before = await handle.stat();
+        if (!before.isFile() || before.isSymbolicLink() || before.dev !== pathBefore.dev || before.ino !== pathBefore.ino || before.size > 16 * 1024 * 1024) throw new Error("event_log_anchor_invalid");
+        text = await handle.readFile("utf8");
+        const after = await handle.stat();
+        const pathAfter = await lstat(path);
+        if (before.dev !== after.dev || before.ino !== after.ino || pathAfter.dev !== after.dev || pathAfter.ino !== after.ino
+          || Buffer.byteLength(text, "utf8") !== before.size) throw new Error("event_log_anchor_invalid");
+      } finally { await handle.close().catch(() => undefined); }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return { format: eventLogHeadFormat, authorityRef: this.authorityRef, eventLogId, anchors: [] };
+        const binding = await this.readBinding(eventLogId);
+        if (binding.historyStarted) throw new Error("event_log_anchor_invalid");
+        return { anchors: [], tailTag: zeroJournalTag };
       }
+      if (error instanceof Error && error.message === "event_log_anchor_invalid") throw error;
       throw new Error("event_log_anchor_invalid");
     }
-    if (!isDataRecord(value) || exactKeys(value, ["format", "authorityRef", "eventLogId", "anchors"])
-      || value.format !== eventLogHeadFormat || value.authorityRef !== this.authorityRef || value.eventLogId !== eventLogId
-      || !Array.isArray(value.anchors)) throw new Error("event_log_anchor_invalid");
-    const anchors: Array<EventLogHeadAnchor & { authorityTag: string }> = [];
-    for (const raw of value.anchors) {
-      const anchor = parseStoredAnchor(raw, this.authorityRef, eventLogId);
-      if (anchors.some((item) => sameAnchorKey(item, anchor))) throw new Error("event_log_anchor_duplicate");
-      if (!await this.verifyHeadTag(anchor, raw.authorityTag)) throw new Error("event_log_anchor_auth_invalid");
-      anchors.push({ ...anchor, authorityTag: raw.authorityTag });
+    if (!text.endsWith("\n")) throw new Error("event_log_anchor_journal_partial");
+    const anchors: Array<EventLogHeadAnchor> = [];
+    let tailTag = zeroJournalTag;
+    for (const line of text.split("\n").slice(0, -1)) {
+      if (Buffer.byteLength(line, "utf8") > maximumJournalRecordBytes) throw new Error("event_log_anchor_record_too_large");
+      let value: unknown;
+      try { value = JSON.parse(line); } catch { throw new Error("event_log_anchor_journal_invalid"); }
+      const record = parseJournalRecord(value, this.authorityRef, eventLogId);
+      if (record.previousJournalTag !== tailTag || !await this.verifyJournalRecord(record)) throw new Error("event_log_anchor_auth_invalid");
+      applyJournalRecord(anchors, record);
+      tailTag = record.journalTag;
     }
-    return { format: eventLogHeadFormat, authorityRef: this.authorityRef, eventLogId, anchors };
+    const binding = await this.readBinding(eventLogId);
+    if (!binding.historyStarted) throw new Error("event_log_anchor_invalid");
+    return { anchors, tailTag };
   }
 
-  private async writeHeadState(eventLogId: string, state: StoredEventLogHeadState): Promise<void> {
-    await mkdir(this.storageRoot, { recursive: true });
-    const path = join(this.storageRoot, `${eventLogId}.head.json`);
-    const temp = `${path}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+  private async appendJournal(eventLogId: string, input: { kind: JournalRecord["kind"]; anchor: EventLogHeadAnchor; expectedPrevious: EventLogHeadAnchor | null; previousJournalTag: string }): Promise<void> {
+    const recordBase = {
+      format: eventLogJournalFormat,
+      kind: input.kind,
+      authorityRef: this.authorityRef,
+      eventLogId,
+      contractId: input.anchor.contractId,
+      streamId: input.anchor.streamId,
+      generation: input.anchor.generation,
+      sequence: input.anchor.sequence,
+      eventTag: input.anchor.eventTag,
+      phase: input.anchor.phase,
+      expectedPrevious: input.expectedPrevious ? summaryOf(input.expectedPrevious) : null,
+      previousJournalTag: input.previousJournalTag,
+    } as const;
+    const record: JournalRecord = { ...recordBase, journalTag: await hmacHex(await this.loadAuthorityKey(), eventLogHeadDomain, canonicalJournal(recordBase)) };
+    const line = `${JSON.stringify(record)}\n`;
+    if (Buffer.byteLength(line, "utf8") > maximumJournalRecordBytes) throw new Error("event_log_anchor_record_too_large");
+    await this.ensureBindingHistoryStarted(eventLogId);
+    const path = this.journalPath(eventLogId);
+    const pathBefore = await lstat(path).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw new Error("event_log_anchor_path_unsafe");
+    });
+    if (pathBefore && (!pathBefore.isFile() || pathBefore.isSymbolicLink())) throw new Error("event_log_anchor_path_unsafe");
+    const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0), 0o600);
     try {
-      await writeFile(temp, `${JSON.stringify(state)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-      await rename(temp, path);
-    } catch {
-      await unlink(temp).catch(() => undefined);
-      throw new Error("event_log_anchor_write_failed");
-    }
+      const before = await handle.stat();
+      if (!before.isFile() || before.isSymbolicLink()) throw new Error("event_log_anchor_write_failed");
+      if (pathBefore && (pathBefore.dev !== before.dev || pathBefore.ino !== before.ino)) throw new Error("event_log_anchor_path_race");
+      const written = await handle.write(line, undefined, "utf8");
+      if (written.bytesWritten !== Buffer.byteLength(line, "utf8")) throw new Error("event_log_anchor_write_failed");
+      await handle.sync();
+      const after = await handle.stat();
+      const pathAfter = await lstat(path);
+      if (before.dev !== after.dev || before.ino !== after.ino || pathAfter.dev !== after.dev || pathAfter.ino !== after.ino
+        || after.size !== before.size + written.bytesWritten) throw new Error("event_log_anchor_write_failed");
+    } finally { await handle.close().catch(() => undefined); }
   }
 
-  private async withAuthorityTag(anchor: EventLogHeadAnchor): Promise<EventLogHeadAnchor & { authorityTag: string }> {
-    return { ...anchor, authorityTag: await this.authorityTag(anchor) };
-  }
-
-  private async authorityTag(anchor: EventLogHeadAnchor, createIfMissing = true): Promise<string> {
-    return createHmac("sha256", await this.loadAuthorityKey(createIfMissing))
-      .update(`morrow.event-log/head/v1|${JSON.stringify({
-        authorityRef: anchor.authorityRef,
-        eventLogId: anchor.eventLogId,
-        contractId: anchor.contractId,
-        streamId: anchor.streamId,
-        generation: anchor.generation,
-        sequence: anchor.sequence,
-        eventTag: anchor.eventTag,
-        phase: anchor.phase,
-        expectedPrevious: anchor.expectedPrevious,
-      })}`, "utf8")
-      .digest("hex");
-  }
-
-  private async verifyHeadTag(anchor: EventLogHeadAnchor, tag: string): Promise<boolean> {
-    if (!eventLogTagPattern.test(tag)) return false;
+  private async verifyJournalRecord(record: JournalRecord): Promise<boolean> {
     try {
-      return constantTimeHexEqual(await this.authorityTag(anchor, false), tag);
-    } catch {
-      return false;
-    }
+      return constantTimeHexEqual(record.journalTag, await hmacHex(await this.loadAuthorityKey(false), eventLogHeadDomain, canonicalJournal(recordWithoutTag(record))));
+    } catch { return false; }
   }
+
+  private async ensureAuthorityBinding(eventLogId: string): Promise<AuthorityBinding> {
+    await this.privateStateRoot.ensure();
+    await mkdir(this.authorityRoot, { recursive: true });
+    const bindingPath = this.bindingPath(eventLogId);
+    try { return await this.readBinding(eventLogId); } catch (error) {
+      if (!(error instanceof Error) || error.message !== "event_log_authority_binding_missing") throw error;
+    }
+    const key = await this.loadAuthorityKey(true);
+    const binding: AuthorityBinding = {
+      format: eventLogBindingFormat, authorityRef: this.authorityRef, eventLogId, historyStarted: false,
+      bindingTag: await hmacHex(key, eventLogBindingDomain, canonicalBinding({ format: eventLogBindingFormat, authorityRef: this.authorityRef, eventLogId, historyStarted: false })),
+    };
+    try { await writeFile(bindingPath, `${JSON.stringify(binding)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 }); }
+    catch (createError) {
+      if (!isAlreadyExists(createError)) throw new Error("event_log_authority_binding_failed");
+      return await this.readBinding(eventLogId);
+    }
+    return binding;
+  }
+
+  private async readBinding(eventLogId: string): Promise<AuthorityBinding> {
+    const path = this.bindingPath(eventLogId);
+    let value: unknown;
+    try { value = JSON.parse(await readFile(path, "utf8")); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("event_log_authority_binding_missing"); throw new Error("event_log_authority_binding_invalid"); }
+    if (!isDataRecord(value) || exactKeys(value, ["format", "authorityRef", "eventLogId", "historyStarted", "bindingTag"])
+      || value.format !== eventLogBindingFormat || value.authorityRef !== this.authorityRef || value.eventLogId !== eventLogId
+      || typeof value.historyStarted !== "boolean" || !eventLogTagPattern.test(value.bindingTag)
+      || !constantTimeHexEqual(value.bindingTag, await hmacHex(await this.loadAuthorityKey(false), eventLogBindingDomain, canonicalBinding({ format: eventLogBindingFormat, authorityRef: this.authorityRef, eventLogId, historyStarted: value.historyStarted })))) {
+      throw new Error("event_log_authority_binding_invalid");
+    }
+    return value as unknown as AuthorityBinding;
+  }
+
+  private async ensureBindingHistoryStarted(eventLogId: string): Promise<void> {
+    const binding = await this.readBinding(eventLogId);
+    if (binding.historyStarted) return;
+    const key = await this.loadAuthorityKey(false);
+    const next: AuthorityBinding = { ...binding, historyStarted: true, bindingTag: await hmacHex(key, eventLogBindingDomain, canonicalBinding({ format: eventLogBindingFormat, authorityRef: this.authorityRef, eventLogId, historyStarted: true })) };
+    const bindingPath = this.bindingPath(eventLogId);
+    const beforePath = await lstat(bindingPath);
+    if (!beforePath.isFile() || beforePath.isSymbolicLink()) throw new Error("event_log_authority_binding_invalid");
+    const handle = await open(bindingPath, constants.O_WRONLY);
+    try {
+      const line = `${JSON.stringify(next)}\n`;
+      await handle.truncate(0);
+      const written = await handle.write(line, 0, "utf8");
+      if (written.bytesWritten !== Buffer.byteLength(line, "utf8")) throw new Error("event_log_authority_binding_failed");
+      await handle.sync();
+      const afterPath = await lstat(bindingPath);
+      if (beforePath.dev !== afterPath.dev || beforePath.ino !== afterPath.ino || afterPath.size !== Buffer.byteLength(line, "utf8")) {
+        throw new Error("event_log_authority_binding_failed");
+      }
+    } finally { await handle.close().catch(() => undefined); }
+  }
+
+  private journalPath(eventLogId: string): string { return join(this.authorityRoot, `${eventLogId}.head.journal`); }
+  private bindingPath(eventLogId: string): string { return join(this.authorityRoot, `${eventLogId}.binding.json`); }
 
   private async loadAuthorityKey(createIfMissing = true): Promise<Buffer> {
     if (this.authorityKey) return Buffer.from(this.authorityKey);
-    if (!createIfMissing) return await readKeyFile(this.keyPath);
-    await mkdir(this.storageRoot, { recursive: true });
-    try {
-      this.authorityKey = await readKeyFile(this.keyPath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      try {
-        await writeFile(this.keyPath, randomBytes(eventLogAuthorityKeyBytes), { flag: "wx", mode: 0o600 });
-      } catch (createError) {
-        if ((createError as NodeJS.ErrnoException).code !== "EEXIST") throw new Error("event_log_authority_unavailable");
-      }
+    await this.privateStateRoot.ensure();
+    await mkdir(this.authorityRoot, { recursive: true });
+    try { this.authorityKey = await readKeyFile(this.keyPath); }
+    catch (error) {
+      if (!createIfMissing || (error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("event_log_authority_unavailable");
+      const entries = await (await import("node:fs/promises")).readdir(this.authorityRoot);
+      if (entries.some((entry) => entry.endsWith(".binding.json") || entry.endsWith(".head.journal"))) throw new Error("event_log_authority_rebootstrap_denied");
+      try { await writeFile(this.keyPath, randomBytes(eventLogAuthorityKeyBytes), { flag: "wx", mode: 0o600 }); }
+      catch (createError) { if (!isAlreadyExists(createError)) throw new Error("event_log_authority_unavailable"); }
       this.authorityKey = await readKeyFile(this.keyPath);
     }
     return Buffer.from(this.authorityKey);
   }
 
-  private async withMutation<T>(operation: () => Promise<T>): Promise<T> {
-    const previous = this.mutationTail.current;
-    let release: () => void = () => undefined;
-    this.mutationTail.current = new Promise<void>((resolvePromise) => { release = resolvePromise; });
-    await previous;
-    try {
-      return await operation();
-    } finally {
-      release();
-    }
+  private async withMutation<T>(eventLogId: string, operation: (state: StoredHeadState) => Promise<T>): Promise<T> {
+    const lock = await this.privateStateRoot.acquireExclusive(this.authorityRef, eventLogId);
+    try { return await operation(await this.readHeadState(eventLogId)); }
+    finally { await lock.release(); }
   }
 }
 
 export function defaultEventLogAuthority(eventLogId: string): EventLogAuthorityCapability {
-  let authority = defaultEventLogAuthorities.get(defaultEventLogAuthorityRoot);
-  if (!authority) {
-    authority = new PersistentEventLogAuthority(defaultEventLogAuthorityRoot);
-    defaultEventLogAuthorities.set(defaultEventLogAuthorityRoot, authority);
-  }
+  const root = defaultWorkerPrivateStateRoot();
+  const key = root.privateRoot;
+  let authority = defaultEventLogAuthorities.get(key);
+  if (!authority) { authority = new PersistentEventLogAuthority(root); defaultEventLogAuthorities.set(key, authority); }
   return authority.capability(eventLogId);
 }
 
-function assertAnchorBinding(anchor: EventLogHeadAnchor, authorityRef: string, eventLogId: string): void {
+function assertAnchorBinding(anchor: EventLogHeadAnchor, authorityRef: string, eventLogId: string, contractId: string, streamId: string): void {
   if (anchor.authorityRef !== authorityRef || anchor.eventLogId !== eventLogId
+    || anchor.contractId !== contractId || anchor.streamId !== streamId
     || !isIdentifier(anchor.contractId) || !eventLogTagPattern.test(anchor.streamId)) {
     throw new Error("event_log_anchor_binding_invalid");
   }
+}
+
+function assertRecordBinding(record: EventLogRecord, eventLogId: string, contractId: string, streamId: string): void {
+  if (!isDataRecord(record) || exactKeys(record, [
+    "format", "eventLogId", "streamId", "contractId", "sequence", "eventId", "previousAuthenticatedTag", "event",
+  ]) || record.format !== "morrow.event-log/4" || record.eventLogId !== eventLogId || record.streamId !== streamId
+    || record.contractId !== contractId || !Number.isSafeInteger(record.sequence) || record.sequence < 1
+    || typeof record.eventId !== "string" || !isIdentifier(record.eventId)
+    || !eventLogTagPattern.test(record.previousAuthenticatedTag)
+    || !isDataRecord(record.event) || record.event.eventId !== record.eventId || record.event.contractId !== contractId) {
+    throw new Error("event_log_record_invalid");
+  }
+}
+
+function eventStreamIdFor(eventLogId: string, contractId: string): string {
+  const streamIdentity = createHash("sha256").update(`morrow.event-log/stream/v1|${eventLogId}`, "utf8").digest("hex");
+  return createHash("sha256").update(`${streamIdentity}|${contractId}`, "utf8").digest("hex");
 }
 
 function assertExpectedPrevious(current: EventLogHeadAnchor | null, expectedPrevious: EventLogHeadAnchor | null): void {
@@ -700,24 +842,33 @@ function assertExpectedPrevious(current: EventLogHeadAnchor | null, expectedPrev
   }
 }
 
-function parseStoredAnchor(value: unknown, authorityRef: string, eventLogId: string): EventLogHeadAnchor & { authorityTag: string } {
-  if (!isDataRecord(value) || exactKeys(value, ["authorityRef", "eventLogId", "contractId", "streamId", "generation", "sequence", "eventTag", "phase", "expectedPrevious", "authorityTag"])) {
+function parseJournalRecord(value: unknown, authorityRef: string, eventLogId: string): JournalRecord {
+  if (!isDataRecord(value) || exactKeys(value, [
+    "format", "kind", "authorityRef", "eventLogId", "contractId", "streamId", "generation", "sequence",
+    "eventTag", "phase", "expectedPrevious", "previousJournalTag", "journalTag",
+  ])) {
     throw new Error("event_log_anchor_invalid");
   }
-  if (value.authorityRef !== authorityRef || value.eventLogId !== eventLogId
+  if (value.format !== eventLogJournalFormat
+    || value.authorityRef !== authorityRef || value.eventLogId !== eventLogId
+    || (value.kind !== "PREPARE" && value.kind !== "COMMIT" && value.kind !== "ABORT")
     || typeof value.contractId !== "string" || typeof value.streamId !== "string"
-    || !isIdentifier(value.contractId) || !eventLogTagPattern.test(value.streamId)
+    || !isIdentifier(value.contractId) || value.streamId !== eventStreamIdFor(eventLogId, value.contractId)
     || !Number.isSafeInteger(value.generation) || value.generation < 1
     || !Number.isSafeInteger(value.sequence) || value.sequence < 1
     || !eventLogTagPattern.test(value.eventTag)
-    || (value.phase !== "prepared" && value.phase !== "committed")
+    || ((value.kind === "COMMIT") !== (value.phase === "committed"))
+    || ((value.kind !== "COMMIT") !== (value.phase === "prepared"))
     || (value.expectedPrevious !== null && (!isDataRecord(value.expectedPrevious)
       || exactKeys(value.expectedPrevious, ["generation", "sequence", "eventTag"])
       || !Number.isSafeInteger(value.expectedPrevious.generation) || value.expectedPrevious.generation < 1
       || !Number.isSafeInteger(value.expectedPrevious.sequence) || value.expectedPrevious.sequence < 1
       || !eventLogTagPattern.test(value.expectedPrevious.eventTag)))
-    || !eventLogTagPattern.test(value.authorityTag)) throw new Error("event_log_anchor_invalid");
+    || !eventLogTagPattern.test(value.previousJournalTag)
+    || !eventLogTagPattern.test(value.journalTag)) throw new Error("event_log_anchor_invalid");
   return {
+    format: eventLogJournalFormat,
+    kind: value.kind,
     authorityRef: value.authorityRef,
     eventLogId: value.eventLogId,
     contractId: value.contractId,
@@ -727,8 +878,119 @@ function parseStoredAnchor(value: unknown, authorityRef: string, eventLogId: str
     eventTag: value.eventTag,
     phase: value.phase,
     expectedPrevious: value.expectedPrevious,
-    authorityTag: value.authorityTag,
+    previousJournalTag: value.previousJournalTag,
+    journalTag: value.journalTag,
   };
+}
+
+function applyJournalRecord(anchors: Array<EventLogHeadAnchor>, record: JournalRecord): void {
+  const next = anchorFromJournal(record);
+  const index = anchors.findIndex((item) => sameAnchorKey(item, next));
+  const current = index < 0 ? null : anchors[index]!;
+  if (record.kind === "PREPARE") {
+    if (current?.phase === "prepared"
+      || !sameAnchorSummary(current?.phase === "committed" ? current : null, record.expectedPrevious)
+      || record.sequence !== (record.expectedPrevious?.sequence ?? 0) + 1
+      || record.generation !== (record.expectedPrevious?.generation ?? 0) + 1) {
+      throw new Error("event_log_anchor_transition_invalid");
+    }
+    if (current) anchors[index] = next;
+    else anchors.push(next);
+    return;
+  }
+  if (!current || current.phase !== "prepared" || !sameAnchorSummary(current, next)
+    || !sameAnchorSummary(current.expectedPrevious, record.expectedPrevious)) {
+    throw new Error("event_log_anchor_transition_invalid");
+  }
+  if (record.kind === "COMMIT") {
+    anchors[index] = { ...next, phase: "committed" };
+    return;
+  }
+  if (record.expectedPrevious === null) anchors.splice(index, 1);
+  else anchors[index] = {
+    ...next,
+    generation: record.expectedPrevious.generation,
+    sequence: record.expectedPrevious.sequence,
+    eventTag: record.expectedPrevious.eventTag,
+    phase: "committed",
+    expectedPrevious: null,
+  };
+}
+
+function anchorFromJournal(record: JournalRecord): EventLogHeadAnchor {
+  return {
+    authorityRef: record.authorityRef,
+    eventLogId: record.eventLogId,
+    contractId: record.contractId,
+    streamId: record.streamId,
+    generation: record.generation,
+    sequence: record.sequence,
+    eventTag: record.eventTag,
+    phase: record.phase,
+    expectedPrevious: record.expectedPrevious,
+  };
+}
+
+function summaryOf(anchor: EventLogHeadAnchor): { generation: number; sequence: number; eventTag: string } {
+  return { generation: anchor.generation, sequence: anchor.sequence, eventTag: anchor.eventTag };
+}
+
+function recordWithoutTag(record: JournalRecord): Omit<JournalRecord, "journalTag"> {
+  const { journalTag: _journalTag, ...withoutTag } = record;
+  return withoutTag;
+}
+
+function canonicalRecord(record: EventLogRecord): string {
+  return canonicalize({
+    format: record.format,
+    eventLogId: record.eventLogId,
+    streamId: record.streamId,
+    contractId: record.contractId,
+    sequence: record.sequence,
+    eventId: record.eventId,
+    previousAuthenticatedTag: record.previousAuthenticatedTag,
+    event: record.event,
+  });
+}
+
+function canonicalJournal(record: Omit<JournalRecord, "journalTag">): string {
+  return canonicalize({
+    format: record.format,
+    kind: record.kind,
+    authorityRef: record.authorityRef,
+    eventLogId: record.eventLogId,
+    contractId: record.contractId,
+    streamId: record.streamId,
+    generation: record.generation,
+    sequence: record.sequence,
+    eventTag: record.eventTag,
+    phase: record.phase,
+    expectedPrevious: record.expectedPrevious,
+    previousJournalTag: record.previousJournalTag,
+  });
+}
+
+function canonicalBinding(binding: Omit<AuthorityBinding, "bindingTag">): string {
+  return canonicalize({
+    format: binding.format,
+    authorityRef: binding.authorityRef,
+    eventLogId: binding.eventLogId,
+    historyStarted: binding.historyStarted,
+  });
+}
+
+function canonicalize(value: unknown): string {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number" && Number.isFinite(value)) return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalize(item)).join(",")}]`;
+  if (isDataRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(value[key])}`).join(",")}}`;
+  }
+  throw new Error("event_log_canonicalization_invalid");
+}
+
+function hmacHex(key: Buffer, domain: string, value: string): string {
+  return createHmac("sha256", key).update(domain, "utf8").update(Buffer.from([0])).update(value, "utf8").digest("hex");
 }
 
 function findAnchor(anchors: readonly EventLogHeadAnchor[], target: EventLogHeadAnchor): EventLogHeadAnchor | null {

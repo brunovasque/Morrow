@@ -209,6 +209,16 @@ deploy nem inicie P4-PR04.
 
 - resultado PRE_DISPATCH: manifesto completo e autorizado para handoff ao Executor; o reconciliador deve confirmar `READY_FOR_EXECUTION`, `nextPrId: P4-PR03` e `nextAuthorizedAction: START_P4_PR03` em worktree limpa nesta branch.
 
+## P4-PR03 — correção arquitetural V2 descendente de `51601a2`
+
+- objetivo desta correção: fechar root authority configurável/adulterável, capability como MAC oracle genérico e CAS apenas intra-instância, incluindo durabilidade da âncora; o formato experimental `morrow.event-log/3` e `.event-log-key-v1` permanece inválido sem migração automática;
+- `WorkerPrivateStateRoot` foi criado em `src/worker-private-state.ts`. A raiz é absoluta, canonicalizada, marcada com identidade estável de instalação/Worker, validada fora das managed roots e protegida contra symlink/junction/reparse; o `LocalWorkerService` só aceita a opção no bootstrap confiável, e o default do Event Log usa o caminho fixo da instalação derivado do módulo, nunca `process.cwd()`;
+- a autoridade persistente agora vive no estado privado do Worker e o Event Log recebe somente capability opaca vinculada a `authorityRef`, `eventLogId`, `contractId`, `streamId` e `epoch`. Não há `authenticateEvent(domain)`/`verifyEvent(domain, ...)`; os domínios internos são fixos `morrow.event-log/auth/v4` e `morrow.event-log/head/v1`, separados do transcript;
+- a âncora externa usa journal append-only autenticado com `PREPARE`, `COMMIT` e `ABORT`; cada registro é escrito integralmente e `FileHandle.sync()` é chamado. Tail parcial, corrupção, anchor ahead, log ahead, divergência, rollback e incerteza de crash bloqueiam sem truncar, apagar evidência ou regravar automaticamente;
+- REDs reproduzidos e GREEN: root dentro da managed root, parent junction, caller com storageRoot, perda de authority após histórico, rebootstrap, capability cross-contract/cross-stream e domínio arbitrário; dois processos no mesmo `expectedPrevious` produziram exatamente um vencedor e um `event_log_anchor_cas_conflict`; lock stale foi recuperado somente com endpoint livre e binding válido, enquanto lease PID-only foi rejeitado;
+- regressões mantidas: D-014, D-015, D-016, D-017, replay/cursor, recovery/liveness, ordering/dedup/loss e transcript/redaction P4-PR02. Bloom de 8 MiB permanece P3/informational e não foi redesenhado; nenhum segredo aparece em JSONL, journal, binding, erro, inspect ou evidência;
+- focused executado nesta correção antes do congelamento: governance `22/22`, P4-PR03 `29/29`, transcript `42/42`, worker-recovery `21/21`, live-activity `8/8`, local-worker `10/10`; `npm test` ainda será repetido com worktree limpa após o commit final; `git diff --check` passou e o reconciliador pré-commit bloqueou somente por `git_worktree_dirty`.
+
 ## P4-PR03 — evidência factual do Executor
 
 - D-014 RED: conversão de `Date` hostil podia lançar fora da conversão sanitizada em transcript e recovery. GREEN: toda conversão de clock aceita somente string, número ou `Date` convertível, captura falha de getter/conversão e retorna apenas `transcript_clock_invalid` ou `worker_recovery_clock_invalid`, sem payload hostil.
