@@ -245,3 +245,15 @@ deploy nem inicie P4-PR04.
 - a factory de produção sempre acrescenta exatamente um segmento validado sob `D:\\Morrow\\private\\worker-installation`, sem separadores, drive, UNC ou navegação. A reserva global e a checagem canônica existente permanecem como defesa adicional;
 - contraprovas GREEN: separadores, traversal, path absoluto/drive/UNC, `.` e diferenças de case são recusados; IDs legítimos `worker-1`, `Worker.A_2`, `a`, `A` repetido 64 vezes e `a..b` são aceitos sem divergência entre Local Worker e factory. Bootstrap e restart legítimos preservam a autoridade;
 - regressões desta correção: focused P4-PR03 `29/29`, governance `23/23`, Local Worker `12/12`; D-014..D-017, CAS multiprocesso, rollback, rebootstrap, journal, replay/cursor, recovery/liveness, transcript/redaction e parent junction permanecem GREEN. O novo candidate é descendente de `ea4bcaa9fd8d2b3de0f079ac05f3ba00165a3d1b` e não altera Event Log, transcript, recovery ou Live Activity;
+
+## P4-PR03 — candidate final e Control Root documental
+
+- `EXECUTION_CANDIDATE_SHA`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`;
+- parent: `ea4bcaa9fd8d2b3de0f079ac05f3ba00165a3d1b`;
+- base contratual: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`;
+- branch: `mvo/p4-pr03-replay-rehydration`;
+- o delta total base→candidate permanece dentro da P4-PR03; não contém P4-PR04, P3/ConPTY, D-013, package drift, UI/API multi-session, deploy ou outro repositório;
+- `SECURITY_REVIEW_GREEN — P4_PR03_READY_FOR_INTEGRATION_PREFLIGHT`, associado exatamente ao Execution Root `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`; P1 nenhum, P2 nenhum, directory sync P3 operacional, Bloom P3/informational, zero scope drift e zero mutação pelo Security Reviewer;
+- resultados fresh: governance/private state `23/23`; Local Worker `12/12`; P4-PR03 `29/29`; transcript `42/42`; recovery `21/21`; Live Activity `8/8`; bootstrap multiprocessado `10 × 8` sem flakiness; CAS `1 winner / 1 event_log_anchor_cas_conflict`; `npm test` final `251/251`; `git diff --check` GREEN; `npm run contract:reconcile` `allowed=true`;
+- a primeira full regression teve EBUSY isolado em ConPTY; o retry integral passou `251/251`, sem reprodução causal; o evento foi classificado como não bloqueante sob D-013 e nenhuma alteração P3/ConPTY foi feita;
+- este commit é somente `CONTROL_ROOT_DOCUMENTARY_RECONCILIATION`; `CONTROL_ROOT_SHA` é o SHA deste commit documental, capturado após sua criação. Ele não substitui nem reidentifica o `EXECUTION_CANDIDATE_SHA`; Reviewer/Auditor devem comparar ambos mecanicamente e confirmar zero mudança em `src/`, `test/` e package files após o Execution Root.
