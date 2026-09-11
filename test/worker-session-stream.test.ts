@@ -155,3 +155,42 @@ test("cursor at the retained floor is explicit and stale history is not reset", 
   assert.equal(atHead.status, "ok");
   assert.equal(atHead.events.length, 0);
 });
+
+test("P2 RED: terminal persistence failure cannot resolve completion as completed", async (t) => {
+  const { root, stream, workspaces } = await harness(t);
+  const workspace = await workspaces.create({ workspaceId: "W-durable", contractId: "C-P4-PR04", roleId: "executor" });
+  const started = new Promise<void>((resolve) => {
+    stream.subscribe("T-durable", (event) => {
+      if (event.type !== "TERMINAL_SESSION_STARTED") return;
+      const sessions = (stream as any).sessions as Map<string, any>;
+      const record = sessions.get("T-durable");
+      assert.ok(record);
+      record.eventLog.append = async () => { throw new Error("simulated terminal durability outage"); };
+      resolve();
+    });
+  });
+  const handle = await stream.start(request(workspace, "T-durable", "setTimeout(() => process.exit(0), 40);"));
+  await started;
+  await assert.rejects(handle.completion, /worker_session_terminal_persistence_failed/);
+  const failedLive = stream.list().find((session) => session.sessionId === "T-durable");
+  assert.ok(failedLive);
+  assert.equal(failedLive.state, "failed");
+  assert.equal(failedLive.liveness, "failed");
+  await stream.close();
+
+  const restarted = await WorkerSessionStream.open({
+    stateRoot: join(root, "session-stream"),
+    terminals: new TerminalSessionManager(join(root, "managed-workspaces")),
+    redaction: { policyId: "p4-pr04-test", sensitiveLiterals: ["MORROW_SECRET_CANARY"] },
+  });
+  const item = restarted.list().find((session) => session.sessionId === "T-durable");
+  assert.ok(item);
+  assert.equal(item.terminal, false);
+  assert.equal(item.state, "recoverable");
+  assert.equal(item.liveness, "offline");
+  const replay = await restarted.replay("T-durable");
+  assert.equal(replay.status, "ok");
+  assert.equal(replay.events.filter((event) => event.type === "TERMINAL_SESSION_STARTED").length, 1);
+  assert.equal(replay.events.some((event) => event.type === "TERMINAL_SESSION_EXITED"), false);
+  await restarted.close();
+});

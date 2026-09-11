@@ -45,6 +45,13 @@ reported as `recoverable` and `offline`, never as completed or online merely
 because the process restarted. A session can therefore be distinguished as
 online, offline/recoverable, terminal, or failed.
 
+The completion promise also waits for the terminal event to finish in the
+session persistence queue. If that append fails, completion rejects with the
+sanitized `worker_session_terminal_persistence_failed` error; it never returns
+a successful terminal result without a durable terminal event. The in-memory
+session becomes failed, while a later reopen correctly derives the non-terminal
+`recoverable`/`offline` state from the events that actually exist.
+
 The central proof uses two actual child processes in distinct managed
 workspaces. Their live output, durable event ids, cursors, redaction, replay,
 and post-restart descriptors remain isolated.

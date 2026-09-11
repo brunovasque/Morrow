@@ -112,6 +112,7 @@ interface SessionRecord extends WorkerSessionIdentity {
   historyTruncated: boolean;
   started: boolean;
   failure: boolean;
+  persistenceError: Error | null;
   queue: Promise<void>;
   redactors: Map<"stdout" | "stderr", StreamRedactorSession>;
 }
@@ -205,6 +206,7 @@ export class WorkerSessionStream {
       const handle = await this.terminals.start(request);
       const completion = handle.completion.then(async (result) => {
         await record.queue;
+        if (record.persistenceError) throw record.persistenceError;
         return result;
       });
       return Object.freeze({ sessionId: record.sessionId, completion });
@@ -318,6 +320,7 @@ export class WorkerSessionStream {
       historyTruncated: false,
       started: false,
       failure: false,
+      persistenceError: null,
       queue: Promise.resolve(),
       redactors: new Map([
         ["stdout", this.redactor.start(redactorMaximumPendingBytes)],
@@ -352,6 +355,7 @@ export class WorkerSessionStream {
     }
     const current = this.sessions.get(event.terminalSessionId)!;
     current.queue = current.queue.then(() => this.persistTerminalEvent(current, event)).catch(() => {
+      current.persistenceError = new Error("worker_session_terminal_persistence_failed");
       current.state = "failed";
       current.liveness = "failed";
       current.terminal = true;
