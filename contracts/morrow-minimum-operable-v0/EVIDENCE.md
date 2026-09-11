@@ -308,3 +308,34 @@ deploy nem inicie P4-PR04.
 - Security `GREEN`, Reviewer `GREEN`, Auditor pré-PR `GREEN`; nenhum novo julgamento técnico é criado por este registro documental.
 - `MERGE_READY` está versionado; o merge da PR #21 fica autorizado sob as cercas mecânicas aplicáveis. P4-PR03 permanece `RUNNING` até a reconciliação pós-merge e o Auditor final; P4-PR04 permanece `PENDING`.
 - Este commit é exclusivamente documental/control-plane, não cria nova Execution Root, não altera código/testes/package/workflow/deploy e não é novo candidate técnico. O SHA deste commit é capturado externamente pelo Integrator como `PRE_MERGE_CONTROL_ROOT_SHA`, sem self-reference documental.
+
+## P4-PR03 — merge integrado e regressão pós-merge
+
+- `EXECUTION_ROOT_SHA`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`; permanece imutável e continua sendo o único candidate técnico.
+- `PRE_MERGE_CONTROL_ROOT_SHA`: `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`; commit documental que versionou `MERGE_READY` antes da integração.
+- PR de produto: `#21`, `https://github.com/brunovasque/Morrow/pull/21`; head aprovado antes do merge `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`; base `phase-2/runtime-v0` em `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`.
+- `MERGE_SHA`: `b95b15a61b549eaa779b26b034cea4d57adf9e74`; parents, na ordem real: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`.
+- A PR #21 ficou `MERGED`; a árvore do merge é idêntica à árvore do head aprovado; o delta integrado contém os 16 paths da PR, sem path inesperado, workflow, package ou deploy drift, e `git diff --check` ficou GREEN.
+- Regressão pós-merge no `MERGE_SHA`: `npm ci` GREEN; focused P4-PR03 `29/29` GREEN; focused transcript/P4-PR02 `42/42` GREEN.
+- `npm test`: primeira execução observada `251/252`, com uma falha isolada de atividade assíncrona `EBADF` em `test/kernel.test.ts`; reexecução imediata `251/251` GREEN. O evento não corresponde ao D-013 documentado, não se reproduziu e não produziu alteração de código; fica explicitamente disponível para julgamento do Auditor final, sem ser promovido a finding causal.
+- `npm run contract:reconcile` no checkout limpo de `phase-2/runtime-v0` retornou exatamente `allowed=false`, `state=BLOCKED_STATE_DIVERGENCE`, `nextPrId=P4-PR03`, `nextAuthorizedAction=START_P4_PR03`, `reasons=[git_branch_mismatch:phase-2/runtime-v0]`. Como no fechamento anterior, a decisão é `EXPECTED_BRANCH_CONTEXT_DIVERGENCE`: o reconciliador é branch-aware e a base integrada não é a branch dedicada da unidade; isto não é drift da árvore nem regressão do produto.
+- `REGRESSION_VETO`: `PASS`. O gate canônico em `governance/gates/REGRESSION_VETO.md` foi aplicado à manifestação pós-merge: árvore/parents/diff-check, `npm ci`, focados, suíte completa reexecutada e reconciliador. A primeira suíte `251/252` por `EBADF` assíncrono isolado não se reproduziu na reexecução `251/251` e não provou regressão de comportamento; D-013 não ocorreu e nenhuma mudança P3/ConPTY foi feita.
+- P4-PR03 permanece `RUNNING` e não `PROVEN`; P4-PR04 permanece `PENDING` e proibida até o fechamento final de P4-PR03.
+- Este registro é somente documental/control-plane. O SHA deste commit é capturado externamente como `POST_MERGE_CONTROL_ROOT_SHA`, sem self-reference e sem nova Execution Root.
+- Próximo ator único: Auditor final independente, em sessão nova e read-only, julgando merge real, árvore/parents, regressão, ausência de drift, cobertura, o evento isolado `EBADF` e a prontidão para emitir o veredito final definido pelo contrato. Nenhum novo Scribe, Reviewer, Security Review, merge ou deploy é autorizado nesta etapa.
+
+## P4-PR03 — fechamento final auditado
+
+- `FINAL_AUDIT_GREEN` foi emitido por Auditor final independente, em sessão nova e read-only, sobre o merge real e a evidência pós-merge.
+- A PR #21 está integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`; parents corretos: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`.
+- A árvore integrada é equivalente à árvore do head aprovado `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, sem drift.
+- Evidência pós-merge preservada: `npm ci` GREEN; P4-PR03 `29/29`; transcript `42/42`; primeira full `251/252` por `EBADF` isolado; retry `251/251`; `git diff --check` GREEN; `REGRESSION_VETO` `PASS`.
+- O `EBADF` foi não causal e não bloqueante; o reconciliador na base retornou somente o `git_branch_mismatch:phase-2/runtime-v0` esperado pelo comportamento branch-aware.
+- Security Review, Reviewer independente e Auditor pré-merge permanecem válidos; o Auditor final confirmou `FINAL_AUDIT_GREEN`.
+- Com a integração desta closure-record, o estado efetivo de P4-PR03 é `PROVEN`. Isto não cria novo candidate técnico nem altera código, testes, package, workflow ou deploy.
+- P4-PR04 passa a ser o próximo PR autorizado após a integração desta closure; seu objetivo é expor stream/API de múltiplas sessões e provar observabilidade ponta a ponta do Worker, com prova de duas sessões reais vistas ao vivo e reidratadas após restart.
+- Dependências satisfeitas para P4-PR04: P4-PR03 `PROVEN` e P3-PR04 `PROVEN`. Próximo ator único: Orchestrator / Contract Engineer persistente, responsável por kickoff, PRE_DISPATCH e TASK do Executor de P4-PR04.
+
+## P4-PR03 — entrada final na tabela de evidências
+
+| `P4-PR03` | `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` | `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a` | [`PR #21`](https://github.com/brunovasque/Morrow/pull/21), merge `b95b15a61b549eaa779b26b034cea4d57adf9e74`; closure PR #22 | `npm ci` GREEN; P4-PR03 `29/29`; transcript `42/42`; retry `251/251`; `git diff --check` GREEN; `REGRESSION_VETO` `PASS`; zero drift | Security `GREEN`; Reviewer `GREEN`; Auditor pré-merge `MERGE_READY`; Auditor final `FINAL_AUDIT_GREEN` | `PROVEN` | 2026-09-11 |
