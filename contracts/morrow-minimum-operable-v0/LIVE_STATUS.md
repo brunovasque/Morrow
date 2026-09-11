@@ -13,11 +13,11 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR03`
 - `active_route_node`: `REPLAY_REHYDRATION_CURSORS_LIVENESS`
-- `active_subaction`: `P4_PR03_PR_IDENTITY_VERSIONED`
+- `active_subaction`: `P4_PR03_MERGE_READY_VERSIONED`
 - `expected_branch_prefix`: `mvo/p4-pr03-`
-- `write_execution_allowed`: `no for integration/merge; START is coarse and not merge authorization`
+- `write_execution_allowed`: `no for implementation; authorized merge is allowed after MERGE_READY; START remains coarse and is not itself merge authorization`
 - `next_authorized_action`: `START_P4_PR03`
-- `next_authorized_actor`: `mesmo Integrator persistente, somente para push fast-forward do novo Control Root documental, confirmação da identidade/remote head da PR #21 e gates pós-PR; merge permanece proibido`
+- `next_authorized_actor`: `Integrator, somente para push fast-forward, merge protegido e regressão pós-merge; depois, Auditor final independente`
 - `execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
 - `opening_control_root_sha`: `de47fd7a3f919a7094a16c051548cef0a47bf51a`
 - `pr_identity_state`: `PR_IDENTITY_VERSIONED`
@@ -25,11 +25,13 @@
 - `pr_head_sha_at_opening`: `de47fd7a3f919a7094a16c051548cef0a47bf51a`
 - `pr_base_sha_at_opening`: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`
 - `pr_state_at_opening`: `OPEN; não draft; mergeable`
-- `merge_authorized`: `no`
+- `merge_ready_state`: `MERGE_READY`
+- `merge_ready_reason`: `MERGE_READY_MUST_BE_VERSIONED_BEFORE_MERGE`
+- `merge_authorized`: `yes`
 
 ## Próxima ação exata
 
-P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com Auditor pré-merge `MERGE_READY`, regressão pós-merge verde e Auditor final `P4_PR02_PROVEN_READY`. A closure-record foi integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. P4-PR03 permanece `RUNNING`, com Execution Root `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`, Control Root de abertura/head `de47fd7a3f919a7094a16c051548cef0a47bf51a`, base de abertura `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e branch `mvo/p4-pr03-replay-rehydration`. Security, Reviewer e Auditor estão `GREEN`; a identidade está versionada como `PR_IDENTITY_VERSIONED` para o repositório `brunovasque/Morrow`, PR #21, URL `https://github.com/brunovasque/Morrow/pull/21`, contra `phase-2/runtime-v0`. O próximo ator é o mesmo Integrator persistente, somente para push fast-forward do novo Control Root documental, confirmar que a mesma PR #21 aponta para ele, executar/observar os gates pós-PR e retornar ao próximo gate; merge permanece proibido. `START_P4_PR03` permanece a ação coarse do reconciliador.
+P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com Auditor pré-merge `MERGE_READY`, regressão pós-merge verde e Auditor final `P4_PR02_PROVEN_READY`. A closure-record foi integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. P4-PR03 permanece `RUNNING`, com Execution Root `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`, Control Root de abertura/head `de47fd7a3f919a7094a16c051548cef0a47bf51a`, base de abertura `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e branch `mvo/p4-pr03-replay-rehydration`. Security, Reviewer e Auditor estão `GREEN`; a identidade está versionada como `PR_IDENTITY_VERSIONED` para o repositório `brunovasque/Morrow`, PR #21, URL `https://github.com/brunovasque/Morrow/pull/21`, contra `phase-2/runtime-v0`. O Auditor pré-merge emitiu `MERGE_READY`, com `MERGE_READY_MUST_BE_VERSIONED_BEFORE_MERGE` e blockers `NONE`; essa determinação está versionada e o merge protegido da PR #21 está autorizado. P4-PR03 permanece `RUNNING` até a regressão pós-merge e o Auditor final independente; P4-PR04 permanece `PENDING`. `START_P4_PR03` permanece a ação coarse do reconciliador.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 

@@ -297,3 +297,14 @@ deploy nem inicie P4-PR04.
 - Estado documental: `PR_IDENTITY_VERSIONED`. Isso versiona a identidade estável e não autoriza merge, não cria unidade nova e não transforma o commit documental em requisito recursivo de conter seu próprio SHA como head atual da PR.
 - O novo commit será o novo Control Root documental, descendente do opening Control Root. Isso não cria nova Execution Root, não muda a unidade P4-PR03 e não exige re-review técnica apenas por esta reconciliação documental.
 - Próximo ator único: o mesmo Integrator persistente, somente para confirmar o novo Control Root, fazer push fast-forward normal da mesma branch, confirmar que a PR #21 continua a mesma PR e que o remote head é o novo Control Root, executar/observar gates pós-PR e retornar ao próximo gate canônico. P4-PR03 permanece `RUNNING` e não `PROVEN`; P4-PR04 permanece `PENDING`.
+
+## P4-PR03 — MERGE_READY versionado antes do merge
+
+- `EXECUTION_ROOT_SHA`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`; permanece imutável e continua sendo o único candidate técnico.
+- `OPENING_CONTROL_ROOT_SHA`: `de47fd7a3f919a7094a16c051548cef0a47bf51a`.
+- Current Control Root/head antes deste registro: `8e819a9633f70c210b663db4edea53f6350ed347`.
+- PR: `#21`, branch `mvo/p4-pr03-replay-rehydration`, base `phase-2/runtime-v0` em `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`.
+- Auditor pré-merge: `MERGE_READY`; determinação: `MERGE_READY_MUST_BE_VERSIONED_BEFORE_MERGE`; blockers: `NONE`.
+- Security `GREEN`, Reviewer `GREEN`, Auditor pré-PR `GREEN`; nenhum novo julgamento técnico é criado por este registro documental.
+- `MERGE_READY` está versionado; o merge da PR #21 fica autorizado sob as cercas mecânicas aplicáveis. P4-PR03 permanece `RUNNING` até a reconciliação pós-merge e o Auditor final; P4-PR04 permanece `PENDING`.
+- Este commit é exclusivamente documental/control-plane, não cria nova Execution Root, não altera código/testes/package/workflow/deploy e não é novo candidate técnico. O SHA deste commit é capturado externamente pelo Integrator como `PRE_MERGE_CONTROL_ROOT_SHA`, sem self-reference documental.
