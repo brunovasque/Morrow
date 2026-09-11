@@ -291,7 +291,7 @@ export class JsonlEventLog implements EventLog {
       if (error instanceof Error && error.message.startsWith("event_log_")) throw new Error("morrow_event_log_anchor_invalid");
       throw new Error("morrow_event_log_read_failed");
     } finally {
-      input?.destroy();
+      if (input && !input.destroyed) input.destroy();
       await handle?.close().catch(() => undefined);
     }
     const reconciledAnchors = await reconcileAnchors(this.authority, anchors, heads, lastHashes);
