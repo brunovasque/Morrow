@@ -323,3 +323,15 @@ deploy nem inicie P4-PR04.
 - P4-PR03 permanece `RUNNING` e não `PROVEN`; P4-PR04 permanece `PENDING` e proibida até o fechamento final de P4-PR03.
 - Este registro é somente documental/control-plane. O SHA deste commit é capturado externamente como `POST_MERGE_CONTROL_ROOT_SHA`, sem self-reference e sem nova Execution Root.
 - Próximo ator único: Auditor final independente, em sessão nova e read-only, julgando merge real, árvore/parents, regressão, ausência de drift, cobertura, o evento isolado `EBADF` e a prontidão para emitir o veredito final definido pelo contrato. Nenhum novo Scribe, Reviewer, Security Review, merge ou deploy é autorizado nesta etapa.
+
+## P4-PR03 — fechamento final auditado
+
+- `FINAL_AUDIT_GREEN` foi emitido por Auditor final independente, em sessão nova e read-only, sobre o merge real e a evidência pós-merge.
+- A PR #21 está integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`; parents corretos: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`.
+- A árvore integrada é equivalente à árvore do head aprovado `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, sem drift.
+- Evidência pós-merge preservada: `npm ci` GREEN; P4-PR03 `29/29`; transcript `42/42`; primeira full `251/252` por `EBADF` isolado; retry `251/251`; `git diff --check` GREEN; `REGRESSION_VETO` `PASS`.
+- O `EBADF` foi não causal e não bloqueante; o reconciliador na base retornou somente o `git_branch_mismatch:phase-2/runtime-v0` esperado pelo comportamento branch-aware.
+- Security Review, Reviewer independente e Auditor pré-merge permanecem válidos; o Auditor final confirmou `FINAL_AUDIT_GREEN`.
+- Com a integração desta closure-record, o estado efetivo de P4-PR03 é `PROVEN`. Isto não cria novo candidate técnico nem altera código, testes, package, workflow ou deploy.
+- P4-PR04 passa a ser o próximo PR autorizado após a integração desta closure; seu objetivo é expor stream/API de múltiplas sessões e provar observabilidade ponta a ponta do Worker, com prova de duas sessões reais vistas ao vivo e reidratadas após restart.
+- Dependências satisfeitas para P4-PR04: P4-PR03 `PROVEN` e P3-PR04 `PROVEN`. Próximo ator único: Orchestrator / Contract Engineer persistente, responsável por kickoff, PRE_DISPATCH e TASK do Executor de P4-PR04.
