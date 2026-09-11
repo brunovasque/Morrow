@@ -1357,7 +1357,7 @@ test("allows only one active owner of a transcript root and releases it on order
   const replacement = await PersistentTranscriptStore.open(configuration(root));
   assert.equal(replacement.inspect("operator").records[0]?.recordId, "record-before-close");
   await replacement.close();
-  assert.deepEqual((await readdir(root)).sort(), [".morrow-transcript-root.json", "transcript-v1.json"]);
+  assert.deepEqual((await readdir(root)).sort(), [".morrow-transcript-root.json", ".transcript-redaction-key", "transcript-v1.json"]);
 
   await writeFile(join(root, unrelated), "operator-owned-name", "utf8");
   await assert.rejects(
@@ -1418,7 +1418,7 @@ test("serializes concurrent stale lease recovery so only one store can acquire t
   assert.equal(acquired.length, 1);
   assert.equal(refused.length, 1);
   await acquired[0]!.value.close();
-  assert.deepEqual(await readdir(root), [".morrow-transcript-root.json"]);
+  assert.deepEqual(await readdir(root), [".morrow-transcript-root.json", ".transcript-redaction-key"]);
 });
 
 test("fails closed on hostile policy collections without invoking accessors", () => {

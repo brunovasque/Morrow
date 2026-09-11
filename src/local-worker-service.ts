@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { WORKER_PROTOCOL_VERSION } from "./worker-protocol.ts";
+import {
+  isValidWorkerId,
+  assertManagedRootDisjointFromPrivateStateRegion,
+  WorkerPrivateStateRoot,
+} from "./worker-private-state.ts";
 
 export type LocalWorkerServiceState = "stopped" | "starting" | "ready" | "stopping" | "failed";
 
@@ -43,7 +48,6 @@ interface ManagedRootMarker {
 }
 
 const markerName = ".morrow-local-worker-root.json";
-const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const protocolVersionPattern = /^\d+\.\d+$/;
 
 export class LocalWorkerService {
@@ -56,6 +60,7 @@ export class LocalWorkerService {
   private layout: LocalWorkerLayout | null = null;
   private startOperation: Promise<LocalWorkerServiceStatus> | null = null;
   private dispatchAttachment: symbol | null = null;
+  private privateStateRoot: WorkerPrivateStateRoot | null = null;
 
   constructor(configuration: LocalWorkerServiceConfiguration) {
     assertConfiguration(configuration);
@@ -87,6 +92,7 @@ export class LocalWorkerService {
     this.stoppedAt = new Date().toISOString();
     this.instanceId = null;
     this.dispatchAttachment = null;
+    this.privateStateRoot = null;
     return this.status();
   }
 
@@ -161,10 +167,21 @@ export class LocalWorkerService {
     return deepFreeze({ status: this.status(), checks });
   }
 
+  privateState(): WorkerPrivateStateRoot {
+    if (!this.privateStateRoot) throw new Error("worker_private_state_not_ready");
+    return this.privateStateRoot;
+  }
+
   private async startInternal(): Promise<LocalWorkerServiceStatus> {
     try {
       const layout = await initializeOwnedLayout(this.configuration);
+      const privateStateRoot = WorkerPrivateStateRoot.forWorker(
+        this.configuration.workerId,
+        [layout.managedRoot, ...this.configuration.operatorOwnedRoots],
+      );
+      await privateStateRoot.ensure();
       this.layout = layout;
+      this.privateStateRoot = privateStateRoot;
       this.instanceId = randomUUID();
       this.startedAt = new Date().toISOString();
       this.stoppedAt = null;
@@ -180,12 +197,14 @@ export class LocalWorkerService {
 
 async function initializeOwnedLayout(configuration: LocalWorkerServiceConfiguration): Promise<LocalWorkerLayout> {
   const requestedRoot = resolve(configuration.managedRoot);
+  assertManagedRootDisjointFromPrivateStateRegion(requestedRoot);
   await assertNoSymbolicLinkAncestors(requestedRoot);
   await mkdir(requestedRoot, { recursive: true });
   const rootEntry = await lstat(requestedRoot);
   if (rootEntry.isSymbolicLink()) throw new Error("worker_managed_root_symlink_refused");
 
   const managedRoot = await realpath(requestedRoot);
+  assertManagedRootDisjointFromPrivateStateRegion(managedRoot);
   if (!containsMorrowSegment(managedRoot)) {
     throw new Error("worker_managed_root_canonical_path_requires_morrow_segment");
   }
@@ -295,7 +314,7 @@ function assertConfiguration(configuration: LocalWorkerServiceConfiguration): vo
   const allowed = new Set(["workerId", "managedRoot", "operatorOwnedRoots", "supportedProtocolVersions"]);
   const unknown = Object.keys(configuration).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`worker_configuration_unknown_field:${unknown}`);
-  if (!workerIdPattern.test(configuration.workerId)) throw new Error("worker_id_invalid");
+  if (!isValidWorkerId(configuration.workerId)) throw new Error("worker_id_invalid");
   if (typeof configuration.managedRoot !== "string" || !isAbsolute(configuration.managedRoot)) {
     throw new Error("worker_managed_root_must_be_absolute");
   }
@@ -356,7 +375,7 @@ function isMarker(value: unknown): value is ManagedRootMarker {
     && Object.keys(value).length === 2
     && value.format === "morrow-local-worker-root/v1"
     && typeof value.workerId === "string"
-    && workerIdPattern.test(value.workerId);
+    && isValidWorkerId(value.workerId);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

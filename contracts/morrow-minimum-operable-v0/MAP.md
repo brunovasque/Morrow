@@ -139,4 +139,11 @@ O campo `next_authorized_action` de `LIVE_STATUS.md` é a projeção humana dess
 - P4-PR02 está `PROVEN`: PR de produto `#18`, merge `3738d7877cc1613e363adee8063322eefb595528`, parents `3657a070e5dc6b1e7b78fa1804761440c55efffc` e `46167607c6f0c55a7f48eec2464a7cbda327dc22`.
 - `P4_PR02_PROVEN_READY` foi emitido após `MERGE_READY`, `npm ci` GREEN, focused `42/42`, `npm test` `214/214`, `git diff --check` GREEN, ausência de D-013, drift e paths inesperados; a árvore do merge é idêntica à do head integrado.
 - O reconciliador na closure-record branch retornou exclusivamente `BLOCKED_STATE_DIVERGENCE` / `git_branch_mismatch`, decisão `EXPECTED_DETACHED_CONTEXT_DIVERGENCE` para o contexto detached/branch-aware quando aplicável. A divergência não é regressão do artefato integrado.
-- A próxima unidade identificada é P4-PR03. Ela não foi iniciada e permanece proibida até o registro documental chegar à branch de integração. A closure-record não é unidade contratual nova e não contém código/runtime/testes.
+- A unidade ativa é P4-PR03, `RUNNING`, com Execution Root `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`, base integrada `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`, parent `ea4bcaa9fd8d2b3de0f079ac05f3ba00165a3d1b` e branch `mvo/p4-pr03-replay-rehydration`. A implementação, o Security Review e o Reviewer estão concluídos; o Reviewer emitiu `REVIEW_READY_FOR_AUDITOR`; a primeira auditoria foi `AUDIT_BLOCKED` somente por documentação, independence evidence e authorization; o Auditor recheck emitiu `AUDIT_GREEN — P4_PR03_READY_FOR_INTEGRATOR`. O Integrator está autorizado somente a fazer push e abrir/atualizar PR contra `phase-2/runtime-v0`; merge permanece proibido; a closure-record da PR #19 já está integrada e não é unidade contratual nova nem contém código/runtime/testes; P4-PR04 permanece fora de escopo.
+
+## Estado atual de P4-PR03 — MERGE_READY versionado
+
+- P4-PR03 permanece `RUNNING`; P4-PR04 permanece `PENDING`.
+- Execution Root técnico: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`; opening Control Root: `de47fd7a3f919a7094a16c051548cef0a47bf51a`; current Control Root anterior ao registro: `8e819a9633f70c210b663db4edea53f6350ed347`.
+- O Auditor pré-merge emitiu `MERGE_READY`, com `MERGE_READY_MUST_BE_VERSIONED_BEFORE_MERGE` e blockers `NONE`; a determinação foi versionada documentalmente antes do merge.
+- A PR #21 pode seguir para merge protegido; o estado técnico continua `RUNNING` até regressão pós-merge e Auditor final independente. Nenhuma mudança técnica foi introduzida por esta reconciliação.

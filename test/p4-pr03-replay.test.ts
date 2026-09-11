@@ -1,0 +1,847 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import test, { type TestContext } from "node:test";
+import { JsonlEventLog, eventLogIdForPath } from "../src/event-log.ts";
+import { PersistentEventLogAuthority } from "../src/governance-registries.ts";
+import { WorkerPrivateStateRoot } from "../src/worker-private-state.ts";
+import {
+  PersistentTranscriptStore,
+  TRANSCRIPT_REDACTION_PLACEHOLDER,
+  type PersistentTranscriptConfiguration,
+} from "../src/stream-transcript.ts";
+import {
+  WorkerRecoveryCoordinator,
+  type WorkerRecoveryConfiguration,
+} from "../src/worker-recovery.ts";
+import { projectContractLiveActivity, replayLiveActivity, type LiveActivityEvent } from "../src/live-activity.ts";
+import type { MorrowEvent } from "../src/types.ts";
+
+const controlledParent = resolve(process.cwd(), ".morrow-test-tmp");
+const baseTime = Date.parse("2026-09-01T12:00:00.000Z");
+
+async function makeRoot(t: TestContext): Promise<string> {
+  await mkdir(controlledParent, { recursive: true });
+  const root = await mkdtemp(join(controlledParent, "p4-pr03-"));
+  t.after(async () => await rm(root, { recursive: true, force: true }));
+  return root;
+}
+
+function transcriptConfiguration(stateRoot: string, clock: () => unknown = () => baseTime): PersistentTranscriptConfiguration {
+  return {
+    stateRoot,
+    retention: { maxAgeMs: 3_600_000, maxRecords: 16, maxTotalBytes: 65_536, maxRecordBytes: 16_384 },
+    access: { writerIds: ["kernel"], readerIds: ["operator"] },
+    redaction: { policyId: "p4-pr03", sensitiveLiterals: ["P4_PR03_SECRET"] },
+    clock: clock as PersistentTranscriptConfiguration["clock"],
+  };
+}
+
+function recordRequest(recordId: string) {
+  return {
+    recordId,
+    contractId: "MORROW-MVO-001",
+    stepId: "P4-PR03",
+    terminalSessionId: "terminal-p4-pr03",
+    agentInstanceId: "agent-p4-pr03",
+    stream: "stdout" as const,
+    writerId: "kernel",
+  };
+}
+
+function event(contractId: string, eventId: string, type = "STEP") : MorrowEvent {
+  return {
+    eventId,
+    contractId,
+    type,
+    occurredAt: "2026-09-01T12:00:00.000Z",
+    actor: { kind: "kernel", id: "kernel" },
+    payload: { eventId },
+    schemaVersion: "0.1",
+  };
+}
+
+function testEventAuthority(file: string, authorityRoot: string) {
+  const privateRoot = WorkerPrivateStateRoot.bootstrap({
+    workerId: "test-worker",
+    privateRoot: authorityRoot,
+    managedRoots: [resolve(file, "..")],
+  });
+  return new PersistentEventLogAuthority(privateRoot, "test-event-log-root").capability(eventLogIdForPath(file));
+}
+
+function eventStreamIdentity(file: string): string {
+  return createHash("sha256")
+    .update("morrow.event-log/stream/v1|" + eventLogIdForPath(file), "utf8")
+    .digest("hex");
+}
+
+async function authenticatedEventTag(file: string, authority: ReturnType<typeof testEventAuthority>, item: MorrowEvent, sequence: number, previousHash: string): Promise<string> {
+  const streamId = createHash("sha256").update(`${eventStreamIdentity(file)}|${item.contractId}`, "utf8").digest("hex");
+  return await authority.bindStream(item.contractId, streamId).authenticateRecord({
+    format: "morrow.event-log/4",
+    eventLogId: eventLogIdForPath(file),
+    streamId,
+    contractId: item.contractId,
+    sequence,
+    eventId: item.eventId,
+    previousAuthenticatedTag: previousHash,
+    event: item,
+  });
+}
+
+function hostileClock(): () => unknown {
+  return () => {
+    const value = Object.create(Date.prototype) as Date & { getTime: () => number };
+    value.getTime = () => { throw new Error("HOSTILE_CLOCK_SECRET"); };
+    return value;
+  };
+}
+
+test("D-014 RED: hostile Date conversion escapes the public clock boundary", async (t) => {
+  const root = await makeRoot(t);
+  await assert.rejects(
+    PersistentTranscriptStore.open(transcriptConfiguration(root, hostileClock())),
+    /transcript_clock_(failed|invalid)/,
+  );
+});
+
+test("D-014 RED: hostile worker clock conversion is sanitized", async (t) => {
+  const root = await makeRoot(t);
+  const configuration = workerConfiguration(root, hostileClock());
+  await assert.rejects(WorkerRecoveryCoordinator.open(configuration), /worker_recovery_clock_invalid/);
+});
+
+test("D-015 RED: a concurrent snapshot replacement cannot change the object that was validated", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  const writer = store.beginRecord(recordRequest("toctou-record"));
+  writer.write("safe output");
+  await writer.commit();
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const outside = join(resolve(root, ".."), `p4-pr03-outside-${randomUUID()}.json`);
+  const original = join(resolve(root, ".."), `p4-pr03-original-${randomUUID()}.json`);
+  t.after(async () => {
+    await unlink(outside).catch(() => undefined);
+    await unlink(original).catch(() => undefined);
+  });
+  await writeFile(outside, await readFile(snapshot, "utf8"), "utf8");
+  const replacement = join(root, "replacement.json");
+  await symlink(outside, replacement);
+  await rename(snapshot, original);
+  await rename(replacement, snapshot);
+
+  await assert.rejects(
+    PersistentTranscriptStore.open(transcriptConfiguration(root)),
+    /transcript_snapshot_(race_detected|too_large_or_invalid)/,
+  );
+  await unlink(snapshot).catch(() => undefined);
+  await rename(original, snapshot);
+  await unlink(outside).catch(() => undefined);
+});
+
+test("D-015 counterproof: same-size replacement between path check and open is rejected", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  const writer = store.beginRecord(recordRequest("same-size-race"));
+  writer.write("safe output");
+  await writer.commit();
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const outside = join(resolve(root, ".."), `p4-pr03-same-size-${randomUUID()}.json`);
+  const original = join(resolve(root, ".."), `p4-pr03-original-${randomUUID()}.json`);
+  t.after(async () => {
+    await unlink(outside).catch(() => undefined);
+    await unlink(original).catch(() => undefined);
+  });
+  const parsed = JSON.parse(await readFile(snapshot, "utf8")) as { records: Array<{ occurredAt: string }>; checksum: string };
+  parsed.records[0]!.occurredAt = "2026-09-01T11:59:59.000Z";
+  const { checksum: _checksum, ...withoutChecksum } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+  await writeFile(outside, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+
+  const childCode = `
+    import fsp from "node:fs/promises";
+    import { syncBuiltinESMExports } from "node:module";
+    import { rename } from "node:fs/promises";
+    const [snapshot, outside, original, root] = process.argv.slice(1);
+    const realOpen = fsp.open;
+    fsp.open = async (...args) => {
+      if (String(args[0]) !== snapshot) return await realOpen(...args);
+      await rename(snapshot, original);
+      await rename(outside, snapshot);
+      try { return await realOpen(...args); }
+      finally { await rename(snapshot, outside); await rename(original, snapshot); }
+    };
+    syncBuiltinESMExports();
+    const { PersistentTranscriptStore } = await import("./src/stream-transcript.ts");
+    try {
+      const store = await PersistentTranscriptStore.open({
+        stateRoot: root,
+        retention: { maxAgeMs: 3600000, maxRecords: 16, maxTotalBytes: 65536, maxRecordBytes: 16384 },
+        access: { writerIds: ["kernel"], readerIds: ["operator"] },
+        redaction: { policyId: "p4-pr03", sensitiveLiterals: ["P4_PR03_SECRET"] },
+        clock: () => "2026-09-01T12:00:00.000Z",
+      });
+      await store.close();
+      process.stdout.write("ACCEPTED\\n");
+    } catch (error) {
+      process.stdout.write(String(error?.message ?? "unknown") + "\\n");
+    }
+  `;
+  const child = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", childCode, snapshot, outside, original, root], {
+    cwd: process.cwd(),
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let output = "";
+  let errors = "";
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => { output += chunk; });
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => { errors += chunk; });
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    child.once("error", rejectPromise);
+    child.once("exit", () => resolvePromise());
+  });
+  assert.doesNotMatch(output, /ACCEPTED/, `${output}${errors}`);
+  assert.match(output, /transcript_snapshot_/, `${output}${errors}`);
+  await unlink(outside).catch(() => undefined);
+});
+
+test("D-016 RED: a checksummed snapshot cannot trust arbitrary redactionCount metadata", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  const writer = store.beginRecord(recordRequest("redaction-count"));
+  writer.write("password=P4_PR03_SECRET");
+  await writer.commit();
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const parsed = JSON.parse(await readFile(snapshot, "utf8")) as { records: Array<{ redactionCount: number }>; checksum: string };
+  parsed.records[0]!.redactionCount += 7;
+  const { checksum: _checksum, ...withoutChecksum } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+  await writeFile(snapshot, `${JSON.stringify(parsed)}\n`, "utf8");
+
+  await assert.rejects(
+    PersistentTranscriptStore.open(transcriptConfiguration(root)),
+    /transcript_snapshot_(redaction_metadata_invalid|invalid)/,
+  );
+});
+
+test("D-016 counterproof: an artificial placeholder without redactor provenance is rejected", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  const writer = store.beginRecord(recordRequest("artificial-placeholder"));
+  writer.write("ordinary output");
+  await writer.commit();
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const parsed = JSON.parse(await readFile(snapshot, "utf8")) as {
+    records: Array<{ content: string; redactionCount: number }>;
+    checksum: string;
+  };
+  parsed.records[0]!.content = TRANSCRIPT_REDACTION_PLACEHOLDER;
+  parsed.records[0]!.redactionCount = 1;
+  const { checksum: _checksum, ...withoutChecksum } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+  await writeFile(snapshot, `${JSON.stringify(parsed)}\n`, "utf8");
+
+  await assert.rejects(
+    PersistentTranscriptStore.open(transcriptConfiguration(root)),
+    /transcript_snapshot_invalid/,
+  );
+});
+
+test("P2-01 RED: deleting current provenance downgrades a snapshot to legacy-v1", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  const writer = store.beginRecord(recordRequest("legacy-downgrade"));
+  writer.write("ordinary output");
+  await writer.commit();
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const original = JSON.parse(await readFile(snapshot, "utf8")) as {
+    redactionProvenanceFormat?: string;
+    records: Array<Record<string, unknown>>;
+    checksum: string;
+  };
+  const variants = [
+    (parsed: typeof original) => {
+      delete parsed.redactionProvenanceFormat;
+      for (const record of parsed.records) delete record.redactionProvenance;
+    },
+    (parsed: typeof original) => { delete parsed.records[0]!.redactionProvenance; },
+    (parsed: typeof original) => { parsed.redactionProvenanceFormat = "legacy-v1"; },
+    (parsed: typeof original) => {
+      (parsed.records[0]!.redactionProvenance as Record<string, unknown>).format = "legacy-v1";
+    },
+  ];
+  for (const mutate of variants) {
+    const parsed = structuredClone(original);
+    mutate(parsed);
+    const { checksum: _checksum, ...withoutChecksum } = parsed;
+    parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+    await writeFile(snapshot, `${JSON.stringify(parsed)}\n`, "utf8");
+    await assert.rejects(
+      PersistentTranscriptStore.open(transcriptConfiguration(root)),
+      /transcript_snapshot_(invalid|checksum_invalid)/,
+    );
+  }
+});
+
+test("P2-02 RED: changing transcript ordinals survives checksum and unauthenticated provenance", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  for (const id of ["ordinal-1", "ordinal-2"]) {
+    const writer = store.beginRecord(recordRequest(id));
+    writer.write(id);
+    await writer.commit();
+  }
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const parsed = JSON.parse(await readFile(snapshot, "utf8")) as {
+    records: Array<{ ordinal: number }>;
+    nextOrdinal: number;
+    checksum: string;
+  };
+  parsed.records[0]!.ordinal = 2;
+  parsed.records[1]!.ordinal = 3;
+  parsed.nextOrdinal = 4;
+  const { checksum: _checksum, ...withoutChecksum } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+  await writeFile(snapshot, `${JSON.stringify(parsed)}\n`, "utf8");
+
+  await assert.rejects(
+    PersistentTranscriptStore.open(transcriptConfiguration(root)),
+    /transcript_snapshot_invalid/,
+  );
+});
+
+test("P2-03 rejects transcript ordinal gaps and hostile cursor traps", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  for (const id of ["gap-1", "gap-2"]) {
+    const writer = store.beginRecord(recordRequest(id));
+    writer.write(id);
+    await writer.commit();
+  }
+  const hostile = new Proxy({}, { ownKeys: () => { throw new Error("CURSOR_SECRET"); } });
+  assert.equal(store.replay("operator", hostile).status, "invalid");
+  const snapshot = join(root, "transcript-v1.json");
+  const parsed = JSON.parse(await readFile(snapshot, "utf8")) as { records: Array<{ ordinal: number }>; nextOrdinal: number; checksum: string; };
+  parsed.records[1]!.ordinal = 3;
+  parsed.nextOrdinal = 4;
+  const { checksum: _checksum, ...withoutChecksum } = parsed;
+  parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+  await store.close();
+  await writeFile(snapshot, `${JSON.stringify(parsed)}\n`, "utf8");
+  await assert.rejects(PersistentTranscriptStore.open(transcriptConfiguration(root)), /transcript_snapshot_invalid/);
+});
+
+test("D-017 counterproof: a stale lease with a reused PID is recoverable without stealing a live instance", async (t) => {
+  const root = await makeRoot(t);
+  const stateRoot = join(root, ".morrow", "worker");
+  await mkdir(stateRoot, { recursive: true });
+  const lock = join(stateRoot, "worker-recovery-v1.lock");
+  await writeFile(lock, `${JSON.stringify({
+    format: "morrow.worker-recovery-lease/v1",
+    workerId: "worker-p4-pr03",
+    ownerId: randomUUID(),
+    processId: process.pid,
+    acquiredAt: "2026-09-01T12:00:00.000Z",
+  })}\n`, "utf8");
+
+  const recovered = await WorkerRecoveryCoordinator.open(workerConfiguration(root));
+  assert.equal(recovered.inspect().connectivity, "offline");
+  await recovered.close();
+});
+
+test("D-017 counterproof: transcript recovery does not treat a reused PID as a live owner", async (t) => {
+  const root = await makeRoot(t);
+  const initialized = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  await initialized.close();
+  await writeFile(join(root, ".transcript-v1.lock"), JSON.stringify({ pid: process.pid, token: "stale-pid-only" }), "utf8");
+  const recovered = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  assert.equal(recovered.replay("operator").status, "ok");
+  await recovered.close();
+});
+
+test("replays event stream from start, intermediate cursor and durable head without duplication or loss", async (t) => {
+  const root = await makeRoot(t);
+  const log = new JsonlEventLog(join(root, "events.jsonl"));
+  for (let index = 1; index <= 5; index += 1) await log.append(event("C-P4-PR03", `event-${index}`));
+
+  const first = await log.replay("C-P4-PR03");
+  assert.equal(first.status, "ok");
+  assert.deepEqual(first.events.map((item) => item.eventId), ["event-1", "event-2", "event-3", "event-4", "event-5"]);
+  const middle = await log.replay("C-P4-PR03", first.cursor, 2);
+  assert.equal(middle.status, "ok");
+  assert.deepEqual(middle.events.map((item) => item.eventId), ["event-1", "event-2"]);
+  const tail = await log.replay("C-P4-PR03", middle.nextCursor);
+  assert.equal(tail.status, "ok");
+  assert.deepEqual(tail.events.map((item) => item.eventId), ["event-3", "event-4", "event-5"]);
+  const head = await log.replay("C-P4-PR03", tail.nextCursor);
+  assert.equal(head.status, "ok");
+  assert.deepEqual(head.events, []);
+
+  const reopened = new JsonlEventLog(join(root, "events.jsonl"));
+  const afterRestart = await reopened.replay("C-P4-PR03", middle.nextCursor);
+  assert.deepEqual(afterRestart.events.map((item) => item.eventId), ["event-3", "event-4", "event-5"]);
+  assert.equal(new Set(afterRestart.events.map((item) => item.eventId)).size, afterRestart.events.length);
+  assert.ok(afterRestart.events.every((item, index) => item.eventId === `event-${index + 3}`));
+});
+
+test("rejects invalid, foreign, stale and future event cursors", async (t) => {
+  const root = await makeRoot(t);
+  const log = new JsonlEventLog(join(root, "events.jsonl"), { maxEventsPerContract: 2 });
+  for (let index = 1; index <= 4; index += 1) await log.append(event("C-P4-PR03", `event-${index}`));
+  const current = await log.replay("C-P4-PR03");
+  assert.equal(current.status, "stale");
+  assert.equal((await log.replay("C-P4-PR03", { streamId: "foreign", sequence: 0 })).status, "invalid");
+  assert.equal((await log.replay("C-P4-PR03", { streamId: current.streamId, sequence: -1 })).status, "invalid");
+  assert.equal((await log.replay("C-P4-PR03", { streamId: current.streamId, sequence: 99 })).status, "future");
+  const retained = await log.replay("C-P4-PR03", { streamId: current.streamId, sequence: 2 });
+  assert.equal(retained.status, "ok");
+  assert.deepEqual(retained.events.map((item) => item.eventId), ["event-3", "event-4"]);
+});
+
+test("P2-03 rejects event reorder, gap, duplicate and hostile cursor traps", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "events.jsonl");
+  const log = new JsonlEventLog(file);
+  for (let index = 1; index <= 3; index += 1) await log.append(event("C-P4-PR03", `integrity-${index}`));
+  const original = (await readFile(file, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+  const corruptions = [
+    (entries: Record<string, unknown>[]) => [entries[1], entries[0], entries[2]],
+    (entries: Record<string, unknown>[]) => entries.map((entry, index) => index === 1 ? { ...entry, sequence: 4 } : entry),
+    (entries: Record<string, unknown>[]) => [...entries.slice(0, 2), entries[1]],
+  ];
+  for (const corrupt of corruptions) {
+    await writeFile(file, `${corrupt(original).map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+    assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  }
+  const duplicateEventId = structuredClone(original);
+  duplicateEventId[2]!.event = {
+    ...(duplicateEventId[2]!.event as Record<string, unknown>),
+    eventId: "integrity-1",
+    payload: { eventId: "integrity-1" },
+  };
+  let previousHash = "0".repeat(64);
+  for (const entry of duplicateEventId) {
+    entry.previousHash = previousHash;
+    entry.eventHash = createHash("sha256").update(JSON.stringify({
+      format: entry.format,
+      sequence: entry.sequence,
+      previousHash: entry.previousHash,
+      event: entry.event,
+    })).digest("hex");
+    previousHash = entry.eventHash as string;
+  }
+  await writeFile(file, `${duplicateEventId.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  await writeFile(file, "{malformed-json}\n", "utf8");
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  await writeFile(file, `${original.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  const current = await new JsonlEventLog(file).replay("C-P4-PR03");
+  const hostile = new Proxy({}, { getPrototypeOf: () => { throw new Error("CURSOR_SECRET"); } });
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03", hostile)).status, "invalid");
+  assert.equal(current.status, "ok");
+});
+
+test("P2-03 rejects a giant UTF-8 JSONL record while accumulating chunks", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "giant-event.jsonl");
+  const giant = {
+    format: "morrow.event-log/4",
+    sequence: 1,
+    previousHash: "0".repeat(64),
+    eventHash: "0".repeat(64),
+    event: { ...event("C-P4-PR03", "giant"), payload: "é".repeat(600_000) },
+  };
+  await writeFile(file, `${JSON.stringify(giant)}\n`, "utf8");
+  const result = await new JsonlEventLog(file).replay("C-P4-PR03", undefined, 1);
+  assert.equal(result.status, "invalid");
+});
+
+test("P2 RED/GREEN: event-log rewrite, removal and insertion cannot forge authenticated history", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "authenticated-events.jsonl");
+  const log = new JsonlEventLog(file);
+  for (let index = 1; index <= 3; index += 1) await log.append(event("C-P4-PR03", `auth-${index}`));
+  const original = (await readFile(file, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, any>);
+  const rewrites = [
+    (entries: Record<string, any>[]) => {
+      entries[0]!.event = { ...entries[0]!.event, payload: { eventId: "forged" } };
+      return entries;
+    },
+    (entries: Record<string, any>[]) => entries.filter((_, index) => index !== 1),
+    (entries: Record<string, any>[]) => [entries[0], { ...entries[1], event: event("C-P4-PR03", "inserted") }, entries[1], entries[2]],
+  ];
+  for (const rewrite of rewrites) {
+    const forged = reindexWithPublicSha(rewrite(structuredClone(original)));
+    await writeFile(file, `${forged.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+    assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  }
+});
+
+test("P2: authenticated event-log domain rejects isolated field changes and downgrade", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "field-events.jsonl");
+  const log = new JsonlEventLog(file);
+  await log.append(event("C-P4-PR03", "field-1"));
+  const original = (await readFile(file, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, any>);
+  const mutations = [
+    (entry: Record<string, any>) => { entry.sequence = 2; },
+    (entry: Record<string, any>) => { entry.event.eventId = "changed-id"; },
+    (entry: Record<string, any>) => { entry.event.contractId = "changed-contract"; },
+    (entry: Record<string, any>) => { entry.event.type = "CHANGED"; },
+    (entry: Record<string, any>) => { entry.event.payload = { changed: true }; },
+    (entry: Record<string, any>) => { entry.previousHash = "f".repeat(64); },
+    (entry: Record<string, any>) => { entry.format = "morrow.event-log/5"; },
+    (entry: Record<string, any>) => { entry.eventHash = "not-hex"; },
+    (entry: Record<string, any>) => { entry.eventHash = "f".repeat(64); },
+  ];
+  for (const mutate of mutations) {
+    const changed = structuredClone(original);
+    mutate(changed[0]!);
+    await writeFile(file, `${changed.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+    assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  }
+  const downgraded = structuredClone(original);
+  downgraded[0]!.format = "morrow.event-log/1";
+  await writeFile(file, `${JSON.stringify(downgraded[0])}\n`, "utf8");
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+});
+
+test("P2: local key sidecars are ignored and external authority binds the log path", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "key-events.jsonl");
+  const log = new JsonlEventLog(file);
+  await log.append(event("C-P4-PR03", "key-1"));
+  const originalLog = await readFile(file, "utf8");
+  const keyPath = `${file}.event-log-key-v1`;
+  const copiedFile = join(root, "copied-events.jsonl");
+  const copiedKey = `${copiedFile}.event-log-key-v1`;
+  await copyFile(file, copiedFile);
+  await writeFile(keyPath, Buffer.alloc(32, 7), { flag: "wx" });
+  await writeFile(copiedKey, Buffer.alloc(32, 7), { flag: "wx" });
+  assert.equal((await new JsonlEventLog(copiedFile).replay("C-P4-PR03")).status, "invalid");
+
+  await unlink(file);
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+  await writeFile(file, originalLog, "utf8");
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "ok");
+  await writeFile(keyPath, Buffer.alloc(31));
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "ok");
+});
+
+test("P2: external head anchor detects rollback and integral old-copy restore", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "rollback-events.jsonl");
+  const log = new JsonlEventLog(file);
+  for (let index = 1; index <= 5; index += 1) await log.append(event("C-P4-PR03", "rollback-" + index));
+  const complete = await readFile(file, "utf8");
+  const prefix = complete.trim().split("\n").slice(0, 3).join("\n") + "\n";
+
+  await writeFile(file, prefix, "utf8");
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+
+  await writeFile(file, complete, "utf8");
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "ok");
+  const oldCopy = join(root, "rollback-old-copy.jsonl");
+  await copyFile(file, oldCopy);
+  await log.append(event("C-P4-PR03", "rollback-6"));
+  await copyFile(oldCopy, file);
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+});
+
+test("P2: replacing the log and legacy sidecar together cannot replace the external root", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "replacement-events.jsonl");
+  const log = new JsonlEventLog(file);
+  await log.append(event("C-P4-PR03", "replacement-1"));
+  const forged = JSON.parse((await readFile(file, "utf8")).trim()) as Record<string, any>;
+  forged.event = { ...forged.event, payload: { forged: true } };
+  forged.eventHash = "a".repeat(64);
+  const sidecar = file + ".event-log-key-v1";
+  await writeFile(file, JSON.stringify(forged) + "\n", "utf8");
+  await writeFile(sidecar, Buffer.alloc(32, 3), "utf8");
+  assert.equal((await new JsonlEventLog(file).replay("C-P4-PR03")).status, "invalid");
+});
+
+test("P2: Event Log rejects a parent junction before mkdir or open", async (t) => {
+  const root = await makeRoot(t);
+  const actual = join(root, "actual");
+  const junction = join(root, "junction");
+  await mkdir(actual, { recursive: true });
+  await symlink(actual, junction, "junction");
+  const file = join(junction, "events.jsonl");
+  await assert.rejects(
+    new JsonlEventLog(file).append(event("C-P4-PR03", "junction-1")),
+    /morrow_event_log_(write_failed|path_unsafe)/,
+  );
+});
+
+test("P2: two real processes racing one head produce one winner and one CAS conflict", async (t) => {
+  const root = await makeRoot(t);
+  const privateRoot = join(root, "private-state");
+  await mkdir(privateRoot, { recursive: true });
+  const eventLogId = "e".repeat(64);
+  const contractId = "C-P4-PR03";
+  const streamIdentity = createHash("sha256").update(`morrow.event-log/stream/v1|${eventLogId}`, "utf8").digest("hex");
+  const streamId = createHash("sha256").update(`${streamIdentity}|${contractId}`, "utf8").digest("hex");
+  const script = `
+    const { WorkerPrivateStateRoot } = await import(${JSON.stringify(pathToFileURL(resolve("src/worker-private-state.ts")).href)});
+    const { PersistentEventLogAuthority } = await import(${JSON.stringify(pathToFileURL(resolve("src/governance-registries.ts")).href)});
+    const [privateRoot, eventLogId, streamId] = process.argv.slice(1);
+    const root = WorkerPrivateStateRoot.bootstrap({ workerId: "cas-worker", privateRoot, managedRoots: [] });
+    const authority = new PersistentEventLogAuthority(root, "cas-authority");
+    const capability = authority.capability(eventLogId).bindStream("C-P4-PR03", streamId);
+    const item = { eventId: "cas-event", contractId: "C-P4-PR03", type: "STEP", occurredAt: "2026-09-01T12:00:00.000Z", actor: { kind: "kernel", id: "kernel" }, payload: { ok: true }, schemaVersion: "0.1" };
+    const tag = await capability.authenticateRecord({ format: "morrow.event-log/4", eventLogId, streamId, contractId: "C-P4-PR03", sequence: 1, eventId: item.eventId, previousAuthenticatedTag: "${"0".repeat(64)}", event: item });
+    const anchor = { authorityRef: "cas-authority", eventLogId, contractId: "C-P4-PR03", streamId, generation: 1, sequence: 1, eventTag: tag, phase: "prepared", expectedPrevious: null };
+    try { await capability.prepareHead(anchor, null); console.log("ok"); } catch (error) { console.log(error instanceof Error ? error.message : "unknown"); }
+  `;
+  const run = () => new Promise<string>((resolvePromise, rejectPromise) => {
+    const child = spawn(process.execPath, ["--experimental-strip-types", "-e", script, privateRoot, eventLogId, streamId], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    child.on("error", rejectPromise);
+    child.on("close", (code) => code === 0 ? resolvePromise(stdout.trim()) : rejectPromise(new Error(`cas_child_exit_${code}:${stdout}:${stderr}`)));
+  });
+  const results = await Promise.all([run(), run()]);
+  assert.equal(results.filter((result) => result === "ok").length, 1);
+  assert.equal(results.filter((result) => result === "event_log_anchor_cas_conflict").length, 1);
+});
+
+test("P2: an authenticated head journal survives reopen and refuses a partial tail", async (t) => {
+  const root = await makeRoot(t);
+  const managed = join(root, "managed");
+  const authorityRoot = join(root, "private-state");
+  await mkdir(managed, { recursive: true });
+  const file = join(managed, "journal-events.jsonl");
+  const authority = testEventAuthority(file, authorityRoot);
+  await new JsonlEventLog(file, { authority }).append(event("C-P4-PR03", "journal-1"));
+  assert.equal((await new JsonlEventLog(file, { authority }).replay("C-P4-PR03")).status, "ok");
+  const journalPath = join(authorityRoot, "event-log-authority", eventLogIdForPath(file) + ".head.journal");
+  await writeFile(journalPath, (await readFile(journalPath, "utf8")) + "{\"partial\":true", "utf8");
+  assert.equal((await new JsonlEventLog(file, { authority }).replay("C-P4-PR03")).status, "invalid");
+});
+
+test("P2: prepared head without append aborts, and complete append before commit is finalized", async (t) => {
+  const root = await makeRoot(t);
+  const managed = join(root, "managed");
+  const authorityRoot = join(root, "authority");
+  await mkdir(managed, { recursive: true });
+  const file = join(managed, "events.jsonl");
+  const authority = testEventAuthority(file, authorityRoot);
+  const log = new JsonlEventLog(file, { authority });
+  await log.append(event("C-P4-PR03", "crash-1"));
+  const first = (await authority.readAnchors())[0]!;
+  const secondEvent = event("C-P4-PR03", "crash-2");
+  const secondTag = await authenticatedEventTag(file, authority, secondEvent, 2, first.eventTag);
+  const prepared = {
+    ...first,
+    generation: first.generation + 1,
+    sequence: 2,
+    eventTag: secondTag,
+    phase: "prepared" as const,
+    expectedPrevious: { generation: first.generation, sequence: first.sequence, eventTag: first.eventTag },
+  };
+  const streamAuthority = authority.bindStream("C-P4-PR03", first.streamId);
+  await streamAuthority.prepareHead(prepared, first);
+  assert.equal((await new JsonlEventLog(file, { authority }).replay("C-P4-PR03")).status, "ok");
+  assert.equal((await authority.readAnchors())[0]!.sequence, 1);
+
+  await streamAuthority.prepareHead(prepared, first);
+  const envelope = {
+    format: "morrow.event-log/4",
+    sequence: 2,
+    previousHash: first.eventTag,
+    eventHash: secondTag,
+    event: secondEvent,
+  };
+  await writeFile(file, (await readFile(file, "utf8")) + JSON.stringify(envelope) + "\n", "utf8");
+  assert.equal((await new JsonlEventLog(file, { authority }).replay("C-P4-PR03")).status, "ok");
+  assert.equal((await authority.readAnchors())[0]!.sequence, 2);
+});
+
+test("P2: anchor ahead, log ahead without prepared, and corrupted anchor all block closed", async (t) => {
+  const root = await makeRoot(t);
+  const managed = join(root, "managed");
+  const authorityRoot = join(root, "authority");
+  await mkdir(managed, { recursive: true });
+  const file = join(managed, "events.jsonl");
+  const authority = testEventAuthority(file, authorityRoot);
+  const log = new JsonlEventLog(file, { authority });
+  await log.append(event("C-P4-PR03", "anchor-1"));
+  const first = (await authority.readAnchors())[0]!;
+  const nextEvent = event("C-P4-PR03", "anchor-2");
+  const nextTag = await authenticatedEventTag(file, authority, nextEvent, 2, first.eventTag);
+  const ahead = {
+    ...first,
+    generation: first.generation + 1,
+    sequence: 2,
+    eventTag: nextTag,
+    phase: "prepared" as const,
+    expectedPrevious: { generation: first.generation, sequence: first.sequence, eventTag: first.eventTag },
+  };
+  const streamAuthority = authority.bindStream("C-P4-PR03", first.streamId);
+  await streamAuthority.prepareHead(ahead, first);
+  await streamAuthority.commitHead({ ...ahead, phase: "committed" }, first);
+  assert.equal((await new JsonlEventLog(file, { authority }).replay("C-P4-PR03")).status, "invalid");
+
+  const noAnchorRoot = join(root, "no-anchor-authority");
+  const noAnchorFile = join(managed, "no-anchor.jsonl");
+  const noAnchorAuthority = testEventAuthority(noAnchorFile, noAnchorRoot);
+  const noAnchorLog = new JsonlEventLog(noAnchorFile, { authority: noAnchorAuthority });
+  await noAnchorLog.append(event("C-P4-PR03", "no-anchor-1"));
+  await unlink(join(noAnchorRoot, "event-log-authority", eventLogIdForPath(noAnchorFile) + ".head.journal"));
+  assert.equal((await new JsonlEventLog(noAnchorFile, { authority: noAnchorAuthority }).replay("C-P4-PR03")).status, "invalid");
+
+  const statePath = join(authorityRoot, "event-log-authority", eventLogIdForPath(file) + ".head.journal");
+  await writeFile(statePath, "{\"corrupted\":true}\n", "utf8");
+  assert.equal((await new JsonlEventLog(file, { authority }).replay("C-P4-PR03")).status, "invalid");
+});
+
+test("P3: HMAC provenance rejects invalid length, encoding and different tags", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  const writer = store.beginRecord(recordRequest("hmac-validation"));
+  writer.write("safe output");
+  await writer.commit();
+  await store.close();
+
+  const snapshot = join(root, "transcript-v1.json");
+  const original = JSON.parse(await readFile(snapshot, "utf8")) as {
+    records: Array<{ redactionProvenance: { tag: string } }>;
+    checksum: string;
+  };
+  for (const tag of ["not-a-tag", "b".repeat(64)]) {
+    const parsed = structuredClone(original);
+    parsed.records[0]!.redactionProvenance.tag = tag;
+    const { checksum: _checksum, ...withoutChecksum } = parsed;
+    parsed.checksum = createHash("sha256").update(JSON.stringify(withoutChecksum)).digest("hex");
+    await writeFile(snapshot, `${JSON.stringify(parsed)}\n`, "utf8");
+    await assert.rejects(PersistentTranscriptStore.open(transcriptConfiguration(root)), /transcript_snapshot_invalid/);
+  }
+});
+
+test("transcript cursor is ordinal-based and survives restart independently from event cursor", async (t) => {
+  const root = await makeRoot(t);
+  const store = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  for (let index = 1; index <= 3; index += 1) {
+    const writer = store.beginRecord(recordRequest(`record-${index}`));
+    writer.write(index === 2 ? "secret=P4_PR03_SECRET" : `safe-${index}`);
+    await writer.commit();
+  }
+  const first = store.replay("operator");
+  assert.equal(first.status, "ok");
+  assert.deepEqual(first.records.map((record) => record.ordinal), [1, 2, 3]);
+  assert.equal(first.records[1]!.content, TRANSCRIPT_REDACTION_PLACEHOLDER);
+  assert.equal(first.records[1]!.redactionCount, 1);
+  const middle = store.replay("operator", first.cursor, 1);
+  assert.equal(middle.status, "ok");
+  assert.deepEqual(middle.records.map((record) => record.recordId), ["record-1"]);
+  await store.close();
+
+  const reopened = await PersistentTranscriptStore.open(transcriptConfiguration(root));
+  const tail = reopened.replay("operator", middle.nextCursor);
+  assert.equal(tail.status, "ok");
+  assert.deepEqual(tail.records.map((record) => record.recordId), ["record-2", "record-3"]);
+  assert.equal((await reopened.replay("operator", { streamId: "events", ordinal: 0 })).status, "invalid");
+  assert.equal((await reopened.replay("operator", { streamId: tail.streamId, ordinal: 99 })).status, "future");
+  await reopened.close();
+});
+
+test("live activity replay keeps its own sequence and identity cursor", () => {
+  const inputs = [liveEvent("live-1", 1, null, "dispatch"), liveEvent("live-2", 2, "live-1", "process")];
+  const projection = projectContractLiveActivity("C-P4-PR03", inputs);
+  assert.equal(projection.ok, true);
+  const first = replayLiveActivity("C-P4-PR03", inputs);
+  assert.equal(first.status, "ok");
+  const tail = replayLiveActivity("C-P4-PR03", inputs, first.cursor, 1);
+  assert.equal(tail.status, "ok");
+  assert.deepEqual(tail.events.map((item) => item.eventId), ["live-1"]);
+  assert.equal(replayLiveActivity("C-P4-PR03", inputs, { streamId: "transcript", sequence: 0 }).status, "invalid");
+  assert.equal(replayLiveActivity("C-P4-PR03", inputs, { streamId: first.streamId, sequence: 99 }).status, "future");
+  const hostile = new Proxy({}, { ownKeys: () => { throw new Error("CURSOR_SECRET"); } });
+  assert.equal(replayLiveActivity("C-P4-PR03", inputs, hostile).status, "invalid");
+});
+
+test("P2-05 replays a large JSONL fixture with a small bounded result", async (t) => {
+  const root = await makeRoot(t);
+  const file = join(root, "large-events.jsonl");
+  const log = new JsonlEventLog(file);
+  const payload = "x".repeat(900);
+  for (let index = 1; index <= 200; index += 1) {
+    await log.append({ ...event("C-P4-PR03", `large-${index}`), payload });
+  }
+  const result = await new JsonlEventLog(file).replay("C-P4-PR03", undefined, 1);
+  assert.equal(result.status, "ok");
+  assert.equal(result.events.length, 1);
+  assert.equal(result.headSequence, 200);
+  assert.equal(result.events[0]!.eventId, "large-1");
+});
+
+function liveEvent(eventId: string, sequence: number, causationId: string | null, to: "dispatch" | "process"): LiveActivityEvent {
+  return {
+    schema: "morrow.live-activity",
+    schemaVersion: "1.0",
+    eventId,
+    causationId,
+    sequence,
+    occurredAt: "2026-09-01T12:00:00.000Z",
+    actor: { kind: "kernel", id: "kernel" },
+    identity: {
+      activityId: "activity-1",
+      correlationId: "correlation-1",
+      contractId: "C-P4-PR03",
+      stepId: "P4-PR03",
+      agentInstanceId: "agent-1",
+      terminalSessionId: "terminal-1",
+      workspaceId: "workspace-1",
+    },
+    transition: { from: sequence === 1 ? null : "dispatch", to, reasonCode: "fixture", sourceKind: to === "dispatch" ? "kernel" : "process", sourceId: "fixture" },
+  };
+}
+
+function reindexWithPublicSha(entries: Record<string, any>[]): Record<string, any>[] {
+  let previousHash = "0".repeat(64);
+  return entries.map((entry, index) => {
+    entry.sequence = index + 1;
+    entry.previousHash = previousHash;
+    entry.eventHash = createHash("sha256").update(JSON.stringify({
+      format: entry.format,
+      sequence: entry.sequence,
+      previousHash: entry.previousHash,
+      event: entry.event,
+    })).digest("hex");
+    previousHash = entry.eventHash;
+    return entry;
+  });
+}
+
+function workerConfiguration(root: string, clock: () => unknown = () => baseTime): WorkerRecoveryConfiguration {
+  const stateRoot = join(root, ".morrow", "worker");
+  return {
+    workerId: "worker-p4-pr03",
+    stateRoot,
+    validationContext: async () => ({}) as never,
+    attempt: async () => ({ ok: false, duplicate: false, code: "WORKER_NOT_READY", detail: "not ready" }),
+    clock: clock as WorkerRecoveryConfiguration["clock"],
+  };
+}

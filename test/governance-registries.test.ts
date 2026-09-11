@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import {
   CapabilityRegistry,
   GovernanceResolver,
+  PersistentEventLogAuthority,
   RoleRegistry,
   SecretBrokerBoundary,
   SecretPolicyRegistry,
@@ -18,6 +23,7 @@ import {
   type WorkAuthorityRequest,
   type WorkAuthorityResult,
 } from "../src/governance-registries.ts";
+import { WorkerPrivateStateRoot } from "../src/worker-private-state.ts";
 
 const roleRef = ref("executor", "1.0.0");
 const skillRef = ref("typescript-change", "1.0.0");
@@ -501,4 +507,210 @@ test("registry snapshots are detached and frozen against later configuration mut
   assert.equal(Object.isFrozen(resolved), true);
   assert.equal(Object.isFrozen(resolved.allowedPaths), true);
   assert.equal(registry.resolve("mutated"), null);
+});
+
+test("Secret Broker owns a persistent opaque Event Log authority and authenticates the external head", async (t) => {
+  const parent = join(process.cwd(), ".morrow-test-tmp");
+  const authorityRoot = await mkdtemp(join(parent, "authority-"));
+  t.after(async () => await rm(authorityRoot, { recursive: true, force: true }));
+  const eventLogId = "a".repeat(64);
+  const streamIdentity = createHash("sha256").update(`morrow.event-log/stream/v1|${eventLogId}`, "utf8").digest("hex");
+  const streamId = createHash("sha256").update(`${streamIdentity}|contract-fixture`, "utf8").digest("hex");
+  const privateRoot = WorkerPrivateStateRoot.bootstrap({ workerId: "fixture-worker", privateRoot: authorityRoot, managedRoots: [] });
+  const authority = new PersistentEventLogAuthority(privateRoot, "authority-one");
+  const authorityCapability = authority.capability(eventLogId);
+  const capability = authorityCapability.bindStream("contract-fixture", streamId);
+  const prepared = {
+    authorityRef: "authority-one",
+    eventLogId,
+    contractId: "contract-fixture",
+    streamId,
+    generation: 1,
+    sequence: 1,
+    eventTag: "c".repeat(64),
+    phase: "prepared" as const,
+    expectedPrevious: null,
+  };
+  await capability.prepareHead(prepared, null);
+  await capability.commitHead({ ...prepared, phase: "committed" }, null);
+  const anchors = await authorityCapability.readAnchors();
+  assert.equal(anchors.length, 1);
+  assert.equal(anchors[0]!.phase, "committed");
+  const state = await readFile(join(authorityRoot, "event-log-authority", eventLogId + ".head.journal"), "utf8");
+  const key = await readFile(join(authorityRoot, "event-log-authority", "event-log-authority-v4.key"), "hex");
+  assert.equal(state.includes(key), false);
+  assert.equal("key" in capability, false);
+  await assert.rejects(
+    capability.prepareHead({ ...prepared, sequence: 2, generation: 2 }, null),
+    /event_log_anchor_cas_conflict/,
+  );
+
+  await writeFile(join(authorityRoot, "event-log-authority", "event-log-authority-v4.key"), Buffer.alloc(31));
+  await assert.rejects(
+    new PersistentEventLogAuthority(privateRoot, "authority-one").capability(eventLogId).readAnchors(),
+    /(?:event_log_(anchor_(invalid|auth_invalid)|authority_(unavailable|binding_invalid))|worker_private_state_unowned)/,
+  );
+  await writeFile(join(authorityRoot, "event-log-authority", "event-log-authority-v4.key"), Buffer.alloc(32, 4));
+  await assert.rejects(
+    new PersistentEventLogAuthority(privateRoot, "authority-one").capability(eventLogId).readAnchors(),
+    /(?:event_log_(anchor_(invalid|auth_invalid)|authority_(unavailable|binding_invalid))|worker_private_state_unowned)/,
+  );
+  const otherRoot = await mkdtemp(join(parent, "authority-other-"));
+  t.after(async () => await rm(otherRoot, { recursive: true, force: true }));
+  await mkdir(join(otherRoot, "event-log-authority"), { recursive: true });
+  await writeFile(join(otherRoot, "event-log-authority", eventLogId + ".head.journal"), state, "utf8");
+  const otherPrivateRoot = WorkerPrivateStateRoot.bootstrap({ workerId: "other-worker", privateRoot: otherRoot, managedRoots: [] });
+  await assert.rejects(
+    new PersistentEventLogAuthority(otherPrivateRoot, "authority-other").capability(eventLogId).readAnchors(),
+    /(?:event_log_(anchor_(invalid|auth_invalid)|authority_(unavailable|binding_invalid))|worker_private_state_unowned)/,
+  );
+});
+
+test("two independent processes bootstrap one Event Log authority without a raw race error", async (t) => {
+  const parent = join(process.cwd(), ".morrow-test-tmp");
+  const privateRootPath = await mkdtemp(join(parent, "bootstrap-race-"));
+  t.after(async () => await rm(privateRootPath, { recursive: true, force: true }));
+  const root = WorkerPrivateStateRoot.bootstrap({ workerId: "bootstrap-race-worker", privateRoot: privateRootPath, managedRoots: [] });
+  await root.ensure();
+  const eventLogId = "e".repeat(64);
+  const contractId = "bootstrap-race-contract";
+  const streamIdentity = createHash("sha256").update(`morrow.event-log/stream/v1|${eventLogId}`, "utf8").digest("hex");
+  const streamId = createHash("sha256").update(`${streamIdentity}|${contractId}`, "utf8").digest("hex");
+  const workerPrivateStateUrl = new URL("../src/worker-private-state.ts", import.meta.url).href;
+  const authorityUrl = new URL("../src/governance-registries.ts", import.meta.url).href;
+  const childSource = `
+    import { WorkerPrivateStateRoot } from ${JSON.stringify(workerPrivateStateUrl)};
+    import { PersistentEventLogAuthority } from ${JSON.stringify(authorityUrl)};
+    const root = WorkerPrivateStateRoot.bootstrap({ workerId: "bootstrap-race-worker", privateRoot: process.argv[1], managedRoots: [] });
+    try {
+      const eventLogId = process.argv[2];
+      const streamId = process.argv[3];
+      const capability = new PersistentEventLogAuthority(root, "bootstrap-race-authority").capability(eventLogId);
+      await capability.bindStream("bootstrap-race-contract", streamId);
+      await capability.readAnchors();
+      process.stdout.write("ok\\n");
+    } catch (error) {
+      process.stdout.write((error instanceof Error ? error.message : "bootstrap_failed") + "\\n");
+      process.exitCode = 1;
+    }
+  `;
+  const run = () => new Promise<{ code: number | null; stdout: string; stderr: string }>((resolveProcess) => {
+    const child = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", childSource, privateRootPath, eventLogId, streamId], {
+      cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"], shell: false,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("close", (code) => resolveProcess({ code, stdout: stdout.trim(), stderr: stderr.trim() }));
+  });
+  const results = await Promise.all(Array.from({ length: 8 }, run));
+  assert.deepEqual(results.map((result) => result.code), Array(8).fill(0));
+  assert.deepEqual(results.map((result) => result.stdout), Array(8).fill("ok"));
+  assert.equal(results.some((result) => result.stderr.includes("ReferenceError")), false);
+  const authorityFiles = await (await import("node:fs/promises")).readdir(join(privateRootPath, "event-log-authority"));
+  assert.equal(authorityFiles.filter((name) => name === "event-log-authority-v4.key").length, 1);
+  assert.equal(authorityFiles.filter((name) => name === `${eventLogId}.binding.json`).length, 1);
+  const restarted = new PersistentEventLogAuthority(root, "bootstrap-race-authority").capability(eventLogId);
+  assert.equal((await restarted.readAnchors()).length, 0);
+});
+
+test("WorkerPrivateStateRoot is bootstrap-only, outside managed roots, stable, and junction-safe", async (t) => {
+  const parent = join(process.cwd(), ".morrow-test-tmp");
+  const root = await mkdtemp(join(parent, "private-state-"));
+  t.after(async () => await rm(root, { recursive: true, force: true }));
+  const managed = join(root, "managed");
+  const privateRoot = join(root, "private");
+  await mkdir(managed, { recursive: true });
+  const state = WorkerPrivateStateRoot.bootstrap({ workerId: "stable-worker", privateRoot, managedRoots: [managed] });
+  const first = await state.ensure();
+  const second = await WorkerPrivateStateRoot.bootstrap({ workerId: "stable-worker", privateRoot, managedRoots: [managed] }).ensure();
+  assert.equal(first.installationId, second.installationId);
+  await assert.rejects(
+    WorkerPrivateStateRoot.bootstrap({ workerId: "stable-worker", privateRoot: join(managed, "private"), managedRoots: [managed] }).ensure(),
+    /worker_private_state_inside_managed_root/,
+  );
+  const junction = join(root, "junction");
+  await symlink(privateRoot, junction, "junction");
+  await assert.rejects(
+    WorkerPrivateStateRoot.bootstrap({ workerId: "stable-worker", privateRoot: join(junction, "child"), managedRoots: [] }).ensure(),
+    /worker_private_state_path_unsafe/,
+  );
+  assert.throws(() => new PersistentEventLogAuthority(privateRoot as never), /event_log_authority_private_root_required/);
+});
+
+test("Event Log capability is narrow and cannot cross contract or stream bindings", async (t) => {
+  const parent = join(process.cwd(), ".morrow-test-tmp");
+  const privateRootPath = await mkdtemp(join(parent, "capability-"));
+  t.after(async () => await rm(privateRootPath, { recursive: true, force: true }));
+  const privateRoot = WorkerPrivateStateRoot.bootstrap({ workerId: "capability-worker", privateRoot: privateRootPath, managedRoots: [] });
+  const eventLogId = "d".repeat(64);
+  const authority = new PersistentEventLogAuthority(privateRoot, "authority-capability");
+  const rootCapability = authority.capability(eventLogId);
+  assert.equal("authenticateEvent" in rootCapability, false);
+  assert.equal("verifyEvent" in rootCapability, false);
+  const identity = createHash("sha256").update(`morrow.event-log/stream/v1|${eventLogId}`, "utf8").digest("hex");
+  const streamId = createHash("sha256").update(`${identity}|contract-a`, "utf8").digest("hex");
+  assert.throws(() => rootCapability.bindStream("contract-b", streamId), /event_log_stream_binding_invalid/);
+  const stream = rootCapability.bindStream("contract-a", streamId);
+  assert.equal("authenticateEvent" in stream, false);
+  assert.equal("domain" in stream, false);
+  const item = {
+    eventId: "capability-event",
+    contractId: "contract-a",
+    type: "STEP",
+    occurredAt: "2026-09-01T12:00:00.000Z",
+    actor: { kind: "kernel", id: "kernel" },
+    payload: { ok: true },
+    schemaVersion: "0.1",
+  };
+  const record = { format: "morrow.event-log/4", eventLogId, streamId, contractId: "contract-a", sequence: 1, eventId: item.eventId, previousAuthenticatedTag: "0".repeat(64), event: item };
+  const tag = await stream.authenticateRecord(record);
+  assert.equal(await stream.verifyRecord(record, tag), true);
+  await assert.rejects(stream.authenticateRecord({ ...record, contractId: "contract-b", event: { ...item, contractId: "contract-b" } }), /event_log_record_invalid/);
+});
+
+test("WorkerPrivateStateRoot recovers only a bound stale endpoint lock, never PID-only state", async (t) => {
+  const parent = join(process.cwd(), ".morrow-test-tmp");
+  const privateRootPath = await mkdtemp(join(parent, "lock-"));
+  t.after(async () => await rm(privateRootPath, { recursive: true, force: true }));
+  const root = WorkerPrivateStateRoot.bootstrap({ workerId: "lock-worker", privateRoot: privateRootPath, managedRoots: [] });
+  const marker = await root.ensure();
+  const authorityRef = "lock-authority";
+  const eventLogId = "f".repeat(64);
+  const lockPath = join(privateRootPath, "locks", `${authorityRef}-${eventLogId}-event-log-anchor.lock`);
+  await mkdir(lockPath, { recursive: true });
+  await writeFile(join(lockPath, "lease.json"), `${JSON.stringify({
+    format: "morrow.worker-private-lock/v1", authorityRef, eventLogId, ownerId: randomUUID(),
+    instanceId: marker.installationId, processId: process.pid, endpointPort: 65_000,
+  })}\n`, "utf8");
+  const lock = await root.acquireExclusive(authorityRef, eventLogId);
+  await lock.release();
+  const legacyPath = join(privateRootPath, "locks", `${authorityRef}-${eventLogId}-event-log-anchor.lock`);
+  await mkdir(legacyPath, { recursive: true });
+  await writeFile(join(legacyPath, "lease.json"), `${JSON.stringify({
+    format: "morrow.worker-private-lock/v1", authorityRef, eventLogId, ownerId: randomUUID(),
+    processId: process.pid, endpointPort: 65_000,
+  })}\n`, "utf8");
+  await assert.rejects(root.acquireExclusive(authorityRef, eventLogId), /worker_private_state_lock_invalid/);
+});
+
+test("an authority cannot rebootstrap after its external history loses the key", async (t) => {
+  const parent = join(process.cwd(), ".morrow-test-tmp");
+  const privateRootPath = await mkdtemp(join(parent, "rebootstrap-"));
+  t.after(async () => await rm(privateRootPath, { recursive: true, force: true }));
+  const privateRoot = WorkerPrivateStateRoot.bootstrap({ workerId: "rebootstrap-worker", privateRoot: privateRootPath, managedRoots: [] });
+  const eventLogId = "1".repeat(64);
+  const streamIdentity = createHash("sha256").update(`morrow.event-log/stream/v1|${eventLogId}`, "utf8").digest("hex");
+  const streamId = createHash("sha256").update(`${streamIdentity}|contract-rebootstrap`, "utf8").digest("hex");
+  const authority = new PersistentEventLogAuthority(privateRoot, "rebootstrap-authority");
+  const rootCapability = authority.capability(eventLogId);
+  const stream = rootCapability.bindStream("contract-rebootstrap", streamId);
+  const anchor = { authorityRef: "rebootstrap-authority", eventLogId, contractId: "contract-rebootstrap", streamId, generation: 1, sequence: 1, eventTag: "2".repeat(64), phase: "prepared" as const, expectedPrevious: null };
+  await stream.prepareHead(anchor, null);
+  await stream.commitHead({ ...anchor, phase: "committed" }, null);
+  await unlink(join(privateRootPath, "event-log-authority", "event-log-authority-v4.key"));
+  await assert.rejects(new PersistentEventLogAuthority(privateRoot, "rebootstrap-authority").capability(eventLogId).readAnchors(), /event_log_authority_(unavailable|rebootstrap_denied)/);
 });

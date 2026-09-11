@@ -1,9 +1,11 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:net";
+import { constants } from "node:fs";
 import {
   lstat,
   link,
   mkdir,
+  open,
   readFile,
   readdir,
   realpath,
@@ -67,6 +69,13 @@ export interface TranscriptRecord {
   content: string;
   redactionCount: number;
   sensitiveInput: boolean;
+  redactionProvenance: TranscriptRedactionProvenance;
+}
+
+export interface TranscriptRedactionProvenance {
+  format: "hmac-sha256-v1";
+  inputDigest: string;
+  tag: string;
 }
 
 export interface RedactedStreamFragment {
@@ -90,8 +99,26 @@ export interface TranscriptView {
   totalBytes: number;
 }
 
+export interface TranscriptCursor {
+  streamId: string;
+  ordinal: number;
+}
+
+export type TranscriptReplayStatus = "ok" | "invalid" | "stale" | "future";
+
+export interface TranscriptReplayResult {
+  status: TranscriptReplayStatus;
+  streamId: string;
+  cursor: TranscriptCursor;
+  nextCursor: TranscriptCursor;
+  retainedFromOrdinal: number;
+  headOrdinal: number;
+  records: readonly TranscriptRecord[];
+}
+
 interface TranscriptState {
   format: typeof TRANSCRIPT_FORMAT;
+  redactionProvenanceFormat: "hmac-sha256-v1";
   redactionPolicyId: string;
   revision: number;
   nextOrdinal: number;
@@ -129,6 +156,8 @@ interface NormalizedTerminalText {
 }
 
 const transcriptFileName = "transcript-v1.json";
+const redactionKeyFileName = ".transcript-redaction-key";
+const redactionProvenanceFormat = "hmac-sha256-v1" as const;
 const leaseFileName = ".transcript-v1.lock";
 const rootMarkerFileName = ".morrow-transcript-root.json";
 const rootMarkerFormat = "morrow.transcript-root/1" as const;
@@ -253,6 +282,7 @@ Object.freeze(StreamRedactor.prototype);
 
 export class StreamRedactorSession {
   #redactor: StreamRedactor;
+  #redactionKey: Buffer;
   #maxPendingBytes: number;
   #holdback: number;
   #releaseBatchBytes: number;
@@ -326,6 +356,7 @@ export class PersistentTranscriptStore {
   #retention: TranscriptRetentionPolicy;
   #access: NormalizedAccessPolicy;
   #redactor: StreamRedactor;
+  #redactionKey: Buffer;
   #clock: (() => string | number | Date) | undefined;
   #lease: TranscriptLease;
   #state: TranscriptState;
@@ -338,6 +369,7 @@ export class PersistentTranscriptStore {
     retention: TranscriptRetentionPolicy,
     access: NormalizedAccessPolicy,
     redactor: StreamRedactor,
+    redactionKey: Buffer,
     clock: (() => string | number | Date) | undefined,
     lease: TranscriptLease,
     state: TranscriptState,
@@ -346,6 +378,7 @@ export class PersistentTranscriptStore {
     this.#retention = retention;
     this.#access = access;
     this.#redactor = redactor;
+    this.#redactionKey = redactionKey;
     this.#clock = clock;
     this.#lease = lease;
     this.#state = state;
@@ -360,11 +393,12 @@ export class PersistentTranscriptStore {
       throw transcriptError("transcript_configuration_inspection_failed");
     }
     const root = await prepareStateRoot(normalized.stateRoot);
+    const redactionKey = await ensureRedactionKey(root);
     const lease = await TranscriptLease.acquire(root);
     try {
       await cleanupOwnedTemps(root);
       const filePath = join(root, transcriptFileName);
-      const loaded = await loadState(filePath, normalized.retention, normalized.access, normalized.redactor);
+      const loaded = await loadState(filePath, normalized.retention, normalized.access, normalized.redactor, redactionKey);
       const now = trustedNow(normalized.clock);
       const state = loaded ?? initialState(normalized.retention, normalized.access, normalized.redactor.policyId, now);
       if (Date.parse(now) < Date.parse(state.updatedAt)) throw transcriptError("transcript_clock_moved_backwards");
@@ -373,6 +407,7 @@ export class PersistentTranscriptStore {
         normalized.retention,
         normalized.access,
         normalized.redactor,
+        redactionKey,
         normalized.clock,
         lease,
         state,
@@ -414,6 +449,28 @@ export class PersistentTranscriptStore {
     return viewState(this.#state);
   }
 
+  replay(readerId: string, cursor?: unknown, limit = 1_024): TranscriptReplayResult {
+    this.assertOpen();
+    if (!isIdentifier(readerId) || !this.#access.readerIds.includes(readerId)) {
+      throw transcriptError("transcript_read_not_authorized");
+    }
+    const streamId = transcriptStreamId(this.#filePath);
+    const headOrdinal = this.#state.nextOrdinal - 1;
+    const retainedFromOrdinal = this.#state.records[0]?.ordinal ?? 1;
+    const initial = { streamId, ordinal: 0 } as TranscriptCursor;
+    const parsed = parseTranscriptCursor(cursor, streamId);
+    if (!parsed.ok) return transcriptReplayResult("invalid", streamId, initial, initial, retainedFromOrdinal, headOrdinal, []);
+    const start = parsed.cursor;
+    if (start.ordinal > headOrdinal) return transcriptReplayResult("future", streamId, start, start, retainedFromOrdinal, headOrdinal, []);
+    if (start.ordinal < retainedFromOrdinal - 1) return transcriptReplayResult("stale", streamId, start, start, retainedFromOrdinal, headOrdinal, []);
+    if (!Number.isSafeInteger(limit) || limit < 0 || limit > 100_000) {
+      return transcriptReplayResult("invalid", streamId, start, start, retainedFromOrdinal, headOrdinal, []);
+    }
+    const records = this.#state.records.filter((record) => record.ordinal > start.ordinal).slice(0, limit);
+    const nextOrdinal = records.length === 0 ? start.ordinal : records[records.length - 1]!.ordinal;
+    return transcriptReplayResult("ok", streamId, start, { streamId, ordinal: nextOrdinal }, retainedFromOrdinal, headOrdinal, records);
+  }
+
   async sweepRetention(actorId: string): Promise<readonly string[]> {
     this.assertOpen();
     if (!isIdentifier(actorId) || !this.#access.writerIds.includes(actorId)) {
@@ -438,6 +495,7 @@ export class PersistentTranscriptStore {
     content: string,
     redactionCount: number,
     sensitiveInput: boolean,
+    inputDigest: string,
   ): Promise<{ record: TranscriptRecord; evictedRecordIds: readonly string[] }> {
     if (authority !== transcriptCommitAuthority) throw transcriptError("transcript_commit_not_authorized");
     this.assertOpen();
@@ -452,6 +510,7 @@ export class PersistentTranscriptStore {
         this.#redactor.redact(content).text !== content
         || (request.stream === "input") !== sensitiveInput
         || (sensitiveInput && content !== SENSITIVE_INPUT_PLACEHOLDER && content !== "")
+        || redactionCount < 0
       ) {
         throw transcriptError("transcript_content_not_redacted");
       }
@@ -473,6 +532,17 @@ export class PersistentTranscriptStore {
         content,
         redactionCount,
         sensitiveInput,
+        redactionProvenance: createRedactionProvenance(
+          this.#redactionKey,
+          request,
+          content,
+          redactionCount,
+          sensitiveInput,
+          inputDigest,
+          this.#state.nextOrdinal,
+          now,
+          transcriptStreamId(this.#filePath),
+        ),
       };
       const draft = cloneState(this.#state);
       draft.records.push(record);
@@ -520,6 +590,7 @@ class TranscriptRecordWriter {
   #session: StreamRedactorSession;
   #parts: string[] = [];
   #redactionCount = 0;
+  #inputDigest = createHash("sha256");
   #rawBytes = 0;
   #finished = false;
   #sensitiveMarkerWritten = false;
@@ -540,6 +611,7 @@ class TranscriptRecordWriter {
     if (this.#finished) throw transcriptError("transcript_writer_finished");
     if (typeof chunk !== "string") throw transcriptError("transcript_chunk_invalid");
     this.#rawBytes += Buffer.byteLength(chunk, "utf8");
+    this.#inputDigest.update(chunk, "utf8");
     if (this.#rawBytes > this.maximumRecordBytes()) {
       this.abort();
       throw transcriptError("transcript_record_too_large");
@@ -571,6 +643,7 @@ class TranscriptRecordWriter {
       this.#parts.join(""),
       this.#request.stream === "input" ? (this.#sensitiveMarkerWritten ? 1 : 0) : this.#redactionCount,
       this.#request.stream === "input",
+      this.#inputDigest.digest("hex"),
     );
     this.#parts.length = 0;
     return deepFreeze({
@@ -596,16 +669,21 @@ class TranscriptRecordWriter {
 class TranscriptLease {
   private readonly path: string;
   private readonly token: string;
+  private readonly activeServer: Server;
   private released = false;
 
-  private constructor(path: string, token: string) {
+  private constructor(path: string, token: string, activeServer: Server) {
     this.path = path;
     this.token = token;
+    this.activeServer = activeServer;
   }
 
   static async acquire(root: string): Promise<TranscriptLease> {
     const path = join(root, leaseFileName);
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    const activeServer = await TranscriptActiveLease.acquire(root);
+    let transferred = false;
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
       const token = randomUUID();
       const temp = join(root, `${leaseFileName}.${process.pid}.${token}.tmp`);
       try {
@@ -616,7 +694,8 @@ class TranscriptLease {
             mode: 0o600,
           });
           await link(temp, path);
-          return new TranscriptLease(path, token);
+          transferred = true;
+          return new TranscriptLease(path, token, activeServer);
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
             throw transcriptError("transcript_lease_failed");
@@ -626,7 +705,6 @@ class TranscriptLease {
         }
         const existing = await readLease(path);
         if (!existing) continue;
-        if (processIsAlive(existing.pid)) throw transcriptError("transcript_store_already_active");
         const recovery = await TranscriptLeaseRecovery.acquire(root);
         try {
           const current = await readLease(path);
@@ -634,7 +712,6 @@ class TranscriptLease {
           if (current.pid !== existing.pid || current.token !== existing.token) {
             throw transcriptError("transcript_lease_changed_during_recovery");
           }
-          if (processIsAlive(current.pid)) throw transcriptError("transcript_store_already_active");
           await unlink(path);
         } finally {
           await recovery.release();
@@ -643,19 +720,63 @@ class TranscriptLease {
         if (isTranscriptError(error)) throw error;
         throw transcriptError("transcript_lease_failed");
       }
+      }
+      throw transcriptError("transcript_lease_failed");
+    } finally {
+      if (!transferred) await closeTranscriptActiveLease(activeServer).catch(() => undefined);
     }
-    throw transcriptError("transcript_lease_failed");
   }
 
   async release(): Promise<void> {
     if (this.released) return;
     this.released = true;
     const existing = await readLease(this.path);
-    if (!existing || existing.token !== this.token || existing.pid !== process.pid) {
+    if (!existing || existing.token !== this.token) {
       throw transcriptError("transcript_lease_owner_mismatch");
     }
+    await closeTranscriptActiveLease(this.activeServer);
     await unlink(this.path);
   }
+}
+
+class TranscriptActiveLease {
+  static async acquire(root: string): Promise<Server> {
+    const identity = createHash("sha256").update(resolve(root).toLowerCase(), "utf8").digest("hex");
+    const endpoint = process.platform === "win32"
+      ? `\\\\.\\pipe\\morrow-transcript-active-${identity}`
+      : join(root, ".transcript-v1-active.sock");
+    const server = createServer((socket) => socket.destroy());
+    server.unref();
+    try {
+      await new Promise<void>((resolvePromise, rejectPromise) => {
+        const onError = (error: NodeJS.ErrnoException) => {
+          server.removeListener("listening", onListening);
+          rejectPromise(error);
+        };
+        const onListening = () => {
+          server.removeListener("error", onError);
+          resolvePromise();
+        };
+        server.once("error", onError);
+        server.once("listening", onListening);
+        server.listen(endpoint);
+      });
+      return server;
+    } catch (error) {
+      await closeTranscriptActiveLease(server).catch(() => undefined);
+      if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+        throw transcriptError("transcript_store_already_active");
+      }
+      throw transcriptError("transcript_lease_failed");
+    }
+  }
+}
+
+async function closeTranscriptActiveLease(server: Server): Promise<void> {
+  if (!server.listening) return;
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    server.close((error) => error ? rejectPromise(error) : resolvePromise());
+  });
 }
 
 class TranscriptLeaseRecovery {
@@ -872,6 +993,34 @@ function pathsReferToSameLocation(left: string, right: string): boolean {
   return left === right;
 }
 
+/**
+ * Validates the nearest existing ancestor before a caller creates anything
+ * below it. Callers must invoke this before and after creating descendants.
+ */
+export async function assertCanonicalDirectoryPath(path: string): Promise<void> {
+  const requested = resolve(path);
+  let probe = requested;
+  while (true) {
+    try {
+      await validateCanonicalDirectory(probe);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        if (isTranscriptError(error)) throw error;
+        throw transcriptError("transcript_state_root_unsafe");
+      }
+      const parent = dirname(probe);
+      if (parent === probe) throw transcriptError("transcript_state_root_unsafe");
+      probe = parent;
+    }
+  }
+}
+
+function sameFileIdentity(left: { dev: number; ino: number; size: number; mtimeMs: number }, right: { dev: number; ino: number; size: number; mtimeMs: number }): boolean {
+  return left.dev === right.dev && left.ino === right.ino
+    && left.size === right.size && left.mtimeMs === right.mtimeMs;
+}
+
 async function ensureOwnedRoot(root: string): Promise<void> {
   const markerPath = join(root, rootMarkerFileName);
   let names = await readdir(root);
@@ -907,6 +1056,7 @@ async function ensureOwnedRoot(root: string): Promise<void> {
     }
   }
   await validateRootMarker(markerPath);
+  await ensureRedactionKey(root);
   await validateOwnedRootEntries(root);
 }
 
@@ -937,6 +1087,7 @@ async function validateOwnedRootEntries(root: string): Promise<void> {
       name === rootMarkerFileName
       || name === transcriptFileName
       || name === leaseFileName
+      || name === redactionKeyFileName
       || snapshotTempPattern().test(name)
       || leaseTempPattern().test(name)
       || rootMarkerTempPattern().test(name)
@@ -977,24 +1128,43 @@ async function loadState(
   retention: TranscriptRetentionPolicy,
   access: NormalizedAccessPolicy,
   redactor: StreamRedactor,
+  redactionKey: Buffer,
 ): Promise<TranscriptState | null> {
-  let metadata;
+  let pathMetadata;
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
   try {
-    metadata = await lstat(path);
+    pathMetadata = await lstat(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw transcriptError("transcript_snapshot_read_failed");
   }
-  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > maximumSnapshotBytes) {
+  if (!pathMetadata.isFile() || pathMetadata.isSymbolicLink() || pathMetadata.size > maximumSnapshotBytes) {
     throw transcriptError("transcript_snapshot_too_large_or_invalid");
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readFile(path, "utf8"));
-  } catch {
+    handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const before = await handle.stat();
+    if (!before.isFile() || before.isSymbolicLink() || !sameFileIdentity(pathMetadata, before)) {
+      throw transcriptError("transcript_snapshot_race_detected");
+    }
+    const raw = await handle.readFile("utf8");
+    const after = await handle.stat();
+    const pathAfter = await lstat(path);
+    if (!after.isFile() || after.isSymbolicLink()
+      || after.size !== before.size
+      || Buffer.byteLength(raw, "utf8") !== before.size
+      || !sameFileIdentity(pathMetadata, pathAfter)) {
+      throw transcriptError("transcript_snapshot_race_detected");
+    }
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    if (isTranscriptError(error)) throw error;
     throw transcriptError("transcript_snapshot_invalid");
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
-  const state = validatePersistedState(parsed, retention, access, redactor);
+  const state = validatePersistedState(parsed, retention, access, redactor, redactionKey, transcriptStreamId(path));
   return state;
 }
 
@@ -1003,9 +1173,12 @@ function validatePersistedState(
   retention: TranscriptRetentionPolicy,
   access: NormalizedAccessPolicy,
   redactor: StreamRedactor,
+  redactionKey: Buffer,
+  streamId: string,
 ): TranscriptState {
-  if (!isPlainDataRecord(input) || !hasExactDataKeys(input, [
+  const expectedKeys = [
     "format",
+    "redactionProvenanceFormat",
     "redactionPolicyId",
     "revision",
     "nextOrdinal",
@@ -1014,13 +1187,15 @@ function validatePersistedState(
     "access",
     "records",
     "checksum",
-  ])) throw transcriptError("transcript_snapshot_invalid");
+  ];
+  if (!isPlainDataRecord(input) || !hasExactDataKeys(input, expectedKeys)) throw transcriptError("transcript_snapshot_invalid");
   const checksum = input.checksum;
   if (typeof checksum !== "string" || checksum !== checksumState(withoutChecksum(input))) {
     throw transcriptError("transcript_snapshot_checksum_invalid");
   }
   if (
     input.format !== TRANSCRIPT_FORMAT
+    || input.redactionProvenanceFormat !== redactionProvenanceFormat
     || input.redactionPolicyId !== redactor.policyId
     || !boundedInteger(input.revision, 0, Number.MAX_SAFE_INTEGER)
     || !boundedInteger(input.nextOrdinal, 1, Number.MAX_SAFE_INTEGER)
@@ -1043,16 +1218,17 @@ function validatePersistedState(
   let previousOccurredAt = Number.NEGATIVE_INFINITY;
   const updatedAt = Date.parse(input.updatedAt);
   for (let index = 0; index < input.records.length; index += 1) {
-    const record = parsePersistedRecord(readDataArrayElement(input.records, index));
+    const record = parsePersistedRecord(readDataArrayElement(input.records, index), true);
     const occurredAt = Date.parse(record.occurredAt);
     if (
-      record.ordinal <= previousOrdinal
+      (records.length > 0 && record.ordinal !== previousOrdinal + 1)
       || ids.has(record.recordId)
       || !access.writerIds.includes(record.writerId)
       || occurredAt < previousOccurredAt
       || occurredAt > updatedAt
       || Buffer.byteLength(record.content, "utf8") > retention.maxRecordBytes
       || redactor.redact(record.content).text !== record.content
+      || !record.redactionProvenance || !verifyRedactionProvenance(redactionKey, record, streamId)
     ) {
       throw transcriptError("transcript_snapshot_invalid");
     }
@@ -1061,12 +1237,13 @@ function validatePersistedState(
     ids.add(record.recordId);
     records.push(record);
   }
-  if (records.length > 0 && input.nextOrdinal <= records[records.length - 1]!.ordinal) {
+  if (records.length > 0 && input.nextOrdinal !== records[records.length - 1]!.ordinal + 1) {
     throw transcriptError("transcript_snapshot_invalid");
   }
   if (totalRecordBytes(records) > retention.maxTotalBytes) throw transcriptError("transcript_snapshot_invalid");
   return {
     format: TRANSCRIPT_FORMAT,
+    redactionProvenanceFormat,
     redactionPolicyId: redactor.policyId,
     revision: input.revision,
     nextOrdinal: input.nextOrdinal,
@@ -1077,8 +1254,8 @@ function validatePersistedState(
   };
 }
 
-function parsePersistedRecord(input: unknown): TranscriptRecord {
-  if (!isPlainDataRecord(input) || !hasExactDataKeys(input, [
+function parsePersistedRecord(input: unknown, requireProvenance: boolean): TranscriptRecord {
+  const keys = [
     "ordinal",
     "recordId",
     "contractId",
@@ -1091,7 +1268,9 @@ function parsePersistedRecord(input: unknown): TranscriptRecord {
     "content",
     "redactionCount",
     "sensitiveInput",
-  ])) throw transcriptError("transcript_snapshot_invalid");
+    ...(requireProvenance ? ["redactionProvenance"] : []),
+  ];
+  if (!isPlainDataRecord(input) || !hasExactDataKeys(input, keys)) throw transcriptError("transcript_snapshot_invalid");
   if (
     !boundedInteger(input.ordinal, 1, Number.MAX_SAFE_INTEGER)
     || !isIdentifier(input.recordId)
@@ -1108,7 +1287,8 @@ function parsePersistedRecord(input: unknown): TranscriptRecord {
     || (input.stream === "input") !== input.sensitiveInput
     || (input.sensitiveInput && input.content !== SENSITIVE_INPUT_PLACEHOLDER && input.content !== "")
   ) throw transcriptError("transcript_snapshot_invalid");
-  return { ...input } as unknown as TranscriptRecord;
+  const redactionProvenance = requireProvenance ? parseRedactionProvenance(input.redactionProvenance) : null;
+  return { ...input, redactionProvenance } as unknown as TranscriptRecord;
 }
 
 async function persistState(path: string, state: TranscriptState): Promise<void> {
@@ -1148,6 +1328,7 @@ function initialState(
 ): TranscriptState {
   return {
     format: TRANSCRIPT_FORMAT,
+    redactionProvenanceFormat,
     redactionPolicyId,
     revision: 0,
     nextOrdinal: 1,
@@ -1173,6 +1354,7 @@ function viewState(state: TranscriptState): TranscriptView {
 function cloneState(state: TranscriptState): TranscriptState {
   return {
     format: TRANSCRIPT_FORMAT,
+    redactionProvenanceFormat: state.redactionProvenanceFormat,
     redactionPolicyId: state.redactionPolicyId,
     revision: state.revision,
     nextOrdinal: state.nextOrdinal,
@@ -1824,6 +2006,179 @@ function countRedactions(ranges: readonly RedactionRange[]): number {
   return ranges.filter((range) => range.replacement === "redact").length;
 }
 
+function createRedactionProvenance(
+  key: Buffer,
+  request: TranscriptRecordRequest,
+  content: string,
+  redactionCount: number,
+  sensitiveInput: boolean,
+  inputDigest: string,
+  ordinal: number,
+  occurredAt: string,
+  streamId: string,
+): TranscriptRedactionProvenance {
+  return {
+    format: redactionProvenanceFormat,
+    inputDigest,
+    tag: redactionTag(
+      key,
+      redactionProvenanceFormat,
+      request,
+      content,
+      redactionCount,
+      sensitiveInput,
+      inputDigest,
+      ordinal,
+      occurredAt,
+      streamId,
+    ),
+  };
+}
+
+function verifyRedactionProvenance(key: Buffer, record: TranscriptRecord, streamId: string): boolean {
+  const provenance = record.redactionProvenance;
+  if (!provenance || provenance.format !== redactionProvenanceFormat) return false;
+  const expected = redactionTag(
+    key,
+    provenance.format,
+    record,
+    record.content,
+    record.redactionCount,
+    record.sensitiveInput,
+    provenance.inputDigest,
+    record.ordinal,
+    record.occurredAt,
+    streamId,
+  );
+  if (!/^[0-9a-f]{64}$/u.test(provenance.tag)) return false;
+  const expectedBytes = Buffer.from(expected, "hex");
+  const actualBytes = Buffer.from(provenance.tag, "hex");
+  return expectedBytes.length === actualBytes.length && timingSafeEqual(expectedBytes, actualBytes);
+}
+
+function parseRedactionProvenance(input: unknown): TranscriptRedactionProvenance {
+  if (!isPlainDataRecord(input) || !hasExactDataKeys(input, ["format", "inputDigest", "tag"])) {
+    throw transcriptError("transcript_snapshot_invalid");
+  }
+  if (input.format !== redactionProvenanceFormat
+    || typeof input.inputDigest !== "string"
+    || !/^[0-9a-f]{64}$/u.test(input.inputDigest)
+    || typeof input.tag !== "string"
+    || !/^[0-9a-f]{64}$/u.test(input.tag)) {
+    throw transcriptError("transcript_snapshot_invalid");
+  }
+  return {
+    format: input.format,
+    inputDigest: input.inputDigest,
+    tag: input.tag,
+  };
+}
+
+function redactionTag(
+  key: Buffer,
+  format: TranscriptRedactionProvenance["format"],
+  record: TranscriptRecord | TranscriptRecordRequest,
+  content: string,
+  redactionCount: number,
+  sensitiveInput: boolean,
+  inputDigest: string,
+  ordinal: number,
+  occurredAt: string,
+  streamId: string,
+): string {
+  const payload = JSON.stringify({
+    format,
+    streamId,
+    ordinal,
+    occurredAt,
+    inputDigest,
+    recordId: record.recordId,
+    contractId: record.contractId,
+    stepId: record.stepId,
+    terminalSessionId: record.terminalSessionId,
+    agentInstanceId: record.agentInstanceId,
+    stream: record.stream,
+    writerId: record.writerId,
+    content,
+    redactionCount,
+    sensitiveInput,
+  });
+  return createHmac("sha256", key).update(payload, "utf8").digest("hex");
+}
+
+function transcriptStreamId(path: string): string {
+  return createHash("sha256").update(`morrow.transcript-replay/1|${resolve(path).toLowerCase()}`, "utf8").digest("hex");
+}
+
+function parseTranscriptCursor(value: unknown, streamId: string): { ok: true; cursor: TranscriptCursor } | { ok: false } {
+  try {
+    if (value === undefined) return { ok: true, cursor: { streamId, ordinal: 0 } };
+    if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) return { ok: false };
+    const keys = Reflect.ownKeys(value);
+    if (keys.length !== 2 || !keys.every((key) => typeof key === "string" && (key === "streamId" || key === "ordinal"))) return { ok: false };
+    const stream = Object.getOwnPropertyDescriptor(value, "streamId");
+    const ordinal = Object.getOwnPropertyDescriptor(value, "ordinal");
+    if (!stream || !ordinal || !("value" in stream) || !("value" in ordinal)
+      || stream.value !== streamId || !Number.isSafeInteger(ordinal.value) || ordinal.value < 0) return { ok: false };
+    return { ok: true, cursor: { streamId, ordinal: ordinal.value as number } };
+  } catch {
+    return { ok: false };
+  }
+}
+
+async function ensureRedactionKey(root: string): Promise<Buffer> {
+  const path = join(root, redactionKeyFileName);
+  try {
+    const metadata = await lstat(path);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size !== 32) {
+      throw transcriptError("transcript_redaction_key_invalid");
+    }
+    const key = await readFile(path);
+    if (key.length !== 32) throw transcriptError("transcript_redaction_key_invalid");
+    return key;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (isTranscriptError(error)) throw error;
+      throw transcriptError("transcript_redaction_key_invalid");
+    }
+    try {
+      await writeFile(path, randomBytes(32), { flag: "wx", mode: 0o600 });
+    } catch (createError) {
+      if ((createError as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw transcriptError("transcript_redaction_key_failed");
+      }
+    }
+    try {
+      const key = await readFile(path);
+      if (key.length !== 32) throw transcriptError("transcript_redaction_key_invalid");
+      return key;
+    } catch (readError) {
+      if (isTranscriptError(readError)) throw readError;
+      throw transcriptError("transcript_redaction_key_invalid");
+    }
+  }
+}
+
+function transcriptReplayResult(
+  status: TranscriptReplayStatus,
+  streamId: string,
+  cursor: TranscriptCursor,
+  nextCursor: TranscriptCursor,
+  retainedFromOrdinal: number,
+  headOrdinal: number,
+  records: readonly TranscriptRecord[],
+): TranscriptReplayResult {
+  return Object.freeze({
+    status,
+    streamId,
+    cursor: Object.freeze({ ...cursor }),
+    nextCursor: Object.freeze({ ...nextCursor }),
+    retainedFromOrdinal,
+    headOrdinal,
+    records: Object.freeze(records.map(cloneRecord)),
+  });
+}
+
 function checksumState(state: object): string {
   return createHash("sha256").update(JSON.stringify(state)).digest("hex");
 }
@@ -1866,15 +2221,18 @@ function processIsAlive(pid: number): boolean {
 }
 
 function trustedNow(clock?: () => string | number | Date): string {
-  let value: string | number | Date;
   try {
-    value = clock ? clock() : Date.now();
+    const value = clock ? clock() : Date.now();
+    let milliseconds: number;
+    if (value instanceof Date) milliseconds = value.getTime();
+    else if (typeof value === "number") milliseconds = value;
+    else if (typeof value === "string") milliseconds = Date.parse(value);
+    else throw new Error("clock_value_invalid");
+    if (!Number.isFinite(milliseconds)) throw new Error("clock_value_invalid");
+    return new Date(milliseconds).toISOString();
   } catch {
-    throw transcriptError("transcript_clock_failed");
+    throw transcriptError("transcript_clock_invalid");
   }
-  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
-  if (!Number.isFinite(date.getTime())) throw transcriptError("transcript_clock_invalid");
-  return date.toISOString();
 }
 
 function isTranscriptStream(value: unknown): value is TranscriptStream {

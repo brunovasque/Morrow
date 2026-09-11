@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Actor } from "./types.ts";
 
 export const LIVE_ACTIVITY_SCHEMA_ID = "morrow.live-activity" as const;
@@ -95,6 +96,24 @@ export interface LiveActivityProjection {
   lastSequence: number;
   entries: readonly LiveActivityFeedEntry[];
   activities: readonly LiveActivitySnapshot[];
+}
+
+export interface LiveActivityReplayCursor {
+  streamId: string;
+  sequence: number;
+}
+
+export type LiveActivityReplayStatus = "ok" | "invalid" | "stale" | "future";
+
+export interface LiveActivityReplayResult {
+  status: LiveActivityReplayStatus;
+  streamId: string;
+  contractId: string;
+  cursor: LiveActivityReplayCursor;
+  nextCursor: LiveActivityReplayCursor;
+  retainedFromSequence: number;
+  headSequence: number;
+  events: readonly LiveActivityEvent[];
 }
 
 export type LiveActivityValidationCode =
@@ -197,6 +216,80 @@ export function projectContractLiveActivity(
   } catch {
     return projectionFailure("INVALID_EVENT", "event_collection_inspection_failed", 0);
   }
+}
+
+export function replayLiveActivity(
+  contractId: string,
+  inputs: readonly unknown[],
+  cursor?: unknown,
+  limit = 1_024,
+  retainedFromSequence = 1,
+): LiveActivityReplayResult {
+  const streamId = liveActivityStreamId(contractId);
+  const initial = { streamId, sequence: 0 } as LiveActivityReplayCursor;
+  if (!Number.isSafeInteger(retainedFromSequence) || retainedFromSequence < 1) {
+    return liveReplayResult("invalid", streamId, contractId, initial, initial, 1, 0, []);
+  }
+  const projection = projectContractLiveActivity(contractId, inputs);
+  if (!projection.ok) return liveReplayResult("invalid", streamId, contractId, initial, initial, retainedFromSequence, 0, []);
+  const parsed = parseLiveActivityCursor(cursor, streamId);
+  if (!parsed.ok) return liveReplayResult("invalid", streamId, contractId, initial, initial, retainedFromSequence, projection.projection.lastSequence, []);
+  const start = parsed.cursor;
+  const headSequence = projection.projection.lastSequence;
+  if (start.sequence > headSequence) return liveReplayResult("future", streamId, contractId, start, start, retainedFromSequence, headSequence, []);
+  if (start.sequence < retainedFromSequence - 1) return liveReplayResult("stale", streamId, contractId, start, start, retainedFromSequence, headSequence, []);
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > LIVE_ACTIVITY_MAX_EVENTS) {
+    return liveReplayResult("invalid", streamId, contractId, start, start, retainedFromSequence, headSequence, []);
+  }
+  const events: LiveActivityEvent[] = [];
+  for (let index = start.sequence; index < inputs.length && events.length < limit; index += 1) {
+    const input = readDataArrayElement(inputs, index);
+    if (!input.ok) return liveReplayResult("invalid", streamId, contractId, start, start, retainedFromSequence, headSequence, []);
+    const validation = validateLiveActivityEvent(input.value);
+    if (!validation.ok) return liveReplayResult("invalid", streamId, contractId, start, start, retainedFromSequence, headSequence, []);
+    events.push(validation.event);
+  }
+  const nextSequence = events.length === 0 ? start.sequence : start.sequence + events.length;
+  return liveReplayResult("ok", streamId, contractId, start, { streamId, sequence: nextSequence }, retainedFromSequence, headSequence, events);
+}
+
+function liveActivityStreamId(contractId: string): string {
+  return createHash("sha256").update(`morrow.live-activity-replay/1|${contractId}`, "utf8").digest("hex");
+}
+
+function parseLiveActivityCursor(value: unknown, streamId: string): { ok: true; cursor: LiveActivityReplayCursor } | { ok: false } {
+  try {
+    if (value === undefined) return { ok: true, cursor: { streamId, sequence: 0 } };
+    if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) return { ok: false };
+    const keys = Reflect.ownKeys(value);
+    if (keys.length !== 2 || !keys.every((key) => typeof key === "string" && (key === "streamId" || key === "sequence"))) return { ok: false };
+    const stream = Object.getOwnPropertyDescriptor(value, "streamId");
+    const sequence = Object.getOwnPropertyDescriptor(value, "sequence");
+    if (!stream || !sequence || !("value" in stream) || !("value" in sequence)
+      || stream.value !== streamId || !Number.isSafeInteger(sequence.value) || sequence.value < 0) return { ok: false };
+    return { ok: true, cursor: { streamId, sequence: sequence.value as number } };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function liveReplayResult(
+  status: LiveActivityReplayStatus,
+  streamId: string,
+  contractId: string,
+  cursor: LiveActivityReplayCursor,
+  nextCursor: LiveActivityReplayCursor,
+  retainedFromSequence: number,
+  headSequence: number,
+  events: readonly LiveActivityEvent[],
+): LiveActivityReplayResult {
+  return Object.freeze({
+    status, streamId, contractId,
+    cursor: Object.freeze({ ...cursor }),
+    nextCursor: Object.freeze({ ...nextCursor }),
+    retainedFromSequence, headSequence,
+    events: Object.freeze(events.map((event) => structuredClone(event))),
+  });
 }
 
 function projectContractLiveActivityUnchecked(

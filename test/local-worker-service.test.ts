@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +9,11 @@ import {
   LocalWorkerService,
   type LocalWorkerServiceConfiguration,
 } from "../src/local-worker-service.ts";
+import {
+  assertManagedRootDisjointFromPrivateStateRegion,
+  WorkerPrivateStateRoot,
+  workerPrivateStateRegionPath,
+} from "../src/worker-private-state.ts";
 
 async function harness() {
   const root = await mkdtemp(join(tmpdir(), "morrow-local-worker-service-"));
@@ -133,6 +139,78 @@ test("refuses roots outside .morrow, declared operator roots, and hidden target 
     } as LocalWorkerServiceConfiguration),
     /worker_configuration_unknown_field:dispatchEnabled/,
   );
+  assert.throws(
+    () => new LocalWorkerService({
+      ...configuration(managedRoot, [operatorRoot]),
+      privateStateRoot: join(root, "caller-controlled-private-root"),
+    } as LocalWorkerServiceConfiguration),
+    /worker_configuration_unknown_field:privateStateRoot/,
+  );
+});
+
+test("derives private state from the installation and reserves it across workers", async (t) => {
+  const { root } = await harness();
+  const workerId = `reserved-${randomUUID().slice(0, 12)}`;
+  const managedA = join(root, ".morrow", "workers", "worker-a");
+  const privateRootRegion = workerPrivateStateRegionPath();
+  const workerA = new LocalWorkerService({
+    ...configuration(managedA),
+    workerId,
+  });
+  t.after(async () => {
+    await workerA.stop().catch(() => undefined);
+    await rm(join(privateRootRegion, workerId), { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const started = await workerA.start();
+  assert.equal(started.state, "ready");
+  assert.ok(started.layout);
+  assert.equal(workerA.privateState().privateRoot, join(privateRootRegion, workerId));
+
+  const managedB = join(workerA.privateState().privateRoot, ".morrow", "workers", "worker-b");
+  const workerB = new LocalWorkerService({ ...configuration(managedB), workerId: "worker-b" });
+  await assert.rejects(workerB.start(), /worker_managed_root_overlaps_private_state_region/);
+
+  assert.throws(
+    () => assertManagedRootDisjointFromPrivateStateRegion(privateRootRegion),
+    /worker_managed_root_overlaps_private_state_region/,
+  );
+  assert.throws(
+    () => assertManagedRootDisjointFromPrivateStateRegion(join(privateRootRegion, ".morrow", "workers")),
+    /worker_managed_root_overlaps_private_state_region/,
+  );
+  assert.throws(
+    () => assertManagedRootDisjointFromPrivateStateRegion(join(privateRootRegion, "..")),
+    /worker_managed_root_overlaps_private_state_region/,
+  );
+  assert.throws(
+    () => assertManagedRootDisjointFromPrivateStateRegion(privateRootRegion.toUpperCase()),
+    /worker_managed_root_overlaps_private_state_region/,
+  );
+});
+
+test("uses one workerId validator for Local Worker and private-state factory", async (t) => {
+  const { root } = await harness();
+  t.after(async () => await rm(root, { recursive: true, force: true }));
+  const validIds = ["worker-1", "Worker.A_2", "a", "A".repeat(64)];
+  for (const workerId of validIds) {
+    assert.doesNotThrow(() => new LocalWorkerService({ ...configuration(join(root, ".morrow", "workers", workerId)), workerId }));
+    assert.doesNotThrow(() => WorkerPrivateStateRoot.forWorker(workerId, []));
+  }
+  const invalidIds = ["a/b", "a\\b", "a/../../outside", "C:\\outside", "\\\\server\\share", "/absolute", "."];
+  for (const workerId of invalidIds) {
+    assert.throws(
+      () => WorkerPrivateStateRoot.forWorker(workerId, []),
+      /worker_id_invalid/,
+      `factory must reject ${workerId}`,
+    );
+    assert.throws(
+      () => new LocalWorkerService({ ...configuration(join(root, ".morrow", "workers", "valid")), workerId }),
+      /worker_id_invalid/,
+      `Local Worker must reject ${workerId}`,
+    );
+  }
 });
 
 test("refuses to adopt a nonempty or other-worker managed root", async () => {

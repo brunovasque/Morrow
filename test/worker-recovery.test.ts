@@ -282,7 +282,9 @@ test("persists replay and ordering fences across coordinator restart", async (t)
 
 test("blocks a result whose idempotency key is not the claimed effect", async (t) => {
   const { stateRoot } = await makeRoot(t);
+  let effects = 0;
   const coordinator = await openCoordinator(stateRoot, async (request) => {
+    effects += 1;
     const result = success(request);
     return {
       ...result,
@@ -294,10 +296,20 @@ test("blocks a result whose idempotency key is not the claimed effect", async (t
   const accepted = await coordinator.accept(dispatchMessage());
   assert.equal(accepted.ok, true);
   assert.equal(coordinator.inspect().connectivity, "offline");
+  assert.equal(coordinator.inspect().liveness, "outcome_unknown");
   assert.deepEqual(coordinator.inspect().dispatches.map(({ status, reason }) => ({ status, reason })), [{
     status: "blocked",
     reason: "attempt_result_invalid",
   }]);
+  const queued = await coordinator.accept(dispatchMessage("2"));
+  assert.equal(queued.ok, true);
+  await connect(coordinator, "worker-session-2");
+  assert.equal(effects, 1);
+  assert.equal(coordinator.inspect().liveness, "outcome_unknown");
+  assert.deepEqual(coordinator.inspect().dispatches.map(({ status, reason }) => ({ status, reason })), [
+    { status: "blocked", reason: "attempt_result_invalid" },
+    { status: "queued", reason: "target_blocked_by_unknown_outcome" },
+  ]);
 });
 
 test("does not drain queued work while heartbeat says busy or draining", async (t) => {
@@ -712,6 +724,7 @@ test("kill after effect blocks unknown outcome on restart without replay", async
     reason: "execution_outcome_unknown_after_restart",
     attempts: 1,
   }]);
+  assert.equal(reopened.inspect().liveness, "outcome_unknown");
   await connect(reopened, "worker-session-after-crash");
   assert.equal(replayAttempts, 0);
   assert.equal(await readFile(effectPath, "utf8"), "dispatch-recovery-1\n");

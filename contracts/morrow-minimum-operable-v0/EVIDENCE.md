@@ -146,3 +146,165 @@ Mensagem de agente, merge ou build verde isolado não é evidência suficiente.
 - Regressão pós-merge: `npm ci` GREEN; focused `42/42`; `npm test` `214/214`; `git diff --check` GREEN; D-013 não ocorreu.
 - Resultado exato do reconciliador em worktree limpa: `allowed=false`, `state=BLOCKED_STATE_DIVERGENCE`, `nextPrId=P4-PR03`, `nextAuthorizedAction=START_P4_PR03`, `reasons=[git_branch_mismatch:mvo/p4-pr02-proven-record]`. A decisão auditada é `EXPECTED_DETACHED_CONTEXT_DIVERGENCE`: em detached HEAD, `git branch --show-current` é vazio e o reconciliador é branch-aware. Isso não representa regressão do artefato integrado.
 - PR #18 foi o único veículo de integração do produto/código. A closure-record somente documental foi transportada pela PR #19 e integrada no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`; não é nova unidade contratual, não contém código/runtime/testes, não reinicia A-001 ou regressão de produto e não constitui P4-PR03. P4-PR03 ainda não foi iniciada e não está bloqueada por essa closure-record.
+
+## START_P4_PR03 — kickoff e PRE_DISPATCH
+
+- estado atual: `P4-PR03 = RUNNING`; `P4-PR02 = PROVEN`; nenhuma execução de código de P4-PR03 começou nesta sessão.
+- base integrada fixada: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` em `phase-2/runtime-v0`.
+- branch de execução: `mvo/p4-pr03-replay-rehydration`, criada diretamente dessa base.
+- contrato: `MORROW-MVO-001`, versão `1.0`, addendum efetivo `A-001`; `A-001` é exclusivo de P4-PR02 e não se aplica a P4-PR03.
+- map step/route: `P4-PR03` / `REPLAY_REHYDRATION_CURSORS_LIVENESS`.
+- objetivo único: implementar replay/reidratação, cursores e liveness após restart.
+- critério de conclusão: o cliente retoma sem duplicar ou perder eventos e distingue esperas válidas, sessão viva/morta, Worker offline/reiniciado, lease stale e falha real.
+- débitos obrigatórios, classificados como `REQUIRED_BLOCKER`: `D-014` hostile clock conversion; `D-015` snapshot TOCTOU; `D-016` coerência verificável de `redactionCount` reidratado; `D-017` identidade recuperável de lease/instância para impedir PID reuse.
+- escopo adicional obrigatório: ordering; cursor válido, stale, future e invalid; restart durante e depois da persistência; redaction/segredos preservados após reidratação.
+- allowed paths iniciais: `src/stream-transcript.ts`, `src/worker-recovery.ts`, testes correspondentes, e `src/event-log.ts` e/ou `src/live-activity.ts` somente se comprovadamente necessários para cursor/replay real; documentação contratual de P4-PR03.
+- forbidden: P4-PR04; API/UI multi-session; P3/ConPTY; `D-013`; deploy; Enova; qualquer outro repositório; autorização genérica para todo `src/`; package files não necessários ao objetivo.
+- segurança: Security Review normal, independente do Executor, obrigatório sobre o candidate completo antes da integração; nenhuma exceção A-001 será reutilizada.
+- regressão final obrigatória: focused P4-PR03; focused transcript/P4-PR02; `npm test`; `git diff --check`; `npm run contract:reconcile`; validação contratual aplicável; contraprovas de restart durante/depois da persistência, replay inicial/intermediário, cursor no limite/invalid/stale/future, ordering, dedup/loss, snapshot adulterado/truncado, troca concorrente/reparse/symlink quando aplicável, hostile clock, metadata incoerente, PID reuse, lease stale, sessão viva/morta, restart repetido e preservação de redaction/segredos.
+- RED obrigatório antes da correção: criar e executar contraprovas vermelhas para `D-014`..`D-017` e para as classes relevantes de replay/cursor/restart; manter cada RED causal e reproduzível no candidate.
+- regressão herdada: testes aceitos de transcript/P4-PR02, baseline P3 e suíte completa permanecem obrigatoriamente verdes; não repetir a cerimônia extraordinária de A-001 da P4-PR02.
+- continuidade: `SESSION_REUSE_BY_DEFAULT`; o Executor permanece na mesma sessão durante implementação e correções. Sessão nova somente para Security Reviewer independente e Auditor independente.
+- routing/runtime: `manual`; access mode `quota-session`; modelo `GPT-5.6 Luna`; effort `high`; sem API; `write mode: pr-only`; workspace restrito a `D:\Morrow` e à branch dedicada.
+- decisões do dono: nenhuma aberta; `P4-PR04` fora de escopo; `D-013` não entra nesta unidade; Security Review normal independente é gate antes da integração.
+- perguntas bloqueantes: nenhuma.
+
+### TASK — EXECUTOR P4-PR03
+
+```text
+Base: cd7113febd147925cc5a5ab3557cb1d2ea48d1dc
+Branch: mvo/p4-pr03-replay-rehydration
+Objetivo único: implementar replay/reidratação, cursores e liveness após restart.
+
+Obrigatórios:
+- D-014 hostile clock conversion, com sanitização fail-closed;
+- D-015 snapshot TOCTOU, vinculando validação e leitura ao mesmo handle/mecanismo comprovável;
+- D-016 redactionCount reidratado coerente e verificável com conteúdo/stream;
+- D-017 identidade de lease/instância recuperável, não apenas PID reutilizável;
+- replay sem duplicação e sem perda, ordering e cursor válido/stale/future/invalid;
+- restart durante e depois da persistência;
+- distinção de sessão viva, sessão morta, espera válida, Worker offline e falha real;
+- redaction e segredos preservados após reidratação.
+
+Antes da correção, prove RED causal e reproduzível para D-014..D-017 e para replay/cursor/restart.
+
+Allowed paths:
+- src/stream-transcript.ts
+- src/worker-recovery.ts
+- testes correspondentes
+- src/event-log.ts e/ou src/live-activity.ts somente se necessários para replay/cursor real
+- documentação contratual de P4-PR03
+
+Forbidden: P4-PR04, API/UI multi-session, P3/ConPTY, D-013, deploy, Enova,
+outros repositórios e autorização genérica para todo src/.
+
+Antes de solicitar integração, passe focused P4-PR03, focused transcript/P4-PR02,
+npm test, git diff --check, npm run contract:reconcile, validação contratual e
+as contraprovas de restart/cursor/order/dedup/loss listadas no manifesto.
+Security Reviewer independente deve revisar o candidate completo antes da integração.
+Mantenha SESSION_REUSE_BY_DEFAULT durante implementação/correções; sessões novas
+somente para Security Reviewer e Auditor independentes. Não execute push, merge,
+deploy nem inicie P4-PR04.
+```
+
+- resultado PRE_DISPATCH: manifesto completo e autorizado para handoff ao Executor; o reconciliador deve confirmar `READY_FOR_EXECUTION`, `nextPrId: P4-PR03` e `nextAuthorizedAction: START_P4_PR03` em worktree limpa nesta branch.
+
+## P4-PR03 — correção arquitetural V2 descendente de `51601a2`
+
+- objetivo desta correção: fechar root authority configurável/adulterável, capability como MAC oracle genérico e CAS apenas intra-instância, incluindo durabilidade da âncora; o formato experimental `morrow.event-log/3` e `.event-log-key-v1` permanece inválido sem migração automática;
+- `WorkerPrivateStateRoot` foi criado em `src/worker-private-state.ts`. A raiz é absoluta, canonicalizada, marcada com identidade estável de instalação/Worker, validada fora das managed roots e protegida contra symlink/junction/reparse; o `LocalWorkerService` só aceita a opção no bootstrap confiável, e o default do Event Log usa o caminho fixo da instalação derivado do módulo, nunca `process.cwd()`;
+- a autoridade persistente agora vive no estado privado do Worker e o Event Log recebe somente capability opaca vinculada a `authorityRef`, `eventLogId`, `contractId`, `streamId` e `epoch`. Não há `authenticateEvent(domain)`/`verifyEvent(domain, ...)`; os domínios internos são fixos `morrow.event-log/auth/v4` e `morrow.event-log/head/v1`, separados do transcript;
+- a âncora externa usa journal append-only autenticado com `PREPARE`, `COMMIT` e `ABORT`; cada registro é escrito integralmente e `FileHandle.sync()` é chamado. Tail parcial, corrupção, anchor ahead, log ahead, divergência, rollback e incerteza de crash bloqueiam sem truncar, apagar evidência ou regravar automaticamente;
+- REDs reproduzidos e GREEN: root dentro da managed root, parent junction, caller com storageRoot, perda de authority após histórico, rebootstrap, capability cross-contract/cross-stream e domínio arbitrário; dois processos no mesmo `expectedPrevious` produziram exatamente um vencedor e um `event_log_anchor_cas_conflict`; lock stale foi recuperado somente com endpoint livre e binding válido, enquanto lease PID-only foi rejeitado;
+- regressões mantidas: D-014, D-015, D-016, D-017, replay/cursor, recovery/liveness, ordering/dedup/loss e transcript/redaction P4-PR02. Bloom de 8 MiB permanece P3/informational e não foi redesenhado; nenhum segredo aparece em JSONL, journal, binding, erro, inspect ou evidência;
+- focused executado nesta correção: governance `22/22`, P4-PR03 `29/29`, transcript `42/42`, worker-recovery `21/21`, live-activity `8/8`, local-worker `10/10`; `npm test` padrão `248/248` GREEN, incluindo ConPTY; execução serial `248/248` GREEN; `git diff --check` passou e `contract:reconcile` em worktree limpa retornou `allowed=true`, `READY_FOR_EXECUTION`, sem razões.
+
+## P4-PR03 — evidência factual do Executor
+
+- D-014 RED: conversão de `Date` hostil podia lançar fora da conversão sanitizada em transcript e recovery. GREEN: toda conversão de clock aceita somente string, número ou `Date` convertível, captura falha de getter/conversão e retorna apenas `transcript_clock_invalid` ou `worker_recovery_clock_invalid`, sem payload hostil.
+- D-015 RED: a leitura anterior usava inspeção de caminho seguida de `readFile`, deixando a janela de troca entre validação e conteúdo; a contraprova same-size aceitou o externo quando as identidades não eram comparadas no primeiro `fstat`. GREEN: snapshot é aberto uma vez, a identidade do handle é vinculada ao objeto inicialmente validado, tipo/tamanho/conteúdo são conferidos no mesmo handle e o caminho é conferido ao final; symlink/reparse/troca/truncamento falham fechado. Contraprovas estão em `test/p4-pr03-replay.test.ts`.
+- D-016 RED: snapshot com checksum recalculado, placeholder artificial e `redactionCount` falso era aceito. GREEN: cada registro atual carrega proveniência mínima versionada (`hmac-sha256-v1`) com HMAC autenticando formato, identidade do transcript, ordinal, tempo, digest de entrada, identidade do registro, conteúdo, stream, writer, `redactionCount` e `sensitiveInput`; a chave interna do root não expõe segredo de usuário. Não há downgrade automático: snapshot atual sem formato/proveniência ou com HMAC inválido falha fechado; não foi encontrada obrigação contratual de abrir legacy automaticamente.
+- D-017 RED: lease stale com PID numericamente vivo era tratado como ativo. GREEN: lease de recovery e transcript mantém endpoint nomeado da instância; PID não é autoridade. Instância viva continua exclusiva pelo endpoint, enquanto lease stale/PID reutilizado é recuperável após o endpoint ser liberado.
+- Replay GREEN: a correção atual rejeita automaticamente os formatos experimentais `morrow.event-log/3` e `.event-log-key-v1`. O envelope `morrow.event-log/4` vincula sequência, tag autenticada anterior, identidade do evento/contrato e stream; a capability opaca recebe HMAC no domínio `morrow.event-log/auth/v4`, enquanto a âncora externa usa `morrow.event-log/head/v1`. A autoridade persistente fica no boundary do Secret Broker, fora da raiz gerenciada do Event Log; nenhum segredo aparece no JSONL, âncora, sidecar, erro, inspect, retorno público ou evidência. O scanner mantém teto de 1 MiB por record durante chunks, Bloom fixo de 8 MiB e continuidade sem materializar o histórico por limite. Reorder, gap, perda, duplicata, rewrite integral, rollback de head, cópia antiga, troca conjunta com sidecar, tag inválida, divergência de root/stream/contrato, anchor ahead e log ahead falham fechado; `prepared` sem append aborta somente quando o log ainda coincide com `expectedPrevious`, e append completo antes do commit é finalizado deterministicamente. `replayLiveActivity` usa sequência/identidade próprios; transcript usa ordinal próprio e rejeita gaps.
+- Reidratação GREEN: snapshot checksum/políticas/ordenação/redaction continuam fail-closed; recovery mantém `queued`, `blocked`, `failed`, `completed` e `outcome_unknown` distintos, sem repetir efeito concluído ou efeito de resultado desconhecido após restart. A view expõe `liveness` derivado sem colapsar `connectivity` ou o motivo durável.
+- Provas focadas desta correção descendente de `d58b3f44b1dd7b2daf883fe103af8f0993226691`: P4-PR03 `27/27`; governance/Secret Broker `18/18`; transcript `42/42`; worker-recovery `21/21`; live-activity `8/8`; suíte completa `242/242`; `git diff --check` GREEN. RED independente no candidate anterior foi rewrite integral com alteração/remoção/reindex/inserção e SHA público refeito, aceito pela cadeia não autenticada; GREEN atual rejeita essas classes pela capability HMAC e pela âncora externa. As contraprovas atuais cobrem rollback `1..5` para `1..3`, restauração integral antiga, substituição conjunta log+sidecar, parent junction, prepared sem append, append completo antes do commit, anchor ahead, log ahead sem prepared, âncora corrompida, root/key ausente ou corrompida, root diferente, cursor hostil e restart/reopen válido. A medição anterior do scanner permanece indicativa: limite pequeno retorna somente a janela solicitada e memória não cresce com IDs do histórico; Bloom de 8 MiB é preservado como finding P3/informational, sem redesenho.
+
+## P4-PR03 — correção de configuração do Local Worker e bootstrap concorrente
+
+- objeto desta correção: candidate bloqueado `18d2375b40439f6927dbccc294fb31a98e015fe6`, parent `ad7d1da613c237bb326c61b1cc164bd022e977c2`, branch `mvo/p4-pr03-replay-rehydration`; escopo restrito a `src/local-worker-service.ts`, `src/worker-private-state.ts`, `src/governance-registries.ts`, testes correspondentes e esta evidência;
+- P2-01 RED reproduzido: no candidate, `LocalWorkerServiceConfiguration.privateStateRoot` permitia iniciar Worker A com private root dentro da managed root já pertencente ao Worker B. GREEN: `privateStateRoot` foi removido da configuração operacional; `LocalWorkerService` usa somente `WorkerPrivateStateRoot.forWorker()`, que deriva `private\worker-installation\<workerId>` a partir do módulo/instalação. A região fixa é reservada lexicalmente antes de `mkdir`, com comparação Windows case-insensitive e normalização de `..`; managed roots iguais, ancestrais ou descendentes são rejeitadas, e as cercas existentes de canonicalização, symlink/junction/reparse continuam antes da criação e após `realpath`;
+- contraprova cross-worker GREEN: Worker A inicia com private root derivada; managed root B sob essa private root é recusada antes de criação com `worker_managed_root_overlaps_private_state_region`. Campo caller-controlled, igualdade, ancestralidade, descendência, spelling em case diferente e caminho com `..` são recusados. O `bootstrap()` com caminho temporário permanece apenas como factory explícita dos testes de storage, não é aceito pela configuração do Local Worker;
+- P2-02 RED reproduzido: a corrida de criação de binding/key alcançava `isAlreadyExists` indefinida e podia lançar `ReferenceError`. GREEN: o helper reconhece somente `Error.code === "EEXIST"`; permission, I/O, path inválido, reparse e corrupção continuam falhas fechadas. O focused multiprocesso usa oito processos independentes, não sobrescreve key/binding, não emite exceção bruta e reabre a mesma autoridade; dez execuções consecutivas do arquivo governance passaram `23/23` sem flakiness;
+- regressões preservadas e revalidadas: CAS multiprocesso `1 winner/1 event_log_anchor_cas_conflict`, stale lock/PID reuse, journal PREPARE/COMMIT/ABORT e `FileHandle.sync()`, rollback e cópia antiga, log+authority replacement, parent junction, key ausente após histórico, D-014, D-015, D-016, D-017, replay/cursor, recovery/liveness, transcript/redaction e Bloom bounded;
+- resultados desta correção: focused P4-PR03 `29/29`, governance `23/23`, Local Worker `11/11`, transcript/recovery/live `71/71`, suíte completa `250/250`, `git diff --check` GREEN. `npm run contract:reconcile` deve ser executado no congelamento do candidate e seu resultado será registrado junto ao SHA final;
+
+## P4-PR03 — validação canônica de `workerId`
+
+- RED reproduzido no candidate `ea4bcaa9fd8d2b3de0f079ac05f3ba00165a3d1b`: `WorkerPrivateStateRoot.forWorker()` aceitava identificadores com `/`, incluindo composição com `..`, e podia produzir private root fora de `private\\worker-installation\\<workerId>`; as classes `\\`, absoluto, drive, UNC e `.` eram cobertas como entradas hostis da factory;
+- GREEN: a única primitive `isValidWorkerId()` agora vive em `src/worker-private-state.ts` e é usada por `LocalWorkerService`, `WorkerPrivateStateRoot.forWorker()` e validação de bootstrap/marker. A validação ocorre antes de `join`, `resolve`, canonicalização ou filesystem; exige exatamente o formato previamente aceito pelo Local Worker: primeiro caractere alfanumérico, seguido por no máximo 63 caracteres alfanuméricos, `.`, `_` ou `-`;
+- a factory de produção sempre acrescenta exatamente um segmento validado sob `D:\\Morrow\\private\\worker-installation`, sem separadores, drive, UNC ou navegação. A reserva global e a checagem canônica existente permanecem como defesa adicional;
+- contraprovas GREEN: separadores, traversal, path absoluto/drive/UNC, `.` e diferenças de case são recusados; IDs legítimos `worker-1`, `Worker.A_2`, `a`, `A` repetido 64 vezes e `a..b` são aceitos sem divergência entre Local Worker e factory. Bootstrap e restart legítimos preservam a autoridade;
+- regressões desta correção: focused P4-PR03 `29/29`, governance `23/23`, Local Worker `12/12`; D-014..D-017, CAS multiprocesso, rollback, rebootstrap, journal, replay/cursor, recovery/liveness, transcript/redaction e parent junction permanecem GREEN. O novo candidate é descendente de `ea4bcaa9fd8d2b3de0f079ac05f3ba00165a3d1b` e não altera Event Log, transcript, recovery ou Live Activity;
+
+## P4-PR03 — candidate final e Control Root documental
+
+- `EXECUTION_CANDIDATE_SHA`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`;
+- parent: `ea4bcaa9fd8d2b3de0f079ac05f3ba00165a3d1b`;
+- base contratual: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`;
+- branch: `mvo/p4-pr03-replay-rehydration`;
+- o delta total base→candidate permanece dentro da P4-PR03; não contém P4-PR04, P3/ConPTY, D-013, package drift, UI/API multi-session, deploy ou outro repositório;
+- `SECURITY_REVIEW_GREEN — P4_PR03_READY_FOR_INTEGRATION_PREFLIGHT`, associado exatamente ao Execution Root `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`; P1 nenhum, P2 nenhum, directory sync P3 operacional, Bloom P3/informational, zero scope drift e zero mutação pelo Security Reviewer;
+- resultados fresh: governance/private state `23/23`; Local Worker `12/12`; P4-PR03 `29/29`; transcript `42/42`; recovery `21/21`; Live Activity `8/8`; bootstrap multiprocessado `10 × 8` sem flakiness; CAS `1 winner / 1 event_log_anchor_cas_conflict`; `npm test` final `251/251`; `git diff --check` GREEN; `npm run contract:reconcile` `allowed=true`;
+- a primeira full regression teve EBUSY isolado em ConPTY; o retry integral passou `251/251`, sem reprodução causal; o evento foi classificado como não bloqueante sob D-013 e nenhuma alteração P3/ConPTY foi feita;
+- este commit é somente `CONTROL_ROOT_DOCUMENTARY_RECONCILIATION`; `CONTROL_ROOT_SHA` é o SHA deste commit documental, capturado após sua criação. Ele não substitui nem reidentifica o `EXECUTION_CANDIDATE_SHA`; Reviewer/Auditor devem comparar ambos mecanicamente e confirmar zero mudança em `src/`, `test/` e package files após o Execution Root.
+
+## P4-PR03 — Independent Reviewer Gate e primeira auditoria
+
+- `EXECUTION_ROOT_SHA`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`;
+- Control Root revisado pelo Reviewer: `02d64f74ebff46bb8f79e545bcc60f6666f8da2c`;
+- Reviewer Independent Gate: sessão independente do Executor, modo read-only, Execution Root `d63a19c2...`, Control Root `02d64f74...`, genealogia GREEN, delta documental somente nos quatro documentos canônicos, Security Review fresh, cobertura contratual fresh, scope GREEN, reconciler `allowed=true`, zero mutação;
+- resultado factual do Reviewer: `REVIEW_READY_FOR_AUDITOR`;
+- Auditor independente executado depois do Reviewer: `AUDIT_BLOCKED`;
+- classificação do bloqueio da primeira auditoria: `documentation`, `independence evidence`, `authorization`;
+- confirmações do Auditor: Execution Root correto, Control Root correto, genealogia GREEN, delta técnico GREEN, Security Review fresh, cobertura/regressão suficiente, scope GREEN, EBUSY/D-013 não bloqueante, P3 conhecidos não bloqueantes e zero mutação;
+- causa exclusiva do bloqueio: `REVIEW_READY_FOR_AUDITOR` ainda não estava versionado e `LIVE_STATUS` ainda projetava `P4_PR03_INDEPENDENT_REVIEW_PENDING`;
+- esta reconciliação é o novo Control Root documental descendente de `02d64f74...`; `NEW_CONTROL_ROOT_SHA` é o SHA deste único commit documental, capturado após sua criação. Não é novo candidate técnico e não altera o `EXECUTION_ROOT_SHA`;
+- autorização: Auditor recheck pendente; `AUDIT_GREEN — P4_PR03_READY_FOR_INTEGRATOR` é obrigatório antes de qualquer push, abertura de PR, integração ou merge.
+
+## P4-PR03 — Auditor recheck GREEN
+
+- `EXECUTION_ROOT_SHA`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a` permanece imutável;
+- Control Root anterior: `c242c06a3cfa31f9b04ce28a325e4e434b4b0f17`;
+- Control Root auditado no recheck: `c242c06a3cfa31f9b04ce28a325e4e434b4b0f17`;
+- o Auditor independente revalidou os blockers anteriores — `documentation`, `independence evidence` e `authorization` — e confirmou que todos foram resolvidos;
+- confirmações do Auditor: genealogia GREEN; delta documental somente docs; zero mutação técnica; Reviewer versionado e independente; Security Review fresh; estado canônico coerente; reconciler `allowed=true`; zero mutação pelo Auditor;
+- resultado exato: `AUDIT_GREEN — P4_PR03_READY_FOR_INTEGRATOR`;
+- determinação do Auditor: `AUDIT_VERDICT_MUST_BE_VERSIONED_BEFORE_INTEGRATOR`;
+- este commit é somente `CONTROL_ROOT_DOCUMENTARY_RECONCILIATION`, descendente do Control Root anterior. `NEW_CONTROL_ROOT_SHA` é o SHA deste único commit documental, capturado após sua criação; não é novo candidate técnico e não substitui o `EXECUTION_ROOT_SHA`;
+- autorização exata: o Integrator pode somente fazer push da branch aprovada, abrir/atualizar PR contra `phase-2/runtime-v0`, capturar PR number/id, head/base SHA e URL/metadata factual disponível, executar os gates pós-abertura exigidos e retornar ao próximo gate. Merge não está autorizado; qualquer alteração técnica exige novo candidate e novo ciclo de review;
+- a sequência histórica fica preservada: Security GREEN → Reviewer GREEN → primeira auditoria `AUDIT_BLOCKED` por documentação → reconciliação documental → Auditor recheck `AUDIT_GREEN` → Integrator.
+
+## P4-PR03 — reconciliação documental da identidade da PR #21
+
+- `EXECUTION_ROOT_SHA`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`; permanece imutável e não é reidentificado pelo commit documental.
+- `OPENING_CONTROL_ROOT_SHA`: `de47fd7a3f919a7094a16c051548cef0a47bf51a`.
+- Identidade estável da PR: repositório `brunovasque/Morrow`; PR `#21`; URL `https://github.com/brunovasque/Morrow/pull/21`; head branch `mvo/p4-pr03-replay-rehydration`; base branch `phase-2/runtime-v0`.
+- Opening PR head SHA: `de47fd7a3f919a7094a16c051548cef0a47bf51a`; opening base SHA: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`.
+- Estado factual na abertura: PR `OPEN`, não draft, mergeable; branch remota criada; remote head na abertura igual a `de47fd7a3f919a7094a16c051548cef0a47bf51a`; PR criada contra `phase-2/runtime-v0`.
+- Gates frescos preservados: Security `GREEN`; Reviewer `GREEN` com `REVIEW_READY_FOR_AUDITOR`; Auditor `GREEN` com `AUDIT_GREEN — P4_PR03_READY_FOR_INTEGRATOR`; Integrator autorizado para a etapa pós-abertura.
+- Abertura registrou nenhum check automático reportado, diff de `16 paths`, zero workflow/package drift e `npm run contract:reconcile` como `allowed=true`, `READY_FOR_EXECUTION`, `START_P4_PR03`.
+- Merge está explicitamente proibido. O Integrator informou zero mutação local; o push autorizado é normal/fast-forward, sem force.
+- Estado documental: `PR_IDENTITY_VERSIONED`. Isso versiona a identidade estável e não autoriza merge, não cria unidade nova e não transforma o commit documental em requisito recursivo de conter seu próprio SHA como head atual da PR.
+- O novo commit será o novo Control Root documental, descendente do opening Control Root. Isso não cria nova Execution Root, não muda a unidade P4-PR03 e não exige re-review técnica apenas por esta reconciliação documental.
+- Próximo ator único: o mesmo Integrator persistente, somente para confirmar o novo Control Root, fazer push fast-forward normal da mesma branch, confirmar que a PR #21 continua a mesma PR e que o remote head é o novo Control Root, executar/observar gates pós-PR e retornar ao próximo gate canônico. P4-PR03 permanece `RUNNING` e não `PROVEN`; P4-PR04 permanece `PENDING`.
+
+## P4-PR03 — MERGE_READY versionado antes do merge
+
+- `EXECUTION_ROOT_SHA`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`; permanece imutável e continua sendo o único candidate técnico.
+- `OPENING_CONTROL_ROOT_SHA`: `de47fd7a3f919a7094a16c051548cef0a47bf51a`.
+- Current Control Root/head antes deste registro: `8e819a9633f70c210b663db4edea53f6350ed347`.
+- PR: `#21`, branch `mvo/p4-pr03-replay-rehydration`, base `phase-2/runtime-v0` em `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`.
+- Auditor pré-merge: `MERGE_READY`; determinação: `MERGE_READY_MUST_BE_VERSIONED_BEFORE_MERGE`; blockers: `NONE`.
+- Security `GREEN`, Reviewer `GREEN`, Auditor pré-PR `GREEN`; nenhum novo julgamento técnico é criado por este registro documental.
+- `MERGE_READY` está versionado; o merge da PR #21 fica autorizado sob as cercas mecânicas aplicáveis. P4-PR03 permanece `RUNNING` até a reconciliação pós-merge e o Auditor final; P4-PR04 permanece `PENDING`.
+- Este commit é exclusivamente documental/control-plane, não cria nova Execution Root, não altera código/testes/package/workflow/deploy e não é novo candidate técnico. O SHA deste commit é capturado externamente pelo Integrator como `PRE_MERGE_CONTROL_ROOT_SHA`, sem self-reference documental.

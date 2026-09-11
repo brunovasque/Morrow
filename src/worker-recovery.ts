@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { createServer, type Server } from "node:net";
 import { lstat, mkdir, open, readFile, realpath, rename, unlink } from "node:fs/promises";
 import { isAbsolute, join, parse, relative, resolve } from "node:path";
 import type {
@@ -16,6 +18,7 @@ import {
 } from "./worker-protocol.ts";
 
 export type WorkerConnectivity = "offline" | "connecting" | "online";
+export type WorkerLiveness = WorkerConnectivity | "blocked" | "failed" | "outcome_unknown";
 export type RecoveryDispatchStatus = "queued" | "running" | "completed" | "failed" | "blocked";
 
 export interface WorkerRecoveryAttemptRequest {
@@ -66,6 +69,7 @@ export interface WorkerRecoveryView {
   workerSessionId: string | null;
   leaseExpiresAt: string | null;
   connectivityReason: string;
+  liveness: WorkerLiveness;
   lastSeenAt: string | null;
   revision: number;
   dispatches: RecoveryDispatchView[];
@@ -189,9 +193,9 @@ const terminalExecutionFailures = new Set([
   "CLEANUP_FAILED",
 ]);
 const unknownOutcomeReasons = new Set([
+  "attempt_result_invalid",
   "execution_outcome_unknown_after_restart",
   "attempt_outcome_unknown",
-  "attempt_result_invalid",
   "worker_disconnected_during_execution",
   "heartbeat_lease_expired_during_execution",
   "worker_session_replaced_during_execution",
@@ -537,6 +541,7 @@ export class WorkerRecoveryCoordinator {
       workerSessionId: connection.workerSessionId,
       leaseExpiresAt: connection.leaseExpiresAt,
       connectivityReason: connection.reason,
+      liveness: deriveLiveness(connection, this.state.dispatches),
       lastSeenAt: connection.lastSeenAt,
       revision: this.state.revision,
       dispatches: this.state.dispatches.map(viewRecord),
@@ -789,14 +794,29 @@ class AtomicWorkerRecoveryStore {
 
   async load(workerId: string, maximum: number): Promise<RecoveryState | null> {
     let raw: string;
+    let handle: Awaited<ReturnType<typeof open>> | null = null;
     try {
       const entry = await lstat(this.filePath);
       if (entry.isSymbolicLink() || !entry.isFile()) throw new Error("worker_recovery_snapshot_file_invalid");
       if (entry.size > maxRecoverySnapshotBytes) throw new Error("worker_recovery_snapshot_too_large");
-      raw = await readFile(this.filePath, "utf8");
+      handle = await open(this.filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      const before = await handle.stat();
+      if (before.isSymbolicLink() || !before.isFile() || !sameSnapshotIdentity(entry, before)) {
+        throw new Error("worker_recovery_snapshot_race_detected");
+      }
+      raw = await handle.readFile("utf8");
+      const after = await handle.stat();
+      const afterPath = await lstat(this.filePath);
+      if (after.isSymbolicLink() || !after.isFile() || after.size !== before.size
+        || Buffer.byteLength(raw, "utf8") !== before.size
+        || !sameSnapshotIdentity(entry, afterPath)) {
+        throw new Error("worker_recovery_snapshot_race_detected");
+      }
     } catch (error) {
       if (isNotFound(error)) return null;
       throw sanitizeStoreError(error, "worker_recovery_snapshot_read_failed");
+    } finally {
+      await handle?.close().catch(() => undefined);
     }
     if (Buffer.byteLength(raw, "utf8") > maxRecoverySnapshotBytes) {
       throw new Error("worker_recovery_snapshot_too_large");
@@ -844,70 +864,89 @@ class AtomicWorkerRecoveryStore {
   }
 }
 
+function sameSnapshotIdentity(
+  left: { dev: number; ino: number; size: number; mtimeMs: number },
+  right: { dev: number; ino: number; size: number; mtimeMs: number },
+): boolean {
+  return left.dev === right.dev && left.ino === right.ino
+    && left.size === right.size && left.mtimeMs === right.mtimeMs;
+}
+
 interface PersistedWorkerRecoveryLease {
   format: "morrow.worker-recovery-lease/v1";
   workerId: string;
   ownerId: string;
   processId: number;
+  instanceId: string;
   acquiredAt: string;
 }
 
 class WorkerRecoveryLease {
   private readonly lockPath: string;
   private readonly ownerId: string;
+  private readonly instanceId: string;
+  private readonly server: Server;
   private released = false;
 
-  private constructor(lockPath: string, ownerId: string) {
+  private constructor(lockPath: string, ownerId: string, instanceId: string, server: Server) {
     this.lockPath = lockPath;
     this.ownerId = ownerId;
+    this.instanceId = instanceId;
+    this.server = server;
   }
 
   static async acquire(root: string, workerId: string, now: string): Promise<WorkerRecoveryLease> {
     const lockPath = join(root, "worker-recovery-v1.lock");
+    const server = await acquireLeaseEndpoint(root);
     const ownerId = randomUUID();
+    const instanceId = randomUUID();
     const record: PersistedWorkerRecoveryLease = {
       format: "morrow.worker-recovery-lease/v1",
       workerId,
       ownerId,
       processId: process.pid,
+      instanceId,
       acquiredAt: now,
     };
 
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      let handle: Awaited<ReturnType<typeof open>> | null = null;
-      try {
-        handle = await open(lockPath, "wx", 0o600);
-        await handle.writeFile(`${JSON.stringify(record)}\n`, "utf8");
-        await handle.sync();
-        await handle.close();
-        return new WorkerRecoveryLease(lockPath, ownerId);
-      } catch (error) {
-        if (handle) await handle.close().catch(() => undefined);
-        if (!isAlreadyExists(error)) throw sanitizeStoreError(error, "worker_recovery_lease_acquire_failed");
-      }
+    try {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        let handle: Awaited<ReturnType<typeof open>> | null = null;
+        try {
+          handle = await open(lockPath, "wx", 0o600);
+          await handle.writeFile(`${JSON.stringify(record)}\n`, "utf8");
+          await handle.sync();
+          await handle.close();
+          return new WorkerRecoveryLease(lockPath, ownerId, instanceId, server);
+        } catch (error) {
+          if (handle) await handle.close().catch(() => undefined);
+          if (!isAlreadyExists(error)) throw sanitizeStoreError(error, "worker_recovery_lease_acquire_failed");
+        }
 
-      const existing = await readRecoveryLease(lockPath, workerId);
-      if (processIsAlive(existing.processId)) {
-        throw new Error("worker_recovery_coordinator_already_active");
+        await readRecoveryLease(lockPath, workerId);
+        const stalePath = `${lockPath}.stale.${randomUUID()}`;
+        try {
+          await rename(lockPath, stalePath);
+          await unlink(stalePath);
+        } catch (error) {
+          if (!isNotFound(error)) throw sanitizeStoreError(error, "worker_recovery_stale_lease_cleanup_failed");
+        }
       }
-      const stalePath = `${lockPath}.stale.${randomUUID()}`;
-      try {
-        await rename(lockPath, stalePath);
-        await unlink(stalePath);
-      } catch (error) {
-        if (!isNotFound(error)) throw sanitizeStoreError(error, "worker_recovery_stale_lease_cleanup_failed");
-      }
+      throw new Error("worker_recovery_lease_contention");
+    } catch (error) {
+      await closeLeaseEndpoint(server).catch(() => undefined);
+      throw error;
     }
-    throw new Error("worker_recovery_lease_contention");
   }
 
   async release(): Promise<void> {
     if (this.released) return;
     const existing = await readRecoveryLease(this.lockPath, null);
-    if (existing.ownerId !== this.ownerId || existing.processId !== process.pid) {
+    if (existing.ownerId !== this.ownerId || existing.instanceId !== this.instanceId) {
       throw new Error("worker_recovery_lease_owner_mismatch");
     }
     try {
+      await closeLeaseEndpoint(this.server);
       await unlink(this.lockPath);
     } catch (error) {
       if (!isNotFound(error)) throw sanitizeStoreError(error, "worker_recovery_lease_release_failed");
@@ -936,26 +975,22 @@ async function readRecoveryLease(lockPath: string, expectedWorkerId: string | nu
   }
   if (
     !isDataRecord(value)
-    || exactKeys(value, ["format", "workerId", "ownerId", "processId", "acquiredAt"]) !== null
+    || (exactKeys(value, ["format", "workerId", "ownerId", "processId", "acquiredAt"]) !== null
+      && exactKeys(value, ["format", "workerId", "ownerId", "processId", "instanceId", "acquiredAt"]) !== null)
     || value.format !== "morrow.worker-recovery-lease/v1"
     || !isIdentifier(value.workerId)
     || (expectedWorkerId !== null && value.workerId !== expectedWorkerId)
     || !isIdentifier(value.ownerId)
     || !positiveSafeInteger(value.processId)
+    || (value.instanceId !== undefined && !isIdentifier(value.instanceId))
     || !isTimestamp(value.acquiredAt)
   ) {
     throw new Error("worker_recovery_lease_invalid");
   }
-  return value as unknown as PersistedWorkerRecoveryLease;
-}
-
-function processIsAlive(processId: number): boolean {
-  try {
-    process.kill(processId, 0);
-    return true;
-  } catch (error) {
-    return !(error instanceof Error && "code" in error && error.code === "ESRCH");
-  }
+  return {
+    ...(value as unknown as Omit<PersistedWorkerRecoveryLease, "instanceId">),
+    instanceId: typeof value.instanceId === "string" ? value.instanceId : "legacy-pid-only",
+  };
 }
 
 function initialState(workerId: string, now: string): RecoveryState {
@@ -1246,10 +1281,69 @@ async function assertNoSymbolicLinkAncestors(path: string): Promise<void> {
 }
 
 function trustedNow(clock: WorkerRecoveryConfiguration["clock"]): string {
-  const value = clock ? clock() : new Date();
-  const milliseconds = value instanceof Date ? value.getTime() : typeof value === "number" ? value : Date.parse(value);
-  if (!Number.isFinite(milliseconds)) throw new Error("worker_recovery_clock_invalid");
-  return new Date(milliseconds).toISOString();
+  try {
+    const value = clock ? clock() : new Date();
+    let milliseconds: number;
+    if (value instanceof Date) milliseconds = value.getTime();
+    else if (typeof value === "number") milliseconds = value;
+    else if (typeof value === "string") milliseconds = Date.parse(value);
+    else throw new Error("clock_value_invalid");
+    if (!Number.isFinite(milliseconds)) throw new Error("clock_value_invalid");
+    return new Date(milliseconds).toISOString();
+  } catch {
+    throw new Error("worker_recovery_clock_invalid");
+  }
+}
+
+function deriveLiveness(
+  connection: RecoveryConnectionState,
+  dispatches: readonly RecoveryDispatchRecord[],
+): WorkerLiveness {
+  if (dispatches.some((record) => record.status === "blocked" && record.reason !== null && unknownOutcomeReasons.has(record.reason))) {
+    return "outcome_unknown";
+  }
+  if (connection.state !== "offline") return connection.state;
+  if (dispatches.some((record) => record.status === "failed")) return "failed";
+  if (dispatches.some((record) => record.status === "blocked")) return "blocked";
+  return "offline";
+}
+
+async function acquireLeaseEndpoint(root: string): Promise<Server> {
+  const identity = createHash("sha256").update(resolve(root).toLowerCase(), "utf8").digest("hex");
+  const endpoint = process.platform === "win32"
+    ? `\\\\.\\pipe\\morrow-worker-recovery-${identity}`
+    : join(root, ".worker-recovery-v1.sock");
+  const server = createServer((socket) => socket.destroy());
+  server.unref();
+  try {
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+      const onError = (error: NodeJS.ErrnoException) => {
+        server.removeListener("listening", onListening);
+        rejectPromise(error);
+      };
+      const onListening = () => {
+        server.removeListener("error", onError);
+        resolvePromise();
+      };
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(endpoint);
+    });
+    return server;
+  } catch (error) {
+    await closeLeaseEndpoint(server).catch(() => undefined);
+    if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+      throw new Error("worker_recovery_coordinator_already_active");
+    }
+    throw sanitizeStoreError(error, "worker_recovery_lease_endpoint_failed");
+  }
+}
+
+async function closeLeaseEndpoint(server: Server): Promise<void> {
+  if (!server.listening) return;
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    server.close((error) => error ? rejectPromise(error) : resolvePromise());
+  });
 }
 
 function trustedNowMs(clock: WorkerRecoveryConfiguration["clock"]): number {

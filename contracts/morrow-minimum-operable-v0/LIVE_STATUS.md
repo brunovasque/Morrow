@@ -3,7 +3,7 @@
 ## Snapshot atual
 
 - `snapshot_version`: `1.0`
-- `updated_at`: `2026-09-10`
+- `updated_at`: `2026-09-11`
 - `contract_version`: `1.0`
 - `effective_addenda`: `A-001`
 - `contract_state`: `READY_FOR_EXECUTION`
@@ -13,15 +13,25 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR03`
 - `active_route_node`: `REPLAY_REHYDRATION_CURSORS_LIVENESS`
-- `active_subaction`: `P4_PR03_PREFLIGHT`
+- `active_subaction`: `P4_PR03_MERGE_READY_VERSIONED`
 - `expected_branch_prefix`: `mvo/p4-pr03-`
-- `write_execution_allowed`: `no for integration/merge; START is coarse and not merge authorization`
+- `write_execution_allowed`: `no for implementation; authorized merge is allowed after MERGE_READY; START remains coarse and is not itself merge authorization`
 - `next_authorized_action`: `START_P4_PR03`
-- `next_authorized_actor`: `Orchestrator / Contract Engineer deve executar o preflight de P4-PR03; implementação somente após PRE_DISPATCH`
+- `next_authorized_actor`: `Integrator, somente para push fast-forward, merge protegido e regressão pós-merge; depois, Auditor final independente`
+- `execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
+- `opening_control_root_sha`: `de47fd7a3f919a7094a16c051548cef0a47bf51a`
+- `pr_identity_state`: `PR_IDENTITY_VERSIONED`
+- `pr_number`: `21`
+- `pr_head_sha_at_opening`: `de47fd7a3f919a7094a16c051548cef0a47bf51a`
+- `pr_base_sha_at_opening`: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`
+- `pr_state_at_opening`: `OPEN; não draft; mergeable`
+- `merge_ready_state`: `MERGE_READY`
+- `merge_ready_reason`: `MERGE_READY_MUST_BE_VERSIONED_BEFORE_MERGE`
+- `merge_authorized`: `yes`
 
 ## Próxima ação exata
 
-P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com Auditor pré-merge `MERGE_READY`, regressão pós-merge verde e Auditor final `P4_PR02_PROVEN_READY`. A prova local `GREEN_LOCAL_A-001` não equivale ao Security Review externo indisponível e não cria precedente. A closure-record foi integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`; P4-PR03 é a próxima unidade contratual, não foi iniciada e não está mais bloqueada por essa pendência documental.
+P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com Auditor pré-merge `MERGE_READY`, regressão pós-merge verde e Auditor final `P4_PR02_PROVEN_READY`. A closure-record foi integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. P4-PR03 permanece `RUNNING`, com Execution Root `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`, Control Root de abertura/head `de47fd7a3f919a7094a16c051548cef0a47bf51a`, base de abertura `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e branch `mvo/p4-pr03-replay-rehydration`. Security, Reviewer e Auditor estão `GREEN`; a identidade está versionada como `PR_IDENTITY_VERSIONED` para o repositório `brunovasque/Morrow`, PR #21, URL `https://github.com/brunovasque/Morrow/pull/21`, contra `phase-2/runtime-v0`. O Auditor pré-merge emitiu `MERGE_READY`, com `MERGE_READY_MUST_BE_VERSIONED_BEFORE_MERGE` e blockers `NONE`; essa determinação está versionada e o merge protegido da PR #21 está autorizado. P4-PR03 permanece `RUNNING` até a regressão pós-merge e o Auditor final independente; P4-PR04 permanece `PENDING`. `START_P4_PR03` permanece a ação coarse do reconciliador.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -43,7 +53,7 @@ Reconciliacao factual adicional de 2026-09-09: o A-001 do candidate `ba350658a39
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `PROVEN` | P4-PR02 `PROVEN` em PR #18 / merge `3738d787`; closure-record da PR #19 integrada em `a7f0f49`; regressão pós-merge e Auditor final verdes; P4-PR03 é a próxima unidade e ainda não foi iniciada |
+| P4 | `RUNNING` | P4-PR02 `PROVEN` em PR #18 / merge `3738d787`; closure-record da PR #19 integrada em `a7f0f49`; P4-PR03 `RUNNING` na branch `mvo/p4-pr03-replay-rehydration`, base `cd7113f`, rota replay/reidratação/cursor/liveness; P4-PR04 permanece fora de escopo |
 | P5 | `BLOCKED` | depende de P4 |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |
@@ -92,6 +102,24 @@ O A-001 completo foi executado por Security Reviewer independente GPT-5.6 Luna, 
 A cobertura incluiu C0/C1; CSI, REP, movimentos, insert/delete/erase, queries/private/intermediates; SGR; OSC/APC/DCS/PM/SOS; formas 7-bit/C1 e incompletas; CR/LF/CRLF/backspace; assignments bare/camel/Pascal/snake/kebab/dotted/quoted; CLI; Authorization/Bearer/tokens/private keys; JSON/YAML/PowerShell e multiline; chunk único, chunks arbitrários e 1-byte; boundaries; live fragment por fragmento; `inspect()`/snapshot/reopen; abort/capacity; autorização; retenção; checksum; root safety; symlink/junction; getters/proxies/objetos hostis; frozen/detached. Nenhum canário alcançou live, `inspect()`, disco ou reopen; findings P1, P2, P3 e informational de segurança foram nenhum. As fronteiras 4095/4096/4097/8191/8192/8193 passaram sem liberação de canário. As medianas independentes em chunks de 1 byte, para 2k/4k/8k/12k/16k, foram: comum `1.591 / 1.617 / 4.745 / 5.668 / 7.213 ms`; assignment seguro `0.988 / 1.870 / 3.558 / 5.762 / 8.417 ms`; terminal `1.071 / 1.837 / 3.802 / 4.330 / 5.917 ms`; string-control `0.714 / 1.376 / 2.450 / 3.658 / 5.127 ms`; LF `0.774 / 1.530 / 3.733 / 6.203 / 9.835 ms`; CRLF `0.891 / 1.696 / 3.383 / 5.570 / 8.887 ms`; combinado adversarial `0.974 / 2.010 / 5.963 / 6.158 / 8.104 ms`.
 
 Este registro atualiza somente o fato de que o gate A-001 exigido para o candidate passou. `GREEN_LOCAL_A-001` não equivale ao Security Review externo indisponível, não cria precedente para outras PRs, não torna P4-PR02 `PROVEN` e não autoriza por si só integração ou merge. P4-PR02 permanece `RUNNING`; a integração e a regressão pós-merge são etapas contratuais ainda requeridas. A projeção mecânica permanece `next_authorized_action: START_P4_PR02`.
+
+## Reconciliação factual atual — P4-PR03 — Reviewer versionado e Auditor recheck
+
+P4-PR03 permanece `RUNNING`. O `EXECUTION_ROOT_SHA` imutável é `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`; o Control Root anterior revisado era `02d64f74ebff46bb8f79e545bcc60f6666f8da2c`. O Reviewer independente já executado em modo read-only, em sessão independente do Executor, emitiu `REVIEW_READY_FOR_AUDITOR`.
+
+A primeira auditoria independente ocorreu depois do Reviewer e emitiu `AUDIT_BLOCKED`, classificado exclusivamente como `documentation`, `independence evidence` e `authorization`. O Auditor confirmou Execution Root e Control Root corretos, genealogia GREEN, delta técnico GREEN, Security Review fresh, cobertura/regressão suficiente, scope GREEN, EBUSY/D-013 não bloqueante, P3 conhecidos não bloqueantes e zero mutação. O bloqueio foi somente a ausência de versionamento do resultado do Reviewer e a projeção stale anterior.
+
+Esta reconciliação versiona o Reviewer sem retroceder para Reviewer nem repetir Security Review. O próximo ator é o mesmo Auditor independente para recheck de documentation, independence evidence, authorization e da separação mecânica dos roots. O Integrator permanece proibido até `AUDIT_GREEN — P4_PR03_READY_FOR_INTEGRATOR`; P4-PR04 continua `PENDING`.
+
+## Reconciliação factual atual — P4-PR03 — Auditor GREEN versionado
+
+P4-PR03 permanece `RUNNING`. O `EXECUTION_ROOT_SHA` imutável é `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`. O Control Root anterior era `c242c06a3cfa31f9b04ce28a325e4e434b4b0f17`; o Auditor revalidou esse objeto e o resultado é versionado por este novo Control Root documental.
+
+O Auditor independente revalidou os blockers anteriores — `documentation`, `independence evidence` e `authorization` — e confirmou que todos foram resolvidos. Confirmou também genealogia GREEN, delta somente documental, zero mutação técnica, Reviewer versionado e independente, Security Review fresh, estado canônico coerente, reconciler `allowed=true` e zero mutação pelo Auditor.
+
+Resultado factual: `AUDIT_GREEN — P4_PR03_READY_FOR_INTEGRATOR`. Determinação explícita: `AUDIT_VERDICT_MUST_BE_VERSIONED_BEFORE_INTEGRATOR`.
+
+O Integrator fica autorizado somente a fazer push da branch `mvo/p4-pr03-replay-rehydration`, abrir/atualizar a PR contra `phase-2/runtime-v0`, capturar PR number/id, head/base SHA e URL/metadata factual disponível, executar os gates pós-abertura exigidos pelo contrato e retornar ao próximo gate. Merge não está autorizado. Qualquer mudança técnica exige novo candidate e novo ciclo de review. P4-PR04 continua `PENDING`.
 
 ## Algoritmo determinístico de próxima ação
 
