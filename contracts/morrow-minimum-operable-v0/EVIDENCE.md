@@ -447,3 +447,15 @@ com blocker arquitetural real ou candidate completo pronto para o próximo gate.
 ```
 
 - resultado PRE_DISPATCH: autorizado para handoff ao Executor persistente nesta branch, com `nextPrId=P4-PR04`, `nextAuthorizedAction=START_P4_PR04`, worktree limpa e dependências satisfeitas.
+
+## P4-PR04 — candidate local multi-session stream
+
+- base fixa: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`; kickoff: `6f593eab2b843220572d4849c6f1ff1ab8e3a6ee`; branch: `mvo/p4-pr04-multi-session-stream`; execução somente em `D:\Morrow`;
+- implementação: `src/worker-session-stream.ts` compõe `TerminalSessionManager`, `StreamRedactor` e `JsonlEventLog`; não cria runtime paralelo, transporte externo ou dependência de UI. Schema: `schema/worker-session-stream.v1.schema.json`; contrato factual: `runtime/MULTI_SESSION_STREAM_API.md`;
+- RED inicial: antes da nova composição, `test/worker-session-stream.test.ts` falhou com `ERR_MODULE_NOT_FOUND` para `src/worker-session-stream.ts`. REDs de composição encontrados em seguida: conclusão do terminal resolvia antes da persistência do tail/EXIT e argumentos sensíveis apareciam no evento START; ambos foram corrigidos antes do congelamento;
+- GREEN central: duas sessões reais Node simultâneas (`T-A`/`T-B`) em workspaces distintos emitiram saída incremental antes do término, com listeners por sessão, ids `${sessionId}:${sequence}`, streams distintos, replay do início/intermediário/head, cursor estrangeiro/hostil/future/stale explícitos, sem duplicação/perda, e reidratação terminal após reopen;
+- restart de sessão incompleta: processo real ainda ativo foi fechado do observador e reaberto; o log durável foi reconstruído como `recoverable`/`offline`/não terminal, sem convertê-lo em completed. Sessões encerradas permaneceram `completed`/`terminal`;
+- redaction: o mesmo `StreamRedactor` bounded protege argumentos START e stdout/stderr antes de live e Event Log; replay/reopen retornam os mesmos fragmentos redigidos e o canário não aparece no evento público. Observador que lança exceção não altera persistência nem outro stream;
+- focused P4-PR04: `4/4`, repetido cinco vezes sem flakiness; focused regressões terminal/multiplexing, Live Activity, transcript, P4-PR03, recovery, Local Worker e governance: `155/155`;
+- regressão completa: `npm test` `255/255`; `git diff --check` executado; `npm run contract:reconcile` deve ser registrado no worktree limpa após o commit candidate; nenhum teste alterou código fora da allowlist. D-013 não apareceu e permanece fora desta PR; nenhum finding P1/P2/P3 novo. Findings informacionais herdados (Bloom bounded e eventuais limites operacionais de sincronização de diretório) permanecem inalterados;
+- estado: candidate pendente de commit final e Security Review independente. Esta evidência não declara segurança nem integração.
