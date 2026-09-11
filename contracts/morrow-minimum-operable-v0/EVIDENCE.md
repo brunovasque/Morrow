@@ -335,3 +335,7 @@ deploy nem inicie P4-PR04.
 - Com a integração desta closure-record, o estado efetivo de P4-PR03 é `PROVEN`. Isto não cria novo candidate técnico nem altera código, testes, package, workflow ou deploy.
 - P4-PR04 passa a ser o próximo PR autorizado após a integração desta closure; seu objetivo é expor stream/API de múltiplas sessões e provar observabilidade ponta a ponta do Worker, com prova de duas sessões reais vistas ao vivo e reidratadas após restart.
 - Dependências satisfeitas para P4-PR04: P4-PR03 `PROVEN` e P3-PR04 `PROVEN`. Próximo ator único: Orchestrator / Contract Engineer persistente, responsável por kickoff, PRE_DISPATCH e TASK do Executor de P4-PR04.
+
+## P4-PR03 — entrada final na tabela de evidências
+
+| `P4-PR03` | `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` | `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a` | [`PR #21`](https://github.com/brunovasque/Morrow/pull/21), merge `b95b15a61b549eaa779b26b034cea4d57adf9e74`; closure PR #22 | `npm ci` GREEN; P4-PR03 `29/29`; transcript `42/42`; retry `251/251`; `git diff --check` GREEN; `REGRESSION_VETO` `PASS`; zero drift | Security `GREEN`; Reviewer `GREEN`; Auditor pré-merge `MERGE_READY`; Auditor final `FINAL_AUDIT_GREEN` | `PROVEN` | 2026-09-11 |
