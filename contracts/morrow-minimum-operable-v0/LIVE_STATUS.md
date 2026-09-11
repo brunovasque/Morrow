@@ -32,6 +32,7 @@
 - `integrated_merge_sha`: `b95b15a61b549eaa779b26b034cea4d57adf9e74`
 - `integrated_merge_parents`: `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc`, `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`
 - `post_merge_regression_state`: `GREEN_AFTER_IMMEDIATE_RETRY; FIRST_RUN_ISOLATED_EBADF_RECORDED_FOR_FINAL_AUDITOR`
+- `regression_veto`: `PASS`
 
 ## Próxima ação exata
 
