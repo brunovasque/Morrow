@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { WORKER_PROTOCOL_VERSION } from "./worker-protocol.ts";
-import { WorkerPrivateStateRoot } from "./worker-private-state.ts";
+import {
+  assertManagedRootDisjointFromPrivateStateRegion,
+  WorkerPrivateStateRoot,
+} from "./worker-private-state.ts";
 
 export type LocalWorkerServiceState = "stopped" | "starting" | "ready" | "stopping" | "failed";
 
@@ -11,7 +14,6 @@ export interface LocalWorkerServiceConfiguration {
   managedRoot: string;
   operatorOwnedRoots: string[];
   supportedProtocolVersions: string[];
-  privateStateRoot?: string;
 }
 
 export interface LocalWorkerLayout {
@@ -173,12 +175,10 @@ export class LocalWorkerService {
   private async startInternal(): Promise<LocalWorkerServiceStatus> {
     try {
       const layout = await initializeOwnedLayout(this.configuration);
-      const privateStateRoot = WorkerPrivateStateRoot.bootstrap({
-        workerId: this.configuration.workerId,
-        privateRoot: this.configuration.privateStateRoot
-          ?? join(resolve(this.configuration.managedRoot), "..", "private-state", this.configuration.workerId),
-        managedRoots: [layout.managedRoot, ...this.configuration.operatorOwnedRoots],
-      });
+      const privateStateRoot = WorkerPrivateStateRoot.forWorker(
+        this.configuration.workerId,
+        [layout.managedRoot, ...this.configuration.operatorOwnedRoots],
+      );
       await privateStateRoot.ensure();
       this.layout = layout;
       this.privateStateRoot = privateStateRoot;
@@ -197,12 +197,14 @@ export class LocalWorkerService {
 
 async function initializeOwnedLayout(configuration: LocalWorkerServiceConfiguration): Promise<LocalWorkerLayout> {
   const requestedRoot = resolve(configuration.managedRoot);
+  assertManagedRootDisjointFromPrivateStateRegion(requestedRoot);
   await assertNoSymbolicLinkAncestors(requestedRoot);
   await mkdir(requestedRoot, { recursive: true });
   const rootEntry = await lstat(requestedRoot);
   if (rootEntry.isSymbolicLink()) throw new Error("worker_managed_root_symlink_refused");
 
   const managedRoot = await realpath(requestedRoot);
+  assertManagedRootDisjointFromPrivateStateRegion(managedRoot);
   if (!containsMorrowSegment(managedRoot)) {
     throw new Error("worker_managed_root_canonical_path_requires_morrow_segment");
   }
@@ -309,16 +311,12 @@ async function inspectManagedChild(root: string, name: "state" | "workspaces" | 
 
 function assertConfiguration(configuration: LocalWorkerServiceConfiguration): void {
   if (!isPlainObject(configuration)) throw new Error("worker_configuration_invalid");
-  const allowed = new Set(["workerId", "managedRoot", "operatorOwnedRoots", "supportedProtocolVersions", "privateStateRoot"]);
+  const allowed = new Set(["workerId", "managedRoot", "operatorOwnedRoots", "supportedProtocolVersions"]);
   const unknown = Object.keys(configuration).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`worker_configuration_unknown_field:${unknown}`);
   if (!workerIdPattern.test(configuration.workerId)) throw new Error("worker_id_invalid");
   if (typeof configuration.managedRoot !== "string" || !isAbsolute(configuration.managedRoot)) {
     throw new Error("worker_managed_root_must_be_absolute");
-  }
-  if (configuration.privateStateRoot !== undefined
-    && (typeof configuration.privateStateRoot !== "string" || !isAbsolute(configuration.privateStateRoot))) {
-    throw new Error("worker_private_state_root_must_be_absolute");
   }
   if (!containsMorrowSegment(resolve(configuration.managedRoot))) {
     throw new Error("worker_managed_root_requires_morrow_segment");

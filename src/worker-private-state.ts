@@ -17,6 +17,8 @@ const privateRootFormat = "morrow.worker-private-state/v1" as const;
 const lockFormat = "morrow.worker-private-lock/v1" as const;
 const lockName = "event-log-anchor.lock";
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u;
+const installationRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const privateStateRegion = join(installationRoot, "private", "worker-installation");
 
 export interface WorkerPrivateStateBootstrap {
   workerId: string;
@@ -61,11 +63,27 @@ export class WorkerPrivateStateRoot {
     return new WorkerPrivateStateRoot(structuredClone(configuration));
   }
 
+  /**
+   * Production Local Worker construction. The location is installation-owned;
+   * operational configuration can select the worker identity, but not a path.
+   */
+  static forWorker(workerId: string, managedRoots: readonly string[]): WorkerPrivateStateRoot {
+    if (typeof workerId !== "string" || !identifierPattern.test(workerId)
+      || !Array.isArray(managedRoots)
+      || managedRoots.some((root) => typeof root !== "string" || !isAbsolute(root))) {
+      throw new Error("worker_private_state_bootstrap_invalid");
+    }
+    return WorkerPrivateStateRoot.bootstrap({
+      workerId,
+      privateRoot: join(privateStateRegion, workerId),
+      managedRoots,
+    });
+  }
+
   static installationDefault(): WorkerPrivateStateRoot {
-    const installationRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
     return WorkerPrivateStateRoot.bootstrap({
       workerId: "local-worker-installation",
-      privateRoot: join(installationRoot, "private", "worker-installation"),
+      privateRoot: privateStateRegion,
       managedRoots: [],
     });
   }
@@ -182,6 +200,21 @@ export class WorkerPrivateStateRoot {
 
 export function defaultWorkerPrivateStateRoot(): WorkerPrivateStateRoot {
   return WorkerPrivateStateRoot.installationDefault();
+}
+
+/**
+ * The installation-private region is reserved before any managed-root mkdir.
+ * Keep this synchronous: the lexical reservation must happen before a path is
+ * created, while the caller performs the existing canonical/reparse checks.
+ */
+export function assertManagedRootDisjointFromPrivateStateRegion(path: string): void {
+  if (typeof path !== "string" || !isAbsolute(path) || pathsOverlap(path, privateStateRegion)) {
+    throw new Error("worker_managed_root_overlaps_private_state_region");
+  }
+}
+
+export function workerPrivateStateRegionPath(): string {
+  return privateStateRegion;
 }
 
 async function ensureDirectoryTree(path: string): Promise<void> {

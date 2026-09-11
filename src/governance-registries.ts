@@ -1244,6 +1244,10 @@ function isDataRecord(value: unknown): value is Record<string, unknown> {
   );
 }
 
+function isAlreadyExists(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "EEXIST";
+}
+
 function exactKeys(value: Record<string, unknown>, required: readonly string[]): string | null {
   for (const key of required) if (!Object.hasOwn(value, key)) return `missing_field:${key}`;
   const allowed = new Set(required);

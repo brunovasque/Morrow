@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -563,6 +564,57 @@ test("Secret Broker owns a persistent opaque Event Log authority and authenticat
     new PersistentEventLogAuthority(otherPrivateRoot, "authority-other").capability(eventLogId).readAnchors(),
     /(?:event_log_(anchor_(invalid|auth_invalid)|authority_(unavailable|binding_invalid))|worker_private_state_unowned)/,
   );
+});
+
+test("two independent processes bootstrap one Event Log authority without a raw race error", async (t) => {
+  const parent = join(process.cwd(), ".morrow-test-tmp");
+  const privateRootPath = await mkdtemp(join(parent, "bootstrap-race-"));
+  t.after(async () => await rm(privateRootPath, { recursive: true, force: true }));
+  const root = WorkerPrivateStateRoot.bootstrap({ workerId: "bootstrap-race-worker", privateRoot: privateRootPath, managedRoots: [] });
+  await root.ensure();
+  const eventLogId = "e".repeat(64);
+  const contractId = "bootstrap-race-contract";
+  const streamIdentity = createHash("sha256").update(`morrow.event-log/stream/v1|${eventLogId}`, "utf8").digest("hex");
+  const streamId = createHash("sha256").update(`${streamIdentity}|${contractId}`, "utf8").digest("hex");
+  const workerPrivateStateUrl = new URL("../src/worker-private-state.ts", import.meta.url).href;
+  const authorityUrl = new URL("../src/governance-registries.ts", import.meta.url).href;
+  const childSource = `
+    import { WorkerPrivateStateRoot } from ${JSON.stringify(workerPrivateStateUrl)};
+    import { PersistentEventLogAuthority } from ${JSON.stringify(authorityUrl)};
+    const root = WorkerPrivateStateRoot.bootstrap({ workerId: "bootstrap-race-worker", privateRoot: process.argv[1], managedRoots: [] });
+    try {
+      const eventLogId = process.argv[2];
+      const streamId = process.argv[3];
+      const capability = new PersistentEventLogAuthority(root, "bootstrap-race-authority").capability(eventLogId);
+      await capability.bindStream("bootstrap-race-contract", streamId);
+      await capability.readAnchors();
+      process.stdout.write("ok\\n");
+    } catch (error) {
+      process.stdout.write((error instanceof Error ? error.message : "bootstrap_failed") + "\\n");
+      process.exitCode = 1;
+    }
+  `;
+  const run = () => new Promise<{ code: number | null; stdout: string; stderr: string }>((resolveProcess) => {
+    const child = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", childSource, privateRootPath, eventLogId, streamId], {
+      cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"], shell: false,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("close", (code) => resolveProcess({ code, stdout: stdout.trim(), stderr: stderr.trim() }));
+  });
+  const results = await Promise.all(Array.from({ length: 8 }, run));
+  assert.deepEqual(results.map((result) => result.code), Array(8).fill(0));
+  assert.deepEqual(results.map((result) => result.stdout), Array(8).fill("ok"));
+  assert.equal(results.some((result) => result.stderr.includes("ReferenceError")), false);
+  const authorityFiles = await (await import("node:fs/promises")).readdir(join(privateRootPath, "event-log-authority"));
+  assert.equal(authorityFiles.filter((name) => name === "event-log-authority-v4.key").length, 1);
+  assert.equal(authorityFiles.filter((name) => name === `${eventLogId}.binding.json`).length, 1);
+  const restarted = new PersistentEventLogAuthority(root, "bootstrap-race-authority").capability(eventLogId);
+  assert.equal((await restarted.readAnchors()).length, 0);
 });
 
 test("WorkerPrivateStateRoot is bootstrap-only, outside managed roots, stable, and junction-safe", async (t) => {
