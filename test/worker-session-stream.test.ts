@@ -115,6 +115,12 @@ test("two real sessions stream independently, replay by cursor, and rehydrate af
   assert.equal(restarted.list().length, 2);
   assert.equal(restarted.list().every((session) => session.state === "completed" && session.liveness === "terminal"), true);
   assert.equal((await restarted.replay("T-A")).status, "ok");
+  const restartedSnapshot = restarted.snapshot("T-A");
+  assert.equal(restartedSnapshot.liveActivity.ok, true);
+  if (restartedSnapshot.liveActivity.ok) {
+    assert.equal(restartedSnapshot.liveActivity.projection.activities[0]?.state, "done");
+  }
+  assert.equal(restartedSnapshot.transcript.records.some((record) => record.terminalSessionId === "T-A"), true);
   await restarted.close();
 });
 
@@ -193,4 +199,21 @@ test("P2 RED: terminal persistence failure cannot resolve completion as complete
   assert.equal(replay.events.filter((event) => event.type === "TERMINAL_SESSION_STARTED").length, 1);
   assert.equal(replay.events.some((event) => event.type === "TERMINAL_SESSION_EXITED"), false);
   await restarted.close();
+});
+
+test("P2 RED: the worker stream composes durable transcript and live activity snapshot", async (t) => {
+  const { stream, workspaces } = await harness(t);
+  const workspace = await workspaces.create({ workspaceId: "W-composition", contractId: "C-P4-PR04", roleId: "executor" });
+  const handle = await stream.start(request(workspace, "T-composition", "process.stdout.write('COMPOSITION-LIVE');"));
+  await handle.completion;
+
+  const snapshot = stream.snapshot("T-composition");
+  assert.equal(snapshot.terminalSnapshot?.terminalSessionId, "T-composition");
+  assert.equal(snapshot.liveActivity.ok, true);
+  if (snapshot.liveActivity.ok) {
+    assert.equal(snapshot.liveActivity.projection.activities[0]?.identity.terminalSessionId, "T-composition");
+    assert.equal(snapshot.liveActivity.projection.activities[0]?.state, "done");
+  }
+  assert.equal(snapshot.transcript.records.some((record) => record.terminalSessionId === "T-composition"), true);
+  assert.equal(snapshot.transcript.records.some((record) => record.content.includes("COMPOSITION-LIVE")), true);
 });
