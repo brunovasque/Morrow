@@ -211,9 +211,16 @@ O campo `next_authorized_action` de `LIVE_STATUS.md` é a projeção humana dess
 - P4-PR04 permanece `RUNNING`; o candidate está `FROZEN_FOR_SECURITY_REVIEW`; o próximo ator único é Security Reviewer independente, em sessão nova e read-only, revisando exatamente `2ab1968fe654223bb727ce55e90ffef2d5f77948`.
 - `START_P4_PR04` permanece coarse e não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
 
-## Estado atual — P4-PR04 candidate 98a32e7, Security Review pendente
+## Registro anterior — P4-PR04 candidate 98a32e7, Security Review pendente
 
 - O Relay congelou mecanicamente o candidate `98a32e7a7184801c855572bbb67192d4b1ec98a2` para a unidade atual P4-PR04, após a recuperação de Git do Executor; `2ab1968fe654223bb727ce55e90ffef2d5f77948` permanece somente como histórico.
 - O delta técnico do candidate congelado está restrito a `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`. Esta reconciliação não promove prova de teste ou segurança.
 - P4-PR04 permanece `RUNNING`; o candidate está `FROZEN_FOR_SECURITY_REVIEW`; o próximo ator único é Security Reviewer independente, em sessão nova e read-only, revisando exatamente `98a32e7a7184801c855572bbb67192d4b1ec98a2`.
+- `START_P4_PR04` permanece coarse e não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
+
+## Estado atual — P4-PR04 candidate a6aee3e, Security Review pendente
+
+- O Relay congelou mecanicamente o candidate `a6aee3e90a6af810ce52a425a6e16ea6281b54a7` para a unidade atual P4-PR04, após a recuperação de Git do Executor; `98a32e7a7184801c855572bbb67192d4b1ec98a2` permanece somente como histórico.
+- O delta técnico do candidate congelado está restrito a `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`. Esta reconciliação não promove prova de teste ou segurança.
+- P4-PR04 permanece `RUNNING`; o candidate está `FROZEN_FOR_SECURITY_REVIEW`; o próximo ator único é Security Reviewer independente, em sessão nova e read-only, revisando exatamente `a6aee3e90a6af810ce52a425a6e16ea6281b54a7`.
 - `START_P4_PR04` permanece coarse e não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
