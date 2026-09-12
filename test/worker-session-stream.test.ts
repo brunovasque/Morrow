@@ -13,6 +13,7 @@ import {
   type WorkerSessionStreamEvent,
 } from "../src/worker-session-stream.ts";
 import { PersistentTranscriptStore } from "../src/stream-transcript.ts";
+import { LIVE_ACTIVITY_MAX_EVENTS } from "../src/live-activity.ts";
 
 async function harness(t: test.TestContext, options: { maxEventsPerSession?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "morrow-worker-session-stream-"));
@@ -306,4 +307,23 @@ test("P2 counterproof: live activity append remains bounded as history grows", a
   }
   assert.equal(record.liveActivityEvents.length, 4_001);
   assert.ok(Date.now() - startedAt < 5_000);
+});
+
+test("P2 counterproof: live activity append refuses the collection limit", async (t) => {
+  const { stream } = await harness(t);
+  const record = {
+    sessionId: "T-live-limit",
+    contractId: "C-P4-PR04",
+    agentInstanceId: "T-live-limit-agent",
+    terminalSessionId: "T-live-limit",
+    workspaceId: "W-live-limit",
+    liveActivityEvents: new Array(LIVE_ACTIVITY_MAX_EVENTS),
+    liveActivityState: "process",
+  } as any;
+  const append = (stream as any).appendLiveActivity.bind(stream);
+  assert.throws(
+    () => append(record, { type: "TERMINAL_OUTPUT", occurredAt: new Date().toISOString(), payload: { stream: "stdout", data: "x" } }),
+    /worker_session_live_activity_limit/,
+  );
+  assert.equal(record.liveActivityEvents.length, LIVE_ACTIVITY_MAX_EVENTS);
 });

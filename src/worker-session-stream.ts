@@ -15,6 +15,7 @@ import {
   type StreamRedactorSession,
 } from "./stream-transcript.ts";
 import {
+  LIVE_ACTIVITY_MAX_EVENTS,
   projectContractLiveActivity,
   validateLiveActivityEvent,
   type LiveActivityEvent,
@@ -638,6 +639,9 @@ export class WorkerSessionStream {
       transitions.push({ to: "failed", sourceKind: "kernel" });
     } else if (terminalEvent.type === "TERMINAL_SESSION_EXITED") {
       transitions.push({ to: terminalEvent.payload.exitCode === 0 && !terminalEvent.payload.timedOut && !terminalEvent.payload.stopped ? "done" : "failed", sourceKind: "process" });
+    }
+    if (record.liveActivityEvents.length + transitions.length > LIVE_ACTIVITY_MAX_EVENTS) {
+      throw new Error("worker_session_live_activity_limit");
     }
     for (const transition of transitions) {
       const sequence = record.liveActivityEvents.length + 1;
