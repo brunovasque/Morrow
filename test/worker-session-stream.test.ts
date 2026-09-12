@@ -84,6 +84,11 @@ test("two real sessions stream independently, replay by cursor, and rehydrate af
   assert.equal(outputEvents(eventsB).some((event) => event.payload.data.includes("A-EARLY")), false);
   assert.equal(JSON.stringify(eventsA).includes("MORROW_SECRET_CANARY"), false);
   assert.equal(JSON.stringify(eventsB).includes("MORROW_SECRET_CANARY"), false);
+  const startedA = eventsA.find((event) => event.type === "TERMINAL_SESSION_STARTED");
+  assert.ok(startedA);
+  assert.equal(Object.isFrozen(startedA.payload), true);
+  assert.equal(Object.isFrozen(startedA.payload.capabilities), true);
+  assert.equal(Object.isFrozen(startedA.payload.presentation), true);
 
   const firstA = await stream.replay("T-A", undefined, 2);
   assert.equal(firstA.status, "ok");
@@ -279,4 +284,26 @@ test("P2 counterproof: transcript snapshot preserves contract and terminal ident
   const records = stream.transcriptRecords("T-shared");
   assert.equal(records.some((record) => record.contractId === "C-OTHER"), false);
   assert.equal(records.some((record) => record.contractId === "C-P4-PR04" && record.content.includes("LOCAL-CONTRACT")), true);
+});
+
+test("P2 counterproof: live activity append remains bounded as history grows", async (t) => {
+  const { stream } = await harness(t);
+  const record = {
+    sessionId: "T-live-bounded",
+    contractId: "C-P4-PR04",
+    agentInstanceId: "T-live-bounded-agent",
+    terminalSessionId: "T-live-bounded",
+    workspaceId: "W-live-bounded",
+    liveActivityEvents: [],
+    liveActivityState: null,
+  } as any;
+  const append = (stream as any).appendLiveActivity.bind(stream);
+  const occurredAt = new Date().toISOString();
+  const startedAt = Date.now();
+  append(record, { type: "TERMINAL_SESSION_STARTED", occurredAt, payload: {} });
+  for (let index = 0; index < 3_999; index += 1) {
+    append(record, { type: "TERMINAL_OUTPUT", occurredAt, payload: { stream: "stdout", data: "x" } });
+  }
+  assert.equal(record.liveActivityEvents.length, 4_001);
+  assert.ok(Date.now() - startedAt < 5_000);
 });

@@ -673,10 +673,9 @@ export class WorkerSessionStream {
       };
       const validated = validateLiveActivityEvent(event);
       if (!validated.ok) throw new Error("worker_session_live_activity_invalid");
-      const validation = projectContractLiveActivity(record.contractId, [...record.liveActivityEvents, validated.event]);
-      if (!validation.ok) throw new Error("worker_session_live_activity_invalid");
+      assertLiveActivityAppend(record, validated.event);
       record.liveActivityEvents.push(validated.event);
-      record.liveActivityState = transition.to;
+      record.liveActivityState = validated.event.transition.to;
       this.publishLiveActivity(record, validated.event);
     }
   }
@@ -776,7 +775,7 @@ export class WorkerSessionStream {
       runtimeId: record.runtimeId,
       workspaceId: record.workspaceId,
       type: event.type as TerminalSessionEvent["type"],
-      payload: Object.freeze(cloneData(payload)),
+      payload: deepFreezeData(cloneData(payload)),
     });
   }
 
@@ -948,6 +947,61 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
 
 function cloneData<T>(value: T): T {
   return structuredClone(value);
+}
+
+function assertLiveActivityAppend(record: SessionRecord, event: LiveActivityEvent): void {
+  const previous = record.liveActivityEvents.at(-1) ?? null;
+  const expectedSequence = record.liveActivityEvents.length + 1;
+  const identity = event.identity;
+  if (event.sequence !== expectedSequence
+    || event.causationId !== (previous?.eventId ?? null)
+    || identity.activityId !== record.sessionId
+    || identity.correlationId !== record.sessionId
+    || identity.contractId !== record.contractId
+    || identity.stepId !== "worker-session-stream"
+    || identity.agentInstanceId !== record.agentInstanceId
+    || identity.terminalSessionId !== record.terminalSessionId
+    || identity.workspaceId !== record.workspaceId
+    || event.transition.from !== record.liveActivityState) {
+    throw new Error("worker_session_live_activity_invalid");
+  }
+  const occurredAt = Date.parse(event.occurredAt);
+  if (previous && occurredAt < Date.parse(previous.occurredAt)) {
+    throw new Error("worker_session_live_activity_invalid");
+  }
+  const from = record.liveActivityState;
+  const to = event.transition.to;
+  if ((from === null && to !== "dispatch")
+    || (from !== null && (!liveActivityActiveStates.has(from) || to === "dispatch"))
+    || !liveActivitySourceKinds[to].includes(event.transition.sourceKind)) {
+    throw new Error("worker_session_live_activity_invalid");
+  }
+}
+
+const liveActivityActiveStates = new Set(["dispatch", "gate", "tool", "process", "waiting-lock", "waiting-quota", "waiting-owner"]);
+const liveActivitySourceKinds: Record<LiveActivityEvent["transition"]["to"], readonly LiveActivityEvent["transition"]["sourceKind"][]> = {
+  dispatch: ["orchestrator", "kernel"],
+  gate: ["gate", "kernel"],
+  tool: ["tool"],
+  process: ["process"],
+  "waiting-lock": ["lock"],
+  "waiting-quota": ["quota"],
+  "waiting-owner": ["owner"],
+  blocked: ["orchestrator", "gate", "lock", "quota", "owner", "kernel"],
+  failed: ["gate", "tool", "process", "kernel"],
+  done: ["orchestrator", "tool", "process", "kernel"],
+};
+
+function deepFreezeData<T>(value: T, seen = new WeakSet<object>()): T {
+  if (value === null || typeof value !== "object") return value;
+  const object = value as object;
+  if (seen.has(object)) return value;
+  seen.add(object);
+  for (const key of Reflect.ownKeys(object)) {
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    if (descriptor && "value" in descriptor) deepFreezeData(descriptor.value, seen);
+  }
+  return Object.freeze(value);
 }
 
 function isWithin(candidate: string, root: string): boolean {
