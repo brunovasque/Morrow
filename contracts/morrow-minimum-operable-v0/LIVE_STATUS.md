@@ -21,8 +21,8 @@
 - `p4_pr03_execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
 - `p4_pr04_base_sha`: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`
 - `p4_pr04_branch`: `mvo/p4-pr04-multi-session-stream`
-- `execution_root_sha`: `b1347fe004355eca8615c4f7662d77de7ee6f294`
-- `candidate_sha`: `b1347fe004355eca8615c4f7662d77de7ee6f294`
+- `execution_root_sha`: `42146b10350ebacb778ffbbfba93500eb93bd7dd`
+- `candidate_sha`: `42146b10350ebacb778ffbbfba93500eb93bd7dd`
 - `opening_control_root_sha`: `6f593eab2b843220572d4849c6f1ff1ab8e3a6ee`
 - `pr_identity_state`: `NOT_OPEN`
 - `pr_number`: `none`
@@ -45,7 +45,7 @@
 
 ## Próxima ação exata
 
-P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está `RUNNING` na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`, candidate congelado em `b1347fe004355eca8615c4f7662d77de7ee6f294`; o próximo ator é o Security Reviewer independente read-only.
+P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está `RUNNING` na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`, candidate congelado em `42146b10350ebacb778ffbbfba93500eb93bd7dd`; o próximo ator é o Security Reviewer independente read-only.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -196,10 +196,16 @@ O focused independente reportado ficou `1/5`; os quatro casos restantes falharam
 
 P4-PR04 permanece `RUNNING`; a Security Review GREEN anterior não se aplica automaticamente ao novo candidate. `START_P4_PR04` continua coarse e não autoriza PR, push, merge ou deploy. O candidate técnico `b1347fe004355eca8615c4f7662d77de7ee6f294` foi congelado mecanicamente pelo Relay na mesma unidade; o próximo ator único é o Security Reviewer independente, em sessão nova e read-only. CONTRACT.md, TARGET.md e a ordem das PRs permanecem inalterados.
 
-## Reconciliação factual de 2026-09-11 — P4-PR04 candidate b1347fe congelado
+## Registro anterior — P4-PR04 candidate b1347fe congelado
 
 O Relay congelou mecanicamente o candidate `b1347fe004355eca8615c4f7662d77de7ee6f294` para P4-PR04. O commit altera somente `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`; a projeção anterior de `8c89bf7` foi superseded para esta unidade.
 
 O novo delta compõe `PersistentTranscriptStore`, `WorkerRecoveryCoordinator`, `LiveActivity` e `WorkerSessionSnapshot` dentro do `WorkerSessionStream`, incluindo transcript/live activity por sessão e estados de recovery. Nenhum resultado de teste, Security Review, PR ou merge é declarado por esta reconciliação.
 
 P4-PR04 continua `RUNNING`, com `candidate_state=FROZEN_FOR_SECURITY_REVIEW` e `security_review_state=SECURITY_REVIEW_PENDING`. O próximo ator único é o Security Reviewer independente, read-only, revisando exatamente o candidate `b1347fe004355eca8615c4f7662d77de7ee6f294`; não há owner decision, push, PR, merge ou deploy autorizado.
+
+## Reconciliação factual de 2026-09-11 — P4-PR04 candidate 42146b1 congelado
+
+O Relay congelou mecanicamente o candidate `42146b10350ebacb778ffbbfba93500eb93bd7dd` na mesma unidade P4-PR04, após a recuperação de Git do Executor. O commit altera somente `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`; o candidate `b1347fe004355eca8615c4f7662d77de7ee6f294` fica preservado como histórico.
+
+Esta reconciliação não declara resultado de teste, contraprova de segurança, PR, push, merge ou deploy. P4-PR04 permanece `RUNNING`, com `candidate_state=FROZEN_FOR_SECURITY_REVIEW` e `security_review_state=SECURITY_REVIEW_PENDING`; o próximo ator único é o Security Reviewer independente, em sessão nova e read-only, revisando exatamente `42146b10350ebacb778ffbbfba93500eb93bd7dd`.

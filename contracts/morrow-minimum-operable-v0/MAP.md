@@ -190,9 +190,16 @@ O campo `next_authorized_action` de `LIVE_STATUS.md` é a projeção humana dess
 - A rota retorna ao Executor P4-PR04 persistente na mesma unidade/branch. Ele deve integrar somente as primitivas já provadas, manter P4-PR04 sem UI/rede/Nexus/deploy, provar live/replay/disco/reopen, resolver o ambiente sem mascarar falhas e repetir regressões antes do novo Reviewer.
 - `START_P4_PR04` permanece coarse; não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
 
-## Estado atual — P4-PR04 candidate b1347fe, Security Review pendente
+## Registro anterior — P4-PR04 candidate b1347fe, Security Review pendente
 
 - O Relay congelou mecanicamente o candidate `b1347fe004355eca8615c4f7662d77de7ee6f294` para a unidade atual P4-PR04; o candidate anterior `8c89bf7af2fc5609cc02acf70966098b3c6261e1` permanece somente como histórico.
 - O delta técnico está restrito a `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts` e compõe as primitivas já provadas de transcript, recovery, Live Activity e snapshot. Nenhuma prova de segurança ou teste é promovida nesta reconciliação.
 - P4-PR04 permanece `RUNNING`; o candidate está `FROZEN_FOR_SECURITY_REVIEW`; o próximo ator único é Security Reviewer independente, em sessão nova e read-only, revisando exatamente `b1347fe004355eca8615c4f7662d77de7ee6f294`.
+- `START_P4_PR04` permanece coarse e não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
+
+## Estado atual — P4-PR04 candidate 42146b1, Security Review pendente
+
+- O Relay congelou mecanicamente o candidate `42146b10350ebacb778ffbbfba93500eb93bd7dd` para a unidade atual P4-PR04, após a recuperação de Git do Executor; `b1347fe004355eca8615c4f7662d77de7ee6f294` permanece somente como histórico.
+- O delta técnico do candidate congelado está restrito a `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`. Esta reconciliação não promove prova de teste ou segurança.
+- P4-PR04 permanece `RUNNING`; o candidate está `FROZEN_FOR_SECURITY_REVIEW`; o próximo ator único é Security Reviewer independente, em sessão nova e read-only, revisando exatamente `42146b10350ebacb778ffbbfba93500eb93bd7dd`.
 - `START_P4_PR04` permanece coarse e não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
