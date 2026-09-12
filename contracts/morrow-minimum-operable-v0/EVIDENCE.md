@@ -491,11 +491,20 @@ com blocker arquitetural real ou candidate completo pronto para o próximo gate.
 - próximo ator único: Security Reviewer independente, sessão nova e read-only, revisando exatamente o candidate `b1347fe004355eca8615c4f7662d77de7ee6f294`; `START_P4_PR04` permanece coarse e não autoriza integração;
 - `CONTRACT.md`, `TARGET.md` e a ordem das 42 PRs não foram alterados; nenhuma decisão do dono é necessária.
 
-## P4-PR04 — candidate 42146b1 congelado e Security Review pendente
+## Registro anterior — P4-PR04 candidate 42146b1 congelado e Security Review pendente
 
 - transição mecânica do Relay: `pendingCandidateSha=42146b10350ebacb778ffbbfba93500eb93bd7dd`, `pendingCandidateUnitId=P4-PR04`; candidate congelado no mesmo branch e na mesma unidade após recuperação de Git do Executor;
 - commit candidate `42146b10350ebacb778ffbbfba93500eb93bd7dd`, mensagem `candidate(p4-pr04): freeze executor result`, com alteração somente em `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`;
 - `b1347fe004355eca8615c4f7662d77de7ee6f294` e o blocker anterior ficam preservados como histórico; não são o objeto atual de Security Review;
 - estado atual: P4-PR04 `RUNNING`, candidate `FROZEN_FOR_SECURITY_REVIEW`, Security Review independente `PENDING`; nenhum resultado de teste, contraprova de segurança, PR, push, merge ou deploy é declarado por esta reconciliação;
 - próximo ator único: Security Reviewer independente, sessão nova e read-only, revisando exatamente `42146b10350ebacb778ffbbfba93500eb93bd7dd`; `START_P4_PR04` permanece coarse e não autoriza integração;
+- `CONTRACT.md`, `TARGET.md` e a ordem das 42 PRs não foram alterados; nenhuma decisão do dono é necessária.
+
+## P4-PR04 — candidate 2ab1968 congelado e Security Review pendente
+
+- transição mecânica do Relay: `pendingCandidateSha=2ab1968fe654223bb727ce55e90ffef2d5f77948`, `pendingCandidateUnitId=P4-PR04`; candidate congelado no mesmo branch e na mesma unidade após recuperação de Git do Executor;
+- commit candidate `2ab1968fe654223bb727ce55e90ffef2d5f77948`, mensagem `candidate(p4-pr04): freeze executor result`, com alteração somente em `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`;
+- `42146b10350ebacb778ffbbfba93500eb93bd7dd` e o blocker anterior ficam preservados como histórico; não são o objeto atual de Security Review;
+- estado atual: P4-PR04 `RUNNING`, candidate `FROZEN_FOR_SECURITY_REVIEW`, Security Review independente `PENDING`; nenhum resultado de teste, contraprova de segurança, PR, push, merge ou deploy é declarado por esta reconciliação;
+- próximo ator único: Security Reviewer independente, sessão nova e read-only, revisando exatamente `2ab1968fe654223bb727ce55e90ffef2d5f77948`; `START_P4_PR04` permanece coarse e não autoriza integração;
 - `CONTRACT.md`, `TARGET.md` e a ordem das 42 PRs não foram alterados; nenhuma decisão do dono é necessária.
