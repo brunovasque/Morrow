@@ -12,6 +12,7 @@ import {
   WorkerSessionStream,
   type WorkerSessionStreamEvent,
 } from "../src/worker-session-stream.ts";
+import { PersistentTranscriptStore } from "../src/stream-transcript.ts";
 
 async function harness(t: test.TestContext, options: { maxEventsPerSession?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "morrow-worker-session-stream-"));
@@ -216,4 +217,66 @@ test("P2 RED: the worker stream composes durable transcript and live activity sn
   }
   assert.equal(snapshot.transcript.records.some((record) => record.terminalSessionId === "T-composition"), true);
   assert.equal(snapshot.transcript.records.some((record) => record.content.includes("COMPOSITION-LIVE")), true);
+});
+
+test("P2 counterproof: live activity observers cannot mutate the causal history", async (t) => {
+  const { stream, workspaces } = await harness(t);
+  const workspace = await workspaces.create({ workspaceId: "W-live-immutable", contractId: "C-P4-PR04", roleId: "executor" });
+  let observed = false;
+  stream.subscribeLiveActivity("T-live-immutable", (event) => {
+    observed = true;
+    try { (event.transition as { to: string }).to = "failed"; } catch { /* frozen event */ }
+  });
+  const handle = await stream.start(request(workspace, "T-live-immutable", "process.stdout.write('IMMUTABLE-LIVE');"));
+  await handle.completion;
+
+  const live = stream.liveActivity("T-live-immutable");
+  assert.equal(observed, true);
+  assert.equal(live.ok, true);
+  if (live.ok) assert.equal(live.projection.activities[0]?.state, "done");
+  const internalEvents = ((stream as any).sessions.get("T-live-immutable").liveActivityEvents) as readonly Record<string, unknown>[];
+  assert.equal(Object.isFrozen(internalEvents[0]), true);
+  assert.equal(Object.isFrozen(internalEvents[0]?.transition), true);
+});
+
+test("P2 counterproof: transcript snapshot preserves contract and terminal identity", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "morrow-worker-session-transcript-identity-"));
+  const transcript = await PersistentTranscriptStore.open({
+    stateRoot: join(root, "transcript"),
+    retention: { maxAgeMs: 86_400_000, maxRecords: 100, maxTotalBytes: 1_048_576, maxRecordBytes: 65_536 },
+    access: { writerIds: ["worker-session-stream"], readerIds: ["worker-session-stream"] },
+    redaction: { policyId: "p4-pr04-test", sensitiveLiterals: [] },
+  });
+  const foreign = transcript.beginRecord({
+    recordId: "foreign-transcript-record",
+    contractId: "C-OTHER",
+    stepId: "other-step",
+    terminalSessionId: "T-shared",
+    agentInstanceId: "foreign-agent",
+    stream: "stdout",
+    writerId: "worker-session-stream",
+  });
+  foreign.write("FOREIGN-CONTRACT");
+  await foreign.commit();
+  const workspaceRoot = join(root, "managed-workspaces");
+  const workspaces = new LocalWorkspaceManager(workspaceRoot);
+  const terminals = new TerminalSessionManager(workspaceRoot);
+  const stream = await WorkerSessionStream.open({
+    stateRoot: join(root, "session-stream"),
+    terminals,
+    transcript,
+    redaction: { policyId: "p4-pr04-test", sensitiveLiterals: [] },
+  });
+  t.after(async () => {
+    await stream.close().catch(() => undefined);
+    await transcript.close().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  });
+  const workspace = await workspaces.create({ workspaceId: "W-transcript-identity", contractId: "C-P4-PR04", roleId: "executor" });
+  const handle = await stream.start(request(workspace, "T-shared", "process.stdout.write('LOCAL-CONTRACT');"));
+  await handle.completion;
+
+  const records = stream.transcriptRecords("T-shared");
+  assert.equal(records.some((record) => record.contractId === "C-OTHER"), false);
+  assert.equal(records.some((record) => record.contractId === "C-P4-PR04" && record.content.includes("LOCAL-CONTRACT")), true);
 });

@@ -16,6 +16,7 @@ import {
 } from "./stream-transcript.ts";
 import {
   projectContractLiveActivity,
+  validateLiveActivityEvent,
   type LiveActivityEvent,
   type LiveActivityProjectionResult,
 } from "./live-activity.ts";
@@ -670,11 +671,13 @@ export class WorkerSessionStream {
           sourceId: createHash("sha256").update(`morrow.worker-session-stream/live-source/v1|${liveIdentity}|${occurredAt}`, "utf8").digest("hex"),
         },
       };
-      const validation = projectContractLiveActivity(record.contractId, [...record.liveActivityEvents, event]);
+      const validated = validateLiveActivityEvent(event);
+      if (!validated.ok) throw new Error("worker_session_live_activity_invalid");
+      const validation = projectContractLiveActivity(record.contractId, [...record.liveActivityEvents, validated.event]);
       if (!validation.ok) throw new Error("worker_session_live_activity_invalid");
-      record.liveActivityEvents.push(event);
+      record.liveActivityEvents.push(validated.event);
       record.liveActivityState = transition.to;
-      this.publishLiveActivity(record, event);
+      this.publishLiveActivity(record, validated.event);
     }
   }
 
@@ -842,7 +845,8 @@ export class WorkerSessionStream {
 
   private transcriptFor(record: SessionRecord): TranscriptView {
     const view = this.transcript.inspect("worker-session-stream");
-    const records = view.records.filter((item) => item.terminalSessionId === record.terminalSessionId);
+    const records = view.records.filter((item) => item.contractId === record.contractId
+      && item.terminalSessionId === record.terminalSessionId);
     return Object.freeze({
       ...view,
       records: Object.freeze(records),
