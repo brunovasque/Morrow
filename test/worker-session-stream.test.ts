@@ -327,3 +327,43 @@ test("P2 counterproof: live activity append refuses the collection limit", async
   );
   assert.equal(record.liveActivityEvents.length, LIVE_ACTIVITY_MAX_EVENTS);
 });
+
+test("P2 counterproof: collection limit rejects before Event Log persistence", async (t) => {
+  const { stream } = await harness(t);
+  let persisted = false;
+  const record = {
+    sessionId: "T-live-persist-limit",
+    terminalSessionId: "T-live-persist-limit",
+    agentInstanceId: "T-live-persist-limit-agent",
+    contractId: "C-P4-PR04",
+    roleId: "executor",
+    runtimeId: "p4-pr04-test-runtime",
+    workspaceId: "W-live-persist-limit",
+    workspaceRoot: "C:/morrow-test-workspace",
+    streamId: "stream-live-persist-limit",
+    eventLog: { append: async () => { persisted = true; } },
+    nextSequence: 1,
+    lastTerminalSequence: 1,
+    state: "running",
+    liveness: "online",
+    terminal: false,
+    historyTruncated: false,
+    started: true,
+    failure: false,
+    persistenceError: null,
+    queue: Promise.resolve(),
+    redactors: new Map(),
+    liveActivityEvents: new Array(LIVE_ACTIVITY_MAX_EVENTS),
+    liveActivityState: "process",
+  } as any;
+  await assert.rejects(
+    () => (stream as any).appendPublicEvent(record, {
+      type: "TERMINAL_OUTPUT",
+      occurredAt: new Date().toISOString(),
+      payload: { stream: "stdout", data: "x" },
+    }, { stream: "stdout", data: "x" }, false),
+    /worker_session_live_activity_limit/,
+  );
+  assert.equal(persisted, false);
+  assert.equal(record.nextSequence, 1);
+});

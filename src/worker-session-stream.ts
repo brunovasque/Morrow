@@ -493,6 +493,7 @@ export class WorkerSessionStream {
       const output = await this.redactedOutput(record, event);
       record.lastTerminalSequence = event.sequence;
       if (output) {
+        this.assertLiveActivityCapacity(record, event);
         await this.recordTranscript(record, event, output, false);
         await this.appendPublicEvent(record, event, output, false);
       }
@@ -508,6 +509,7 @@ export class WorkerSessionStream {
       : event.type === "TERMINAL_SESSION_FAILED"
       ? { error: "terminal_session_failed", durationMs: event.payload.durationMs }
       : cloneData(event.payload);
+    this.assertLiveActivityCapacity(record, event);
     await this.recordTranscript(record, event, payload, false);
     await this.appendPublicEvent(record, event, payload, false);
     this.applyLiveState(record, event);
@@ -539,6 +541,7 @@ export class WorkerSessionStream {
         type: "TERMINAL_OUTPUT" as const,
         payload: { stream, data: fragment.text },
       } satisfies TerminalSessionEvent;
+      this.assertLiveActivityCapacity(record, syntheticEvent);
       await this.recordTranscript(record, syntheticEvent, { stream, data: fragment.text, redactionCount: fragment.redactionCount }, true);
       await this.appendPublicEvent(record, syntheticEvent, { stream, data: fragment.text, redactionCount: fragment.redactionCount }, true);
     }
@@ -551,6 +554,7 @@ export class WorkerSessionStream {
     payload: Record<string, any>,
     synthetic: boolean,
   ): Promise<void> {
+    this.assertLiveActivityCapacity(record, terminalEvent);
     const sequence = record.nextSequence;
     const eventId = `${record.sessionId}:${sequence}`;
     const stored: StoredSessionPayload = {
@@ -585,6 +589,16 @@ export class WorkerSessionStream {
     this.appendLiveActivity(record, terminalEvent);
     this.publish(record, this.publicEvent(record, event, sequence, stored.payload));
     if (terminalEvent.type === "TERMINAL_SESSION_STARTED") record.started = true;
+  }
+
+  private assertLiveActivityCapacity(
+    record: SessionRecord,
+    terminalEvent: Pick<TerminalSessionEvent, "type" | "payload">,
+  ): void {
+    const additional = liveActivityTransitionCount(record.liveActivityState, terminalEvent);
+    if (record.liveActivityEvents.length + additional > LIVE_ACTIVITY_MAX_EVENTS) {
+      throw new Error("worker_session_live_activity_limit");
+    }
   }
 
   private sanitizeStartedPayload(payload: Extract<TerminalSessionEvent, { type: "TERMINAL_SESSION_STARTED" }>["payload"]): Record<string, any> {
@@ -980,6 +994,22 @@ function assertLiveActivityAppend(record: SessionRecord, event: LiveActivityEven
     || !liveActivitySourceKinds[to].includes(event.transition.sourceKind)) {
     throw new Error("worker_session_live_activity_invalid");
   }
+}
+
+function liveActivityTransitionCount(
+  state: LiveActivityEvent["transition"]["from"],
+  terminalEvent: Pick<TerminalSessionEvent, "type" | "payload">,
+): number {
+  if (state === "done" || state === "failed") return 0;
+  if (terminalEvent.type === "TERMINAL_SESSION_STARTED" && state === null) return 2;
+  if (terminalEvent.type === "TERMINAL_SESSION_FAILED") return state === null ? 2 : 1;
+  if (terminalEvent.type === "TERMINAL_OUTPUT"
+    || terminalEvent.type === "TERMINAL_INPUT_WRITTEN"
+    || terminalEvent.type === "TERMINAL_INPUT_ENDED"
+    || terminalEvent.type === "TERMINAL_RESIZED"
+    || terminalEvent.type === "TERMINAL_INTERRUPT_REQUESTED"
+    || terminalEvent.type === "TERMINAL_SESSION_EXITED") return 1;
+  return 0;
 }
 
 const liveActivityActiveStates = new Set(["dispatch", "gate", "tool", "process", "waiting-lock", "waiting-quota", "waiting-owner"]);
