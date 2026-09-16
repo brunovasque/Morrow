@@ -2,6 +2,10 @@
 
 Um contrato não é um único arquivo. É um conjunto governado de artefatos com responsabilidades distintas.
 
+## Contrato ativo do produto
+
+O contrato mestre para tornar o Morrow minimamente operável está em [`morrow-minimum-operable-v0/README.md`](morrow-minimum-operable-v0/README.md). Ele é a entrada obrigatória para qualquer aba/agente que continue a construção do Runtime V0.
+
 ## Artefatos canônicos
 
 - `CONTRACT.md` — destino, critérios, exclusões, invariantes e decisões do dono;

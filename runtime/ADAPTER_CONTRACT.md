@@ -80,6 +80,12 @@ interface AgentResult {
 - remover/segregar credenciais que não devam chegar ao processo filho;
 - registrar provider, modelo, runtime e access mode usados.
 
+## Observabilidade da sessão
+
+Quando a invocação possui terminal gerenciado, o resultado final continua canônico, mas não é a única superfície. O adapter expõe eventos incrementais ordenados de ciclo de vida e saída, vinculados a `terminal_session_id`, `agent_instance_id` e `workspace_id`.
+
+O backend declara capabilities reais (`tty`, entrada interativa e resize). `process-pipes` é suficiente para automação e testes do V0; uma interface equivalente a terminal interativo exige backend PTY/ConPTY. O chat com o Cérebro nunca é implementado como escrita implícita no terminal de outro agente.
+
 ## Regras de fallback
 
 1. `quota-session` nunca cai silenciosamente para `api`.
