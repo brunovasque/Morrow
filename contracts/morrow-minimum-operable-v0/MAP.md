@@ -265,6 +265,30 @@ Morrow cadastrado/validado pelo instalador oficial, demais frentes/regras/arquiv
 Worktree recuperado sobre f0a166b: serial original 283/283, stress original e instrumentado 70/70 cada, probe 12 sessoes, direct exits 0. Causa historica do timeout inconclusiva, risco residual a avaliar independentemente. Freeze local autorizado, sem presumir REGRESSION_VETO PASS; candidato 6372857 continua BLOCKED ate novo freeze. Ver EVIDENCE. Sem push, PR, merge ou P5.
 
 
-## Estado atual - P4-PR04 FROZEN_AWAITING_SECURITY_REVIEW (2026-11-26)
+## Registro anterior - P4-PR04 FROZEN_AWAITING_SECURITY_REVIEW (2026-11-26)
 
 Candidato tecnico `2e0a54cef6ab4ae2cae8e08c13c16fb273b48479`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`; anterior `6372857cb645f994d31125bdb4ed8baef97591c8` SUPERSEDED/INVALIDATED. Codigo e evidencias validados preservados, commit documental separado. Regressao original 283/283, estresse original/instrumentado 70/70 cada e probe 12 sessoes, exit direto 0; nenhum novo teste ou elevacao no freeze. Intermitencia historica ConPTY inconclusiva registrada como risco residual para avaliacao independente, sem afirmar causa ou eliminacao. P4-PR04 RUNNING, FROZEN_FOR_SECURITY_REVIEW / SECURITY_REVIEW_PENDING. Proximo ator revisor independente em sessao nova no SHA exato; ver EVIDENCE e `.morrow-test-tmp/p4-pr04-freeze-f0a166b-01/FINAL_VERIFICATION.json`. Sem escrita tecnica, push, PR, merge, deploy ou P5.
+
+## Registro anterior - P4-PR04 I5 recuperacao restrita ao harness autorizada (2026-11-26)
+
+Candidato 2e0a54c SECURITY_REVIEW_BLOCKED; 14 achados e I1-I4 GREEN, stress independente 68/70. Diagnostico demonstra reutilizacao de PID e falso positivo liveness, sem atribuir os REDs historicos a concorrencia externa. Executor autorizado a corrigir somente testes/harness/probes, preservar runtime, repetir provas e retornar READY_FOR_FREEZE ou BLOCKED. Nova elevacao depende do operador; sem P5. Ver EVIDENCE.
+
+## Registro anterior - P4-PR04 I5 harness validado, BLOCKED EPERM (2026-11-26)
+
+Focus 14/14, stress 73/73, serial 284/286 (dois symlinks nativos EPERM), zero skips. PID+nascimento, unicidade simultanea e encerramento original comprovados, inclusive filho sobrevivente real. Runtime/I1-I4/dependencias e 173 arquivos protegidos intactos. Evidencias e manifestos em .morrow-test-tmp/p4-pr04-pid-harness-closure. Candidate 2e0a54c SECURITY_REVIEW_BLOCKED. Proxima acao: nova autorizacao administrativa para regressao integral monitorada 286/286; sem freeze, commit, push, merge ou P5.
+
+## Registro anterior - P4-PR04 I5 elevacao autorizada (2026-11-26)
+
+Operador autorizou exclusivamente regressao serial elevada 286/286 pelo DC/Guardian, preservando harness e runtime. Foco 14/14 e estresse 73/73 anteriores permanecem validos; dois EPERM pendentes ate nova prova. Sem freeze ou P5. Ver EVIDENCE.
+
+## Registro anterior - P4-PR04 I5 READY_FOR_FREEZE (2026-11-26)
+
+Harness validado: focus 14/14, stress 73/73, regressao serial elevada 286/286 PASS, exit direto 0, zero SKIP. Elevacao encerrada, 46 amostras sem interferencias externas detectadas, hashes protegidos intactos. Candidate anterior 2e0a54c SECURITY_REVIEW_BLOCKED; worktree recuperado READY_FOR_FREEZE, aguarda ordem expressa do Cerebro. Risco residual historico ConPTY preservado. Ver EVIDENCE e .morrow-test-tmp/p4-pr04-pid-elevated-closure. Sem commit, freeze ou P5.
+
+## Registro anterior - P4-PR04 I5 freeze autorizado (2026-11-26)
+
+Regressao 286/286, stress 73/73 e foco 14/14 PASS; hashes e exits conferidos. Freeze local autorizado pelo Cerebro, preservando runtime e evidencias. Nova revisao independente obrigatoria; sem merge ou P5. Ver EVIDENCE.
+
+## Estado atual - P4-PR04 FROZEN_AWAITING_SECURITY_REVIEW (2026-11-26)
+
+Candidato tecnico `2ed65f83ad2f56e797712475dab0a5fe3e3e7c99` congelado, anterior `2e0a54cef6ab4ae2cae8e08c13c16fb273b48479` SUPERSEDED/INVALIDATED (PRO BLOCKED historico). Focus 14/14, stress 73/73 e regressao elevada 286/286 PASS, exit direto 0, zero skips. Runtime/I1-I4 intactos. Risco residual historico ConPTY mantido. Proximo ator revisor independente em sessao read-only; evidencias `.morrow-test-tmp/p4-pr04-pid-freeze-01` e EVIDENCE. Sem merge/P5.
