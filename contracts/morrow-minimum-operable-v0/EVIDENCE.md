@@ -526,3 +526,16 @@ com blocker arquitetural real ou candidate completo pronto para o próximo gate.
 - estado atual: P4-PR04 `RUNNING`, candidate `FROZEN_FOR_SECURITY_REVIEW`, Security Review independente `PENDING`; nenhum resultado de teste, contraprova de segurança, PR, push, merge ou deploy é declarado por esta reconciliação;
 - próximo ator único: Security Reviewer independente, sessão nova e read-only, revisando exatamente `a6aee3e90a6af810ce52a425a6e16ea6281b54a7`; `START_P4_PR04` permanece coarse e não autoriza integração;
 - `CONTRACT.md`, `TARGET.md` e a ordem das 42 PRs não foram alterados; nenhuma decisão do dono é necessária.
+
+## 2026-11-25 — P4-PR04 Security Review BLOCKED (retorno ao Executor)
+
+Parecer independente recebido do Security Reviewer via operador, realizado exclusivamente por DC, candidate `a6aee3e90a6af810ce52a425a6e16ea6281b54a7`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`. Veredito `BLOCKED`; a conclusao abaixo e relato do revisor, ainda nao reproduzida pelo Cerebro.
+
+- P2-01: canario sintetico exposto no retorno de conclusao em stdout e stderr.
+- P2-02: apos fechamento do stream, retorno `completed` sem evento terminal duravel.
+- P2-03: transcript expoe registros de outro agente do mesmo contrato.
+- P2-04: `T-Case` e `t-case` aceitas com mesmo streamId no Windows, invalidando replay de uma sessao.
+- Focused 11/11 GREEN, incluindo processos simultaneos reais e reidratacao; regressao completa RED: tres falhas (EBUSY, EPERM e redaction SGR nao diagnosticada), um teste ignorado; diff-check GREEN, Git limpo e dependencias preservadas, segundo o revisor.
+- Limitacao: impedimentos ambientais e regressao SGR nao resolvidos; nenhum log bruto ou contraprova executavel foi fornecido ao Cerebro nesta devolutiva. Nao promover a prova a GREEN.
+
+Retorno autorizado ao Executor persistente, apos PRE_DISPATCH: reproduzir e corrigir os quatro P2 no mesmo lote; diagnosticar EBUSY/EPERM, SGR e teste ignorado; contraprovar cada falha e executar regressao cumulativa. Alterar apenas superficies causalmente necessarias, sem refactor lateral, sem relaxar controles/testes, sem novas dependencias. Registrar RED/GREEN, evidencias e checkpoint; congelar novo candidate e devolver ao Security Reviewer independente read-only. P4-PR04 permanece RUNNING; nenhum push, PR, merge, deploy ou P5 autorizado.

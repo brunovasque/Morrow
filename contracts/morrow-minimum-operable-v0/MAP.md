@@ -224,3 +224,7 @@ O campo `next_authorized_action` de `LIVE_STATUS.md` é a projeção humana dess
 - O delta técnico do candidate congelado está restrito a `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`. Esta reconciliação não promove prova de teste ou segurança.
 - P4-PR04 permanece `RUNNING`; o candidate está `FROZEN_FOR_SECURITY_REVIEW`; o próximo ator único é Security Reviewer independente, em sessão nova e read-only, revisando exatamente `a6aee3e90a6af810ce52a425a6e16ea6281b54a7`.
 - `START_P4_PR04` permanece coarse e não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
+
+## Estado atual — P4-PR04 Security Review BLOCKED, retorno ao Executor (2026-11-25)
+
+Candidate `a6aee3e90a6af810ce52a425a6e16ea6281b54a7` bloqueado por quatro P2 (redaction no retorno, durabilidade terminal, isolamento entre agentes, colisao case-insensitive Windows) e regressao RED (EBUSY, EPERM, SGR e um teste ignorado a diagnosticar). Ver registro detalhado em EVIDENCE.md. Rota: Executor persistente → reproducao/contraprovas e correcoes causais em lote → regressao → novo candidate → Security Reviewer independente → Reviewer/Auditor e integracao somente sob gates canonicos. Preservar P4-PR04 RUNNING e impedir P5, push, PR, merge e deploy. Nenhuma mudanca de destino ou ordem contratual.

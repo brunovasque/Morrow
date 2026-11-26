@@ -3,7 +3,7 @@
 ## Snapshot atual
 
 - `snapshot_version`: `1.0`
-- `updated_at`: `2026-09-11`
+- `updated_at`: `2026-11-25`
 - `contract_version`: `1.0`
 - `effective_addenda`: `none_for_P4_PR04; A-001 historical only for P4-PR02`
 - `contract_state`: `READY_FOR_EXECUTION`
@@ -13,11 +13,11 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR04`
 - `active_route_node`: `MULTI_SESSION_STREAM_API_OBSERVABILITY`
-- `active_subaction`: `P4_PR04_CANDIDATE_FROZEN_SECURITY_REVIEW_PENDING`
+- `active_subaction`: `P4_PR04_SECURITY_REVIEW_BLOCKED_RETURN_TO_EXECUTOR`
 - `expected_branch_prefix`: `mvo/p4-pr04-`
-- `write_execution_allowed`: `no technical writes; independent Security Reviewer is read-only; no push/PR/merge`
+- `write_execution_allowed`: `Executor may make only causal P4-PR04 technical writes after PRE_DISPATCH; no push/PR/merge`
 - `next_authorized_action`: `START_P4_PR04`
-- `next_authorized_actor`: `Independent Security Reviewer P4-PR04`
+- `next_authorized_actor`: `Executor P4-PR04 persistente`
 - `p4_pr03_execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
 - `p4_pr04_base_sha`: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`
 - `p4_pr04_branch`: `mvo/p4-pr04-multi-session-stream`
@@ -30,7 +30,7 @@
 - `pr_base_sha_at_opening`: `not_applicable`
 - `pr_state_at_opening`: `not_applicable`
 - `merge_ready_state`: `NOT_READY_BEFORE_INDEPENDENT_REVIEW`
-- `merge_ready_reason`: `independent_reviewer_and_auditor_required`
+- `merge_ready_reason`: `four_P2_and_red_regression_require_causal_correction_and_independent_gates`
 - `merge_authorized`: `no`
 - `pre_merge_control_root_sha`: `not_applicable`
 - `integrated_merge_sha`: `not_applicable`
@@ -40,12 +40,12 @@
 - `final_audit_state`: `not_started`
 - `p4_pr03_state`: `PROVEN`
 - `p4_pr04_state`: `RUNNING`
-- `candidate_state`: `FROZEN_FOR_SECURITY_REVIEW`
-- `security_review_state`: `SECURITY_REVIEW_PENDING`
+- `candidate_state`: `SECURITY_REVIEW_BLOCKED`
+- `security_review_state`: `SECURITY_REVIEW_BLOCKED`
 
 ## Próxima ação exata
 
-P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está `RUNNING` na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`, candidate congelado em `a6aee3e90a6af810ce52a425a6e16ea6281b54a7`; o próximo ator é o Security Reviewer independente read-only.
+P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está `RUNNING` na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`, candidate `a6aee3e90a6af810ce52a425a6e16ea6281b54a7` com Security Review `BLOCKED` por quatro P2 e regressao RED; proximo ator Executor P4-PR04 persistente.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -227,3 +227,16 @@ Esta reconciliação não declara resultado de teste, contraprova de segurança,
 O Relay congelou mecanicamente o candidate `a6aee3e90a6af810ce52a425a6e16ea6281b54a7` na mesma unidade P4-PR04, após a recuperação de Git do Executor. O commit altera somente `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`; o candidate `98a32e7a7184801c855572bbb67192d4b1ec98a2` fica preservado como histórico.
 
 Esta reconciliação não declara resultado de teste, contraprova de segurança, PR, push, merge ou deploy. P4-PR04 permanece `RUNNING`, com `candidate_state=FROZEN_FOR_SECURITY_REVIEW` e `security_review_state=SECURITY_REVIEW_PENDING`; o próximo ator único é o Security Reviewer independente, em sessão nova e read-only, revisando exatamente `a6aee3e90a6af810ce52a425a6e16ea6281b54a7`.
+
+## 2026-11-25 — P4-PR04 Security Review BLOCKED (retorno ao Executor)
+
+Parecer independente recebido do Security Reviewer via operador, realizado exclusivamente por DC, candidate `a6aee3e90a6af810ce52a425a6e16ea6281b54a7`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`. Veredito `BLOCKED`; a conclusao abaixo e relato do revisor, ainda nao reproduzida pelo Cerebro.
+
+- P2-01: canario sintetico exposto no retorno de conclusao em stdout e stderr.
+- P2-02: apos fechamento do stream, retorno `completed` sem evento terminal duravel.
+- P2-03: transcript expoe registros de outro agente do mesmo contrato.
+- P2-04: `T-Case` e `t-case` aceitas com mesmo streamId no Windows, invalidando replay de uma sessao.
+- Focused 11/11 GREEN, incluindo processos simultaneos reais e reidratacao; regressao completa RED: tres falhas (EBUSY, EPERM e redaction SGR nao diagnosticada), um teste ignorado; diff-check GREEN, Git limpo e dependencias preservadas, segundo o revisor.
+- Limitacao: impedimentos ambientais e regressao SGR nao resolvidos; nenhum log bruto ou contraprova executavel foi fornecido ao Cerebro nesta devolutiva. Nao promover a prova a GREEN.
+
+Retorno autorizado ao Executor persistente, apos PRE_DISPATCH: reproduzir e corrigir os quatro P2 no mesmo lote; diagnosticar EBUSY/EPERM, SGR e teste ignorado; contraprovar cada falha e executar regressao cumulativa. Alterar apenas superficies causalmente necessarias, sem refactor lateral, sem relaxar controles/testes, sem novas dependencias. Registrar RED/GREEN, evidencias e checkpoint; congelar novo candidate e devolver ao Security Reviewer independente read-only. P4-PR04 permanece RUNNING; nenhum push, PR, merge, deploy ou P5 autorizado.
