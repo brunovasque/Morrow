@@ -170,6 +170,8 @@ export class WorkerSessionStream {
   private readonly recovery: WorkerRecoveryCoordinator | null;
   private readonly maxEventsPerSession: number | undefined;
   private readonly sessions = new Map<string, SessionRecord>();
+  // Event-log authority derives identity from a case-folded path, including on Windows.
+  private readonly sessionKeys = new Set<string>();
   private readonly listeners = new Map<string, Set<WorkerSessionStreamListener>>();
   private readonly liveActivityListeners = new Map<string, Set<WorkerLiveActivityListener>>();
   private unsubscribeTerminalEvents: (() => void) | null = null;
@@ -309,19 +311,31 @@ export class WorkerSessionStream {
   async start(request: TerminalSessionRequest): Promise<{ sessionId: string; completion: Promise<TerminalSessionResult> }> {
     this.assertOpen();
     assertSessionId(request.terminalSessionId);
-    if (this.sessions.has(request.terminalSessionId)) throw new Error("worker_session_id_already_exists");
+    const sessionKey = request.terminalSessionId.toLowerCase();
+    if (this.sessionKeys.has(sessionKey)) throw new Error("worker_session_id_already_exists");
     const record = this.recordFromRequest(request);
     this.sessions.set(record.sessionId, record);
+    this.sessionKeys.add(sessionKey);
     try {
       const handle = await this.terminals.start(request);
       const completion = handle.completion.then(async (result) => {
         await record.queue;
         if (record.persistenceError) throw record.persistenceError;
-        return result;
+        // A settled terminal process is not proof that its terminal event was committed.
+        if (!record.terminal || result.status !== record.state) {
+          throw new Error("worker_session_terminal_persistence_failed");
+        }
+        return Object.freeze({
+          ...result,
+          stdout: this.redactor.redact(result.stdout).text,
+          stderr: this.redactor.redact(result.stderr).text,
+          error: result.error === undefined ? undefined : "terminal_session_failed",
+        });
       });
       return Object.freeze({ sessionId: record.sessionId, completion });
     } catch (error) {
       this.sessions.delete(record.sessionId);
+      this.sessionKeys.delete(sessionKey);
       throw error;
     }
   }
@@ -345,13 +359,18 @@ export class WorkerSessionStream {
     this.closed = true;
     this.unsubscribeTerminalEvents?.();
     this.unsubscribeTerminalEvents = null;
+    let flushError: Error | null = null;
     for (const record of this.sessions.values()) {
       record.queue = record.queue.then(async () => {
-        if (!record.terminal) await this.flushRedactors(record);
+        if (!record.terminal && !record.persistenceError) await this.flushRedactors(record);
+      }).catch(() => {
+        this.markPersistenceFailure(record);
+        flushError = record.persistenceError;
       });
     }
     await Promise.all([...this.sessions.values()].map((record) => record.queue));
     if (this.ownsTranscript) await this.transcript.close();
+    if (flushError) throw flushError;
   }
 
   private async rehydrate(): Promise<void> {
@@ -362,6 +381,8 @@ export class WorkerSessionStream {
       }
       const sessionId = entry.name.slice(0, -eventLogSuffix.length);
       assertSessionId(sessionId);
+      const sessionKey = sessionId.toLowerCase();
+      if (this.sessionKeys.has(sessionKey)) throw new Error("worker_session_id_already_exists");
       const eventLog = new JsonlEventLog(join(this.sessionsRoot, entry.name), {
         maxEventsPerContract: this.maxEventsPerSession,
       });
@@ -385,6 +406,7 @@ export class WorkerSessionStream {
       record.queue = Promise.resolve();
       record.redactors.clear();
       this.sessions.set(sessionId, record);
+      this.sessionKeys.add(sessionKey);
     }
   }
 
@@ -469,17 +491,25 @@ export class WorkerSessionStream {
         workspaceRoot: event.payload.cwd,
       };
       assertSessionId(identity.sessionId);
+      const sessionKey = identity.sessionId.toLowerCase();
+      // A terminal started outside the stream must not bind an alias to existing history.
+      if (this.sessionKeys.has(sessionKey)) return;
       this.sessions.set(identity.sessionId, this.newRecord(identity, this.eventLogFor(identity.sessionId), "starting", "online", false));
+      this.sessionKeys.add(sessionKey);
     }
     const current = this.sessions.get(event.terminalSessionId)!;
-    current.queue = current.queue.then(() => this.persistTerminalEvent(current, event)).catch(() => {
-      current.persistenceError = new Error("worker_session_terminal_persistence_failed");
-      current.state = "failed";
-      current.liveness = "failed";
-      current.terminal = true;
-      current.failure = true;
-    });
+    current.queue = current.queue.then(async () => {
+      // An earlier gap makes every later event untrustworthy, even if storage recovers.
+      if (!current.persistenceError) await this.persistTerminalEvent(current, event);
+    }).catch(() => this.markPersistenceFailure(current));
     await current.queue;
+  }
+
+  private markPersistenceFailure(record: SessionRecord): void {
+    record.persistenceError ??= new Error("worker_session_terminal_persistence_failed");
+    record.state = "failed";
+    record.liveness = "failed";
+    record.failure = true;
   }
 
   private async persistTerminalEvent(record: SessionRecord, event: TerminalSessionEvent): Promise<void> {
@@ -863,7 +893,8 @@ export class WorkerSessionStream {
   private transcriptFor(record: SessionRecord): TranscriptView {
     const view = this.transcript.inspect("worker-session-stream");
     const records = view.records.filter((item) => item.contractId === record.contractId
-      && item.terminalSessionId === record.terminalSessionId);
+      && item.terminalSessionId === record.terminalSessionId
+      && item.agentInstanceId === record.agentInstanceId);
     return Object.freeze({
       ...view,
       records: Object.freeze(records),

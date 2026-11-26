@@ -66,3 +66,9 @@ they are not converted into an empty or successful session.
 
 The stream is intentionally local and provider-neutral. An HTTP/WebSocket
 adapter is outside P4-PR04.
+
+## Completion, identity and failure boundaries
+
+Completion returns the terminal result only after its matching terminal state is durably recorded; stdout and stderr are redacted using the existing canonical policy, and backend error text is replaced by a stable error code. Closing observation before the terminal event rejects the stream completion, even if the underlying process exits successfully. An append failure makes the persistence gap sticky: subsequent terminal events are not committed and a reopen can only reconstruct the durable prefix.
+
+Session identifiers retain their original spelling but reserve a case-folded key before asynchronous launch, including on Windows. A case alias cannot claim the same durable event-log authority or cursor, including after reopen. Transcript records are scoped to contract, terminal session and agent instance.

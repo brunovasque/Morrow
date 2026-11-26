@@ -131,28 +131,45 @@ test("two real sessions stream independently, replay by cursor, and rehydrate af
   await restarted.close();
 });
 
-test("restart does not turn an unfinished session into completed", async (t) => {
+test("restart does not turn an unfinished session into completed", { timeout: 30_000 }, async (t) => {
   const { root, stream, workspaces, terminals } = await harness(t);
   const workspace = await workspaces.create({ workspaceId: "W-restart", contractId: "C-P4-PR04", roleId: "executor" });
   const observed = new Promise<void>((resolve) => {
     stream.subscribe("T-restart", (event) => { if (event.type === "TERMINAL_OUTPUT") resolve(); });
   });
-  const handle = await stream.start(request(workspace, "T-restart", "process.stdout.write('x'.repeat(5000));setTimeout(()=>{},1000)"));
-  await observed;
-  await stream.close();
-  const restarted = await WorkerSessionStream.open({
-    stateRoot: join(root, "session-stream"),
-    terminals: new TerminalSessionManager(join(root, "managed-workspaces")),
-    redaction: { policyId: "p4-pr04-test", sensitiveLiterals: ["MORROW_SECRET_CANARY"] },
+  // Explicit stdin barrier: persistence latency cannot make this process exit early.
+  const handle = await stream.start({
+    ...request(workspace, "T-restart", "process.stdin.once('data',()=>process.exit(0));process.stdout.write('x'.repeat(5000))"),
+    timeoutMs: 20_000,
   });
-  const item = restarted.list().find((session) => session.sessionId === "T-restart");
-  assert.ok(item);
-  assert.equal(item.state, "recoverable");
-  assert.equal(item.liveness, "offline");
-  assert.equal(item.terminal, false);
-  await handle.completion;
-  await restarted.close();
-  void terminals;
+  const outcome = handle.completion.then((result) => ({ result }), (error) => ({ error }));
+  let restarted: WorkerSessionStream | undefined;
+  try {
+    await observed;
+    assert.equal(terminals.snapshot("T-restart").status, "running");
+    await stream.close();
+    assert.equal(terminals.snapshot("T-restart").status, "running");
+    restarted = await WorkerSessionStream.open({
+      stateRoot: join(root, "session-stream"),
+      terminals: new TerminalSessionManager(join(root, "managed-workspaces")),
+      redaction: { policyId: "p4-pr04-test", sensitiveLiterals: ["MORROW_SECRET_CANARY"] },
+    });
+    const item = restarted.list().find((session) => session.sessionId === "T-restart");
+    assert.ok(item);
+    assert.equal(item.state, "recoverable");
+    assert.equal(item.liveness, "offline");
+    assert.equal(item.terminal, false);
+    const replay = await restarted.replay("T-restart");
+    assert.equal(replay.status, "ok");
+    assert.equal(replay.events.some((event) => event.type === "TERMINAL_SESSION_EXITED"), false);
+  } finally {
+    if (terminals.snapshot("T-restart").status === "running") await terminals.write("T-restart", "finish\n");
+    await terminals.wait("T-restart");
+    await restarted?.close();
+  }
+  const settled = await outcome;
+  assert.match(String("error" in settled ? settled.error : settled.result.status), /worker_session_terminal_persistence_failed/);
+  assert.equal((await terminals.wait("T-restart")).status, "completed");
 });
 
 test("cursor at the retained floor is explicit and stale history is not reset", async (t) => {
@@ -366,4 +383,244 @@ test("P2 counterproof: collection limit rejects before Event Log persistence", a
   );
   assert.equal(persisted, false);
   assert.equal(record.nextSequence, 1);
+});
+
+test("recovery P2-01: completion redacts stdout and stderr without losing safe output", async (t) => {
+  const { root, stream, workspaces } = await harness(t);
+  const workspace = await workspaces.create({ workspaceId: "W-result-redaction", contractId: "C-P4-PR04", roleId: "executor" });
+  const handle = await stream.start(request(workspace, "T-result-redaction",
+    "process.stdout.write('out safe\\nMORROW_SECRET_');process.stderr.write('err safe\\nMORROW_SECRET_');setTimeout(()=>{process.stdout.write('CANARY\\nout tail\\nout-MORROW_SECRET_CANARY-tail');process.stderr.write('CANARY\\nerr tail\\nerr-MORROW_SECRET_CANARY-tail')},30)"));
+  const result = await handle.completion;
+  assert.equal(result.status, "completed");
+  assert.ok(result.stdout.includes("out safe") && result.stdout.includes("out tail"));
+  assert.ok(result.stderr.includes("err safe") && result.stderr.includes("err tail"));
+  assert.equal(result.stdout.includes("out-"), false);
+  assert.equal(result.stderr.includes("err-"), false);
+  assert.equal(JSON.stringify(result).includes("MORROW_SECRET_CANARY"), false);
+  const replay = await stream.replay("T-result-redaction");
+  assert.equal(replay.status, "ok");
+  assert.equal(JSON.stringify(replay).includes("MORROW_SECRET_CANARY"), false);
+  assert.equal(JSON.stringify(stream.snapshot("T-result-redaction")).includes("MORROW_SECRET_CANARY"), false);
+  const disk = await (await import("node:fs/promises")).readFile(join(root, "session-stream", "sessions", "T-result-redaction.event-log"), "utf8");
+  assert.equal(disk.includes("MORROW_SECRET_CANARY"), false);
+});
+
+test("recovery P2-02: close before exit cannot return a successful completion", { timeout: 30_000 }, async (t) => {
+  const { root, stream, workspaces, terminals } = await harness(t);
+  const workspace = await workspaces.create({ workspaceId: "W-close-before-exit", contractId: "C-P4-PR04", roleId: "executor" });
+  const started = new Promise<void>((resolve) => stream.subscribe("T-close-before-exit", (event) => {
+    if (event.type === "TERMINAL_SESSION_STARTED") resolve();
+  }));
+  const handle = await stream.start({
+    ...request(workspace, "T-close-before-exit", "process.stdin.once('data',()=>process.exit(0))"),
+    timeoutMs: 20_000,
+  });
+  const outcome = handle.completion.then((result) => ({ result }), (error) => ({ error }));
+  try {
+    await started;
+    assert.equal(terminals.snapshot("T-close-before-exit").status, "running");
+    await stream.close();
+    assert.equal(terminals.snapshot("T-close-before-exit").status, "running");
+  } finally {
+    if (terminals.snapshot("T-close-before-exit").status === "running") await terminals.write("T-close-before-exit", "finish\n");
+    await terminals.wait("T-close-before-exit");
+  }
+  const settled = await outcome;
+  assert.equal((await terminals.wait("T-close-before-exit")).status, "completed");
+  const reopened = await WorkerSessionStream.open({
+    stateRoot: join(root, "session-stream"),
+    terminals: new TerminalSessionManager(join(root, "managed-workspaces")),
+    redaction: { policyId: "p4-pr04-test", sensitiveLiterals: ["MORROW_SECRET_CANARY"] },
+  });
+  try {
+    const replay = await reopened.replay("T-close-before-exit");
+    assert.equal(replay.status, "ok");
+    assert.equal(replay.events.some((event) => event.type === "TERMINAL_SESSION_EXITED"), false);
+    assert.equal(reopened.list()[0]?.state, "recoverable");
+    assert.match(String("error" in settled ? settled.error : settled.result.status), /worker_session_terminal_persistence_failed/);
+  } finally {
+    await reopened.close();
+  }
+});
+
+test("recovery P2-03: transcript excludes a different agent in the same contract and session after restart", async (t) => {
+  const { root, stream, workspaces } = await harness(t);
+  const transcript = (stream as any).transcript as PersistentTranscriptStore;
+  const foreign = transcript.beginRecord({
+    recordId: "same-contract-foreign-agent-record",
+    contractId: "C-P4-PR04",
+    stepId: "worker-session-stream",
+    terminalSessionId: "T-agent-filter",
+    agentInstanceId: "foreign-agent",
+    stream: "stdout",
+    writerId: "worker-session-stream",
+  });
+  foreign.write("FOREIGN-AGENT-ONLY");
+  await foreign.commit();
+  const workspace = await workspaces.create({ workspaceId: "W-agent-filter", contractId: "C-P4-PR04", roleId: "executor" });
+  const handle = await stream.start(request(workspace, "T-agent-filter", "process.stdout.write('OWN-AGENT-ONLY')"));
+  await handle.completion;
+  const before = stream.snapshot("T-agent-filter").transcript.records;
+  await stream.close();
+  const reopened = await WorkerSessionStream.open({
+    stateRoot: join(root, "session-stream"),
+    terminals: new TerminalSessionManager(join(root, "managed-workspaces")),
+    redaction: { policyId: "p4-pr04-test", sensitiveLiterals: ["MORROW_SECRET_CANARY"] },
+  });
+  try {
+    const after = reopened.transcriptRecords("T-agent-filter");
+    for (const records of [before, after]) {
+      assert.ok(records.some((record) => record.content.includes("OWN-AGENT-ONLY")));
+      assert.ok(records.every((record) => record.agentInstanceId === "T-agent-filter-agent"));
+      assert.equal(JSON.stringify(records).includes("FOREIGN-AGENT-ONLY"), false);
+    }
+  } finally {
+    await reopened.close();
+  }
+});
+
+test("recovery P2-04: case aliases cannot claim a durable session or cursor", async (t) => {
+  const { root, stream, workspaces, terminals } = await harness(t);
+  const a = await workspaces.create({ workspaceId: "W-case-original", contractId: "C-P4-PR04", roleId: "executor" });
+  const b = await workspaces.create({ workspaceId: "W-case-alias", contractId: "C-P4-PR04", roleId: "reviewer" });
+  const original = await stream.start(request(a, "T-Case", "process.stdout.write('ORIGINAL-CASE')"));
+  await original.completion;
+  const originalReplay = await stream.replay("T-Case");
+  const alias = await stream.start(request(b, "t-case", "process.stdout.write('ALIAS-CASE')")).then(async (handle) => {
+    await handle.completion.catch(() => undefined);
+    return "accepted";
+  }, (error) => String(error));
+  assert.match(alias, /worker_session_id_already_exists/);
+  assert.equal(terminals.list().some((item) => item.terminalSessionId === "t-case"), false);
+  assert.equal(stream.list().length, 1);
+  assert.deepEqual(await stream.replay("T-Case"), originalReplay);
+  await stream.close();
+  const reopened = await WorkerSessionStream.open({
+    stateRoot: join(root, "session-stream"),
+    terminals: new TerminalSessionManager(join(root, "managed-workspaces")),
+    redaction: { policyId: "p4-pr04-test", sensitiveLiterals: ["MORROW_SECRET_CANARY"] },
+  });
+  try {
+    assert.deepEqual(await reopened.replay("T-Case"), originalReplay);
+    await assert.rejects(reopened.start(request(b, "T-CASE", "process.exit(0)")), /worker_session_id_already_exists/);
+  } finally {
+    await reopened.close();
+  }
+});
+
+test("recovery combined: two real sessions, alias contention, foreign agent, transient durable failure and process restart", { timeout: 20_000 }, async (t) => {
+  const { root, stream, workspaces, terminals } = await harness(t);
+  const workspaceA = await workspaces.create({ workspaceId: "W-combined-A", contractId: "C-P4-PR04", roleId: "executor" });
+  const workspaceB = await workspaces.create({ workspaceId: "W-combined-B", contractId: "C-P4-PR04", roleId: "reviewer" });
+  const seenA: WorkerSessionStreamEvent[] = [];
+  const seenB: WorkerSessionStreamEvent[] = [];
+  const started = (sessionId: string, events: WorkerSessionStreamEvent[]) => new Promise<void>((resolve) => {
+    stream.subscribe(sessionId, (event) => { events.push(event); if (event.type === "TERMINAL_SESSION_STARTED") resolve(); });
+  });
+  const startedA = started("T-Combined-A", seenA);
+  const startedB = started("T-Combined-B", seenB);
+  const scriptA = "process.stdin.once('data',()=>{process.stdout.write('A visible\\n'+'x'.repeat(6000)+'\\nMORROW_SECRET_CANARY\\n');setTimeout(()=>process.exit(0),50)})";
+  const scriptB = "process.stdin.once('data',()=>{process.stdout.write('B visible\\n'+'y'.repeat(6000)+'\\nMORROW_SECRET_');process.stderr.write('B stderr\\nMORROW_SECRET_');setTimeout(()=>{process.stdout.write('CANARY\\nB tail\\n');process.stderr.write('CANARY\\nB stderr tail\\n');process.exit(0)},80)})";
+  const [a, b] = await Promise.all([
+    stream.start(request(workspaceA, "T-Combined-A", scriptA)),
+    stream.start(request(workspaceB, "T-Combined-B", scriptB)),
+  ]);
+  const outcomeA = assert.rejects(a.completion, /^Error: worker_session_terminal_persistence_failed$/);
+  await Promise.all([startedA, startedB]);
+  const live = terminals.list().filter((item) => item.status === "running");
+  assert.equal(live.length, 2);
+  assert.ok(live.every((item) => Number.isInteger(item.pid) && item.pid! > 0));
+  assert.equal(new Set(live.map((item) => item.pid)).size, 2);
+  await assert.rejects(stream.start(request(workspaceB, "t-combined-a", "process.exit(0)")), /worker_session_id_already_exists/);
+  assert.equal(terminals.list().length, 2);
+  const foreign = (stream as any).transcript.beginRecord({
+    recordId: "combined-foreign-record", contractId: "C-P4-PR04", stepId: "worker-session-stream",
+    terminalSessionId: "T-Combined-B", agentInstanceId: "T-Combined-A-agent", stream: "stdout", writerId: "worker-session-stream",
+  });
+  foreign.write("FOREIGN ONLY COMBINED");
+  await foreign.commit();
+  const internal = (stream as any).sessions.get("T-Combined-A");
+  const originalAppend = internal.eventLog.append.bind(internal.eventLog);
+  let failedOutput = 0;
+  let afterFailureAttempts = 0;
+  internal.eventLog.append = async (event: any) => {
+    if (!failedOutput && event.type === "TERMINAL_OUTPUT") {
+      failedOutput++;
+      throw new Error("synthetic transient disk error MORROW_SECRET_CANARY");
+    }
+    if (failedOutput) afterFailureAttempts++;
+    return originalAppend(event);
+  };
+  await Promise.all([terminals.write("T-Combined-A", "go\n"), terminals.write("T-Combined-B", "go\n")]);
+  const resultB = await b.completion;
+  await outcomeA;
+  assert.equal(failedOutput, 1);
+  assert.equal(afterFailureAttempts, 0, "an output gap must never be followed by a durable terminal event");
+  assert.equal((await terminals.wait("T-Combined-A")).status, "completed");
+  assert.equal(resultB.status, "completed");
+  assert.ok(resultB.stdout.includes("B visible") && resultB.stdout.includes("B tail"));
+  assert.ok(resultB.stderr.includes("B stderr tail"));
+  assert.equal(JSON.stringify(resultB).includes("MORROW_SECRET_CANARY"), false);
+  const descriptors = stream.list();
+  const failed = descriptors.find((item) => item.sessionId === "T-Combined-A")!;
+  assert.equal(failed.state, "failed");
+  assert.equal(failed.terminal, false);
+  assert.equal(failed.liveness, "failed");
+  assert.equal(seenA.some((event) => event.type === "TERMINAL_SESSION_EXITED" || event.type === "TERMINAL_OUTPUT"), false);
+  const replayA = await stream.replay("T-Combined-A");
+  const replayB = await stream.replay("T-Combined-B");
+  assert.equal(replayA.status, "ok");
+  assert.equal(replayB.status, "ok");
+  assert.equal(replayA.events.some((event) => event.type === "TERMINAL_SESSION_EXITED"), false);
+  assert.equal(replayB.events.filter((event) => event.type === "TERMINAL_SESSION_EXITED").length, 1);
+  assert.equal((await stream.replay("T-Combined-A", replayB.nextCursor)).status, "invalid");
+  assert.deepEqual(seenB, replayB.events);
+  assert.ok(stream.transcriptRecords("T-Combined-B").every((item) => item.agentInstanceId === "T-Combined-B-agent"));
+  for (const publicValue of [seenA, seenB, replayA, replayB, stream.snapshot("T-Combined-A"), stream.snapshot("T-Combined-B")]) {
+    const serialized = JSON.stringify(publicValue);
+    assert.equal(serialized.includes("MORROW_SECRET_CANARY"), false);
+    assert.equal(serialized.includes("FOREIGN ONLY COMBINED"), false);
+  }
+  await stream.close();
+  // Rehydrate in an independent Node process, not merely a fresh class instance.
+  const { execFile } = await import("node:child_process");
+  const childCode = [
+    "import {WorkerSessionStream} from './src/worker-session-stream.ts';",
+    "import {TerminalSessionManager} from './src/terminal-session.ts';",
+    "import {join} from 'node:path';",
+    "const root=process.argv[1];",
+    "const s=await WorkerSessionStream.open({stateRoot:join(root,'session-stream'),terminals:new TerminalSessionManager(join(root,'managed-workspaces')),redaction:{policyId:'p4-pr04-test',sensitiveLiterals:['MORROW_SECRET_CANARY']}});",
+    "try{const list=s.list();const a=await s.replay('T-Combined-A');const b=await s.replay('T-Combined-B');const snap=s.snapshot('T-Combined-B');console.log(JSON.stringify({pid:process.pid,list,a,b,snap}));}finally{await s.close();}",
+  ].join("\n");
+  const raw = await new Promise<string>((resolve, reject) => {
+    execFile(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", childCode, root], { cwd: process.cwd(), timeout: 12_000, maxBuffer: 2_000_000, windowsHide: true },
+      (error, stdout) => error ? reject(error) : resolve(stdout));
+  });
+  const reopened = JSON.parse(raw);
+  assert.notEqual(reopened.pid, process.pid);
+  assert.equal(reopened.list.find((item: any) => item.sessionId === "T-Combined-A").state, "recoverable");
+  assert.equal(reopened.list.find((item: any) => item.sessionId === "T-Combined-B").state, "completed");
+  assert.deepEqual(reopened.a, replayA);
+  assert.deepEqual(reopened.b, replayB);
+  assert.equal(raw.includes("MORROW_SECRET_CANARY"), false);
+  assert.equal(raw.includes("FOREIGN ONLY COMBINED"), false);
+});
+
+test("recovery adversarial: concurrent case-alias starts reserve exactly one identity before any await", { timeout: 10_000 }, async (t) => {
+  const { stream, terminals, workspaces } = await harness(t);
+  const a = await workspaces.create({ workspaceId: "W-racing-A", contractId: "C-RACE-A", roleId: "executor" });
+  const b = await workspaces.create({ workspaceId: "W-racing-B", contractId: "C-RACE-B", roleId: "reviewer" });
+  const outcomes = await Promise.allSettled([
+    stream.start(request(a, "T-Racing", "process.stdout.write('first winner')")),
+    stream.start(request(b, "t-racing", "process.stdout.write('second winner')")),
+  ]);
+  const successes = outcomes.filter((item) => item.status === "fulfilled");
+  const failures = outcomes.filter((item) => item.status === "rejected");
+  assert.equal(successes.length, 1);
+  assert.equal(failures.length, 1);
+  assert.match(String(failures[0]!.reason), /worker_session_id_already_exists/);
+  await successes[0]!.value.completion;
+  assert.equal(terminals.list().length, 1);
+  assert.equal(stream.list().length, 1);
+  assert.equal((await stream.replay(successes[0]!.value.sessionId)).status, "ok");
 });

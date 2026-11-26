@@ -13,6 +13,8 @@ import { TerminalSessionManager, type TerminalSessionEvent } from "../src/termin
 import { WindowsConptyTerminalBackend } from "../src/windows-conpty-backend.ts";
 import { LocalWorkspaceManager } from "../src/workspace-manager.ts";
 
+// Windows may retain a ConPTY working-directory handle briefly after process exit.
+// Bounded native rm retries still fail if the fixture cannot actually be removed.
 async function fixture(
   authenticated = true,
   authenticationText = authenticated ? "Logged in using ChatGPT\n" : "Not logged in\n",
@@ -192,7 +194,7 @@ test("runs a quota fixture through managed ConPTY with live output and bound met
       event.terminalSessionId === "T-codex" && event.type === "TERMINAL_INPUT_WRITTEN"
     )), false);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 
@@ -208,7 +210,7 @@ test("refuses API environment before opening a terminal", async () => {
     }), /codex_quota_environment_unsafe:OPENAI_API_KEY/);
     assert.equal(terminals.list().length, 0);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 
@@ -236,7 +238,7 @@ test("refuses a prompt that cannot fit the ConPTY launch envelope before authent
     }), /terminal_launch_spec_too_large/);
     assert.equal(terminals.list().length, 0);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 
@@ -269,7 +271,7 @@ test("refuses missing or negatively worded ChatGPT authentication before the age
     assert.equal(terminals.list().some((session) => session.terminalSessionId === "T-auth"), false);
     assert.equal(terminals.list().some((session) => session.terminalSessionId === "T-auth-auth"), true);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 
@@ -283,6 +285,6 @@ test("refuses to promote a process-pipes transport to Codex terminal", async () 
     }), /codex_quota_conpty_backend_required/);
     assert.equal(terminals.list().length, 0);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
