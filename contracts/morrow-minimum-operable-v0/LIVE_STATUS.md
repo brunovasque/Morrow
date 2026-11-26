@@ -13,11 +13,11 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR04`
 - `active_route_node`: `MULTI_SESSION_STREAM_API_OBSERVABILITY`
-- `active_subaction`: `P4_PR04_CANDIDATE_FROZEN_SECURITY_REVIEW_PENDING`
+- `active_subaction`: `P4_PR04_SECURITY_REVIEW_BLOCKED_INVARIANT_RECOVERY`
 - `expected_branch_prefix`: `mvo/p4-pr04-`
-- `write_execution_allowed`: `no technical writes; independent Security Reviewer is read-only; no push/PR/merge`
+- `write_execution_allowed`: `Executor may make only causal P4-PR04 technical writes after PRE_DISPATCH and invariant diagnosis; no push/PR/merge`
 - `next_authorized_action`: `START_P4_PR04`
-- `next_authorized_actor`: `Independent Security Reviewer P4-PR04`
+- `next_authorized_actor`: `Executor P4-PR04 persistente`
 - `p4_pr03_execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
 - `p4_pr04_base_sha`: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`
 - `p4_pr04_branch`: `mvo/p4-pr04-multi-session-stream`
@@ -30,7 +30,7 @@
 - `pr_base_sha_at_opening`: `not_applicable`
 - `pr_state_at_opening`: `not_applicable`
 - `merge_ready_state`: `NOT_READY_BEFORE_INDEPENDENT_REVIEW`
-- `merge_ready_reason`: `independent_reviewer_and_auditor_required`
+- `merge_ready_reason`: `P2_08_to_12_and_P3_02_require_invariant_recovery`
 - `merge_authorized`: `no`
 - `pre_merge_control_root_sha`: `not_applicable`
 - `integrated_merge_sha`: `not_applicable`
@@ -40,12 +40,12 @@
 - `final_audit_state`: `not_started`
 - `p4_pr03_state`: `PROVEN`
 - `p4_pr04_state`: `RUNNING`
-- `candidate_state`: `FROZEN_FOR_SECURITY_REVIEW`
-- `security_review_state`: `SECURITY_REVIEW_PENDING`
+- `candidate_state`: `SECURITY_REVIEW_BLOCKED`
+- `security_review_state`: `SECURITY_REVIEW_BLOCKED`
 
 ## Próxima ação exata
 
-P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está `RUNNING` na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`, candidate recuperado e congelado em `6372857cb645f994d31125bdb4ed8baef97591c8`; anterior `08e2df00ca87c27f403e835fe63a7479e68a293c` SUPERSEDED/INVALIDATED, Security Review BLOCKED anterior historico. Security Review `PENDING`; proximo ator Security Reviewer independente read-only. Cumulativa serial elevada 276/276 PASS sem SKIP, zero interferencias detectadas em 57 amostras, processos elevados encerrados. ExitCode direto Node ausente e intermitencia ConPTY sob carga pendente de avaliacao; prova candidata com exit code direto corretamente capturado obrigatoria antes do gate de aprovacao, conforme EVIDENCE. Nenhum merge, push, PR, deploy ou P5 autorizado.
+P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está `RUNNING` na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`, candidate recuperado e congelado em `6372857cb645f994d31125bdb4ed8baef97591c8`; anterior `08e2df00ca87c27f403e835fe63a7479e68a293c` SUPERSEDED/INVALIDATED, Security Review BLOCKED anterior historico. Security Review `BLOCKED` por P2-08..12/P3-02; proximo ator Executor persistente, recuperacao por invariantes conforme EVIDENCE. Oito achados anteriores GREEN; cumulativa independente 274/276 (EPERM), estresse 64/64. Nenhum merge, push, PR, deploy ou P5 autorizado.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -324,3 +324,7 @@ DC conferiu sumula integral 276/276, zero fail/cancelled/skipped/todo, stderr va
 - Evidencias reconferidas: .morrow-test-tmp/p4-pr04-recovery-c7b905a/SHA256SUMS.txt, FINAL-REGRESSION-SHA256SUMS.txt e os tres inventarios elevated-cumulative-01/02/03. Freeze: freeze-01/SHA256SUMS.txt (SHA256 5056FED947EBDC8FE786CEE9990B4AA97FCAEDE25E10E56F7E7E2D9B4155E637) com SHA do candidate, hashes tecnicos e blobs antes/depois, patches integrais e tecnicos, paths e estatisticas contra base e candidate anterior. Manifesto final anterior 60E53E87B9C7CCF674729B970E83A1850972AEBEF3A7533E179B4E72DCE57B5F preservado. Cumulativa serial elevada 276/276 PASS, 0 FAIL/CANCELLED/SKIP/TODO, stderr vazio, log SHA256 ED2ADB26FFD45B12B525FC66069DA2F7AFC9678ADE986F66A2B3B1BF57115502; monitor SHA256 E8D6463DAC07D01CD16C0E29D0343BB085DB8D0025BF8D155169104C60790DA0, 57 amostras e zero interferencias detectadas. Worker focused 23/23, governance 24/24, P2 anteriores e novos/P3-01, contraprovas combinadas/adversariais, bootstrap, EBADF, SGR, ConPTY e symlinks nativos passaram. Todos os processos elevados encerrados; autorizacao temporaria consumida.
 - Ressalvas obrigatorias: duas tentativas iniciais abortadas antes dos testes por falsos positivos do monitor; monitor por amostragem nao garante ausencia de processos breves. Launcher exit 0 observado, full.exit e worker.exit vazios: exit code direto do Node nao registrado, sem preenchimento retroativo. ConPTY sob carga nao comprovadamente livre de intermitencia. Revisor independente deve avaliar cobertura, seguranca, alteracoes causais inclusive modulos anteriores, intermitencia e obter prova do candidate com exit code direto corretamente capturado antes do gate de aprovacao; nova elevacao exige autorizacao expressa do operador. Freeze nao equivale a REGRESSION_VETO PASS nem SECURITY_REVIEW_GREEN.
 - P4-PR04 RUNNING; candidate FROZEN_FOR_SECURITY_REVIEW; SECURITY_REVIEW_PENDING. Proximo ator unico: Independent Security Reviewer P4-PR04, sessao nova read-only, SHA exato contra base e candidate anterior. Registro documental separado do tecnico. START_P4_PR04 coarse; sem nova escrita tecnica, push, PR, merge, deploy ou P5.
+
+## 2026-11-26 - Security Review BLOCKED, recuperacao por invariantes
+
+Parecer independente do candidate `6372857cb645f994d31125bdb4ed8baef97591c8`: P2-08..12 e P3-02 bloqueantes, oito anteriores GREEN, cumulativa 274/276 (dois EPERM) e estresse 64/64. Rota e matriz I1-I5 detalhadas em EVIDENCE.md. Executor persistente autorizado a diagnosticar, provar e corrigir causas comuns somente dentro de P4-PR04; sem freeze, elevacao sem nova autorizacao, push, PR, merge, deploy ou P5.
