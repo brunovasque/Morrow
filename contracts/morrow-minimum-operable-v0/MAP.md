@@ -229,9 +229,13 @@ O campo `next_authorized_action` de `LIVE_STATUS.md` é a projeção humana dess
 
 Candidate `a6aee3e90a6af810ce52a425a6e16ea6281b54a7` bloqueado por quatro P2 (redaction no retorno, durabilidade terminal, isolamento entre agentes, colisao case-insensitive Windows) e regressao RED (EBUSY, EPERM, SGR e um teste ignorado a diagnosticar). Ver registro detalhado em EVIDENCE.md. Rota: Executor persistente → reproducao/contraprovas e correcoes causais em lote → regressao → novo candidate → Security Reviewer independente → Reviewer/Auditor e integracao somente sob gates canonicos. Preservar P4-PR04 RUNNING e impedir P5, push, PR, merge e deploy. Nenhuma mudanca de destino ou ordem contratual.
 
-## Estado atual - P4-PR04 candidate recuperado congelado, Security Review PENDING (2026-11-25)
+## Registro anterior - P4-PR04 candidate recuperado congelado, Security Review PENDING (2026-11-25)
 
 - Candidate/Execution Root `08e2df00ca87c27f403e835fe63a7479e68a293c`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`; anterior `a6aee3e90a6af810ce52a425a6e16ea6281b54a7` SUPERSEDED/INVALIDATED.
 - Freeze autorizado sem alteracao funcional; delta tecnico contra base: runtime/MULTI_SESSION_STREAM_API.md, schema/worker-session-stream.v1.schema.json, src/worker-session-stream.ts, test/codex-conpty-adapter.test.ts, test/stream-transcript.test.ts e test/worker-session-stream.test.ts; contra anterior, os mesmos exceto schema. Evidencias em EVIDENCE.md e freeze-01/SHA256SUMS.txt.
 - Cumulativa serial 269/269 PASS sem SKIP; focused 17/17; ambos symlinks GREEN. Primeira elevada 267/269, focused ConPTY 0/2 e controles diretos GREEN preservados. Intermitencia ConPTY sob carga pendente de avaliacao independente; REGRESSION_VETO nao iniciado.
 - P4-PR04 RUNNING; FROZEN_FOR_SECURITY_REVIEW / SECURITY_REVIEW_PENDING. Proximo ator: Security Reviewer independente read-only. START_P4_PR04 coarse; sem nova escrita tecnica, elevacao, push, PR, merge, deploy ou P5. CONTRACT, TARGET e ordem das 42 PRs preservados.
+
+## Estado atual - P4-PR04 Security Review BLOCKED (2026-11-25)
+
+Candidate `08e2df00ca87c27f403e835fe63a7479e68a293c` bloqueado pelos novos P2-05..07 e P3-01. Quatro P2 anteriores GREEN. Cumulativa independente 265/269, zero SKIP; EPERM, bootstrap/EBADF e ConPTY requerem diagnostico. Proximo ator Executor persistente, conforme EVIDENCE. Sem freeze, push, PR, merge, deploy ou P5.
