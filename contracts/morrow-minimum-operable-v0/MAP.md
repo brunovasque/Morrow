@@ -293,6 +293,10 @@ Regressao 286/286, stress 73/73 e foco 14/14 PASS; hashes e exits conferidos. Fr
 
 Candidato tecnico `2ed65f83ad2f56e797712475dab0a5fe3e3e7c99` congelado, anterior `2e0a54cef6ab4ae2cae8e08c13c16fb273b48479` SUPERSEDED/INVALIDATED (PRO BLOCKED historico). Focus 14/14, stress 73/73 e regressao elevada 286/286 PASS, exit direto 0, zero skips. Runtime/I1-I4 intactos. Risco residual historico ConPTY mantido. Proximo ator revisor independente em sessao read-only; evidencias `.morrow-test-tmp/p4-pr04-pid-freeze-01` e EVIDENCE. Sem merge/P5.
 
-## Estado atual - P4-PR04 SECURITY_REVIEW_GREEN (2026-11-26)
+## Registro anterior - P4-PR04 SECURITY_REVIEW_GREEN (2026-11-26)
 
 Candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99 aprovado no Security Review: estresse independente 73/73, 14 achados e I1-I5 PASS, regressao congelada 286/286 conferida, risco residual ConPTY nao bloqueante neste gate. Proximo ator Independent Reviewer, nova sessao read-only. P4-PR04 RUNNING; sem integracao, merge ou P5. Ver EVIDENCE.
+
+## Estado atual - P4-PR04 REVIEW_READY_FOR_AUDITOR (2026-11-26)
+
+Candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99, Security Review e Independent Reviewer GREEN. 197 entradas, 16 blobs, cobertura e I1-I5 verificados, provas 286/286 e 73/73 preservadas, risco residual nao bloqueante. Proximo ator Auditor independente, nova sessao read-only. P4-PR04 RUNNING; sem integracao, merge ou P5. Ver EVIDENCE.

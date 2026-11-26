@@ -13,11 +13,11 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR04`
 - `active_route_node`: `MULTI_SESSION_STREAM_API_OBSERVABILITY`
-- `active_subaction`: `P4_PR04_INDEPENDENT_REVIEW_PENDING`
+- `active_subaction`: `P4_PR04_AUDIT_PENDING`
 - `expected_branch_prefix`: `mvo/p4-pr04-`
-- `write_execution_allowed`: `Only independent review of frozen candidate; no technical writes, push, PR or merge`
+- `write_execution_allowed`: `Only independent audit of frozen candidate and versioned reviewer gate; no technical writes, push, PR or merge`
 - `next_authorized_action`: `START_P4_PR04`
-- `next_authorized_actor`: `Independent Reviewer P4-PR04, new read-only session`
+- `next_authorized_actor`: `Independent Auditor P4-PR04, new read-only session`
 - `p4_pr03_execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
 - `p4_pr04_base_sha`: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`
 - `p4_pr04_branch`: `mvo/p4-pr04-multi-session-stream`
@@ -29,8 +29,8 @@
 - `pr_head_sha_at_opening`: `not_applicable`
 - `pr_base_sha_at_opening`: `not_applicable`
 - `pr_state_at_opening`: `not_applicable`
-- `merge_ready_state`: `NOT_READY_BEFORE_INDEPENDENT_REVIEW`
-- `merge_ready_reason`: `security_review_green_independent_reviewer_and_audit_pending`
+- `merge_ready_state`: `NOT_READY_BEFORE_AUDIT_AND_INTEGRATION`
+- `merge_ready_reason`: `security_review_green_reviewer_ready_for_auditor_audit_pending`
 - `merge_authorized`: `no`
 - `pre_merge_control_root_sha`: `not_applicable`
 - `integrated_merge_sha`: `not_applicable`
@@ -40,12 +40,12 @@
 - `final_audit_state`: `not_started`
 - `p4_pr03_state`: `PROVEN`
 - `p4_pr04_state`: `RUNNING`
-- `candidate_state`: `FROZEN_FOR_INDEPENDENT_REVIEW`
+- `candidate_state`: `FROZEN_FOR_AUDIT`
 - `security_review_state`: `SECURITY_REVIEW_GREEN`
 
 ## Próxima ação exata
 
-P4-PR04 permanece RUNNING, com candidato tecnico congelado `2ed65f83ad2f56e797712475dab0a5fe3e3e7c99`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`. SECURITY_REVIEW_GREEN confirmado, estresse independente 73/73 PASS, 14 achados e I1-I5 GREEN, regressao elevada congelada 286/286 conferida; risco residual ConPTY nao bloqueante neste gate. Proximo ator unico: Independent Reviewer P4-PR04 em sessao nova read-only, para escopo, roots, cobertura, evidencia e regressao; retornar REVIEW_READY_FOR_AUDITOR ou BLOCKED. Ver EVIDENCE. Sem escrita tecnica, push, PR, merge, deploy ou P5.
+P4-PR04 permanece RUNNING, com candidato tecnico congelado `2ed65f83ad2f56e797712475dab0a5fe3e3e7c99`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`. SECURITY_REVIEW_GREEN e REVIEW_READY_FOR_AUDITOR versionados, 14 achados e I1-I5 GREEN, regressao congelada 286/286, stress independente 73/73; risco residual ConPTY nao bloqueante nos gates concluidos. Proximo ator unico: Auditor independente em nova sessao read-only; retornar AUDIT_GREEN - P4_PR04_READY_FOR_INTEGRATOR ou AUDIT_BLOCKED. Ver EVIDENCE. Sem escrita tecnica, push, PR, merge, deploy ou P5.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -439,3 +439,9 @@ Autorizado exclusivamente freeze local do worktree recuperado, mantendo commits 
 Candidato tecnico 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99, base 78e1bfdc7d32f2e150d03aaee80b62514c446d4f, HEAD documental do parecer ca3c3657c4cb943ee4d0896dab02fc0369da3d74. Parecer independente SECURITY_REVIEW_GREEN, exclusivo deste SHA, confirmado pelo Cerebro via DC em .morrow-test-tmp/p4-pr04-review-2ed65f8/SECURITY_REVIEW_GREEN.md, SHA256 101BB7CD16B24AE639D12431B763F787BA7FC7D551381C0EBD3DA928FDF6C850. FINAL_VERIFICATION.json, log TAP e direct.exit conferidos: estresse independente 73/73, exit 0, zero SKIP; 14 achados anteriores e I1-I5 PASS, regressao congelada elevada 286/286 conferida por evidencia original (sem nova elevacao). 180 arquivos protegidos sem divergencia segundo inventario do Revisor; runtime e dependencias intactos. Identidade PID+nascimento, unicidade simultanea e encerramento da identidade original aprovados, inclusive contraprovas de sobrevivente real. Nenhum bloqueio contratual identificado pelo Security Reviewer. Risco residual de timeout historico ConPTY inconclusivo, sem recorrencia nas provas atuais, avaliado como nao bloqueante para este gate; sem afirmar causa ambiental ou eliminacao definitiva.
 
 Decisao: registrar o gate aprovado em commit exclusivamente documental, manter execution root/candidate tecnico intactos. P4-PR04 RUNNING, FROZEN_FOR_INDEPENDENT_REVIEW, SECURITY_REVIEW_GREEN. Proximo ator unico: Independent Reviewer P4-PR04, sessao nova read-only, conferir contrato, escopo, roots, evidencia, cobertura, regressao, Security Review e ausencia de drift; aproveitar as provas validas sem repeticao indiscriminada, executar contraprovas adicionais apenas se justificadas. Retornar REVIEW_READY_FOR_AUDITOR ou BLOCKED fundamentado. Nao reabrir achados ja aprovados sem evidencia nova; nenhuma escrita tecnica, elevacao sem autorizacao expressa, push, PR, merge, deploy ou P5. REGRESSION_VETO e auditoria final permanecem pendentes.
+
+## 2026-11-26 - P4-PR04 REVIEW_READY_FOR_AUDITOR e handoff ao Auditor
+
+Execution root/candidato tecnico 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99; base 78e1bfdc7d32f2e150d03aaee80b62514c446d4f; opening control root 6f593eab2b843220572d4849c6f1ff1ab8e3a6ee; control root revisado 358e1013d3a0bf1d0a95453fcb12102b4e89ab53. Independent Reviewer emitiu REVIEW_READY_FOR_AUDITOR. Parecer confirmado via DC em .morrow-test-tmp/p4-pr04-independent-reviewer-gate-2ed65f8/REVIEW_READY_FOR_AUDITOR.md, SHA256 7FBF602240E8604ED432C09B22AAD6CA65D63D0BDC9E0452AAA212FAC2A25FC9, e FINAL_VERIFICATION.json. Contrato, genealogia, escopo, 16 blobs tecnicos, 197 entradas de manifestos, cobertura, 14 achados e I1-I5 GREEN; Security Review GREEN confirmado. Focus 14/14, stress Executor 73/73, regressao serial elevada congelada 286/286, stress Security Reviewer independente 73/73, todos exit 0 e zero SKIP. Provas reaproveitadas, sem novas execucoes nem elevacao. Sessoes read-only distintas do Executor; mesmo contexto de chat do Security Review, sem alegar nova identidade de agente/modelo. Jobs Guardian 20261126-143930-6d1bfacd e 20261126-144038-f1babc1f. Risco residual ConPTY historico inconclusivo permanece nao bloqueante neste gate. Nenhum bloqueio contratual identificado.
+
+Cerebro versiona o parecer exclusivamente em LIVE_STATUS, EVIDENCE, MAP e PRS, formando novo control root documental descendente de 358e101, sem mudar execution root. P4-PR04 RUNNING; candidato congelado para auditoria. Proximo ator unico: Auditor independente, nova sessao read-only, validar genealogia, autoridade, separacao de roots, gates frescos, independencia real, cobertura e evidencias, escopo e ausencia de drift; reaproveitar provas validas, sem repeticao indiscriminada. Retornar AUDIT_GREEN - P4_PR04_READY_FOR_INTEGRATOR ou AUDIT_BLOCKED fundamentado. Nenhum push, abertura de PR, merge, deploy ou P5 autorizado. REGRESSION_VETO pos-merge e auditoria final pendentes.
