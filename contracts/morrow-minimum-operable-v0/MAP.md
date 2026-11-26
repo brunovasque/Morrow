@@ -297,6 +297,10 @@ Candidato tecnico `2ed65f83ad2f56e797712475dab0a5fe3e3e7c99` congelado, anterior
 
 Candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99 aprovado no Security Review: estresse independente 73/73, 14 achados e I1-I5 PASS, regressao congelada 286/286 conferida, risco residual ConPTY nao bloqueante neste gate. Proximo ator Independent Reviewer, nova sessao read-only. P4-PR04 RUNNING; sem integracao, merge ou P5. Ver EVIDENCE.
 
-## Estado atual - P4-PR04 REVIEW_READY_FOR_AUDITOR (2026-11-26)
+## Registro anterior - P4-PR04 REVIEW_READY_FOR_AUDITOR (2026-11-26)
 
 Candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99, Security Review e Independent Reviewer GREEN. 197 entradas, 16 blobs, cobertura e I1-I5 verificados, provas 286/286 e 73/73 preservadas, risco residual nao bloqueante. Proximo ator Auditor independente, nova sessao read-only. P4-PR04 RUNNING; sem integracao, merge ou P5. Ver EVIDENCE.
+
+## Estado atual - P4-PR04 AUDIT_GREEN (2026-11-26)
+
+Candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99, Security Review, Independent Reviewer e Auditor GREEN. 307 entradas, 180 arquivos e 7 controles negativos aprovados. Integrator autorizado apenas ao push normal da branch e abertura da PR contra phase-2/runtime-v0, com identidade e gates pos-abertura. P4-PR04 RUNNING; sem merge ou P5. Ver EVIDENCE.
