@@ -9,6 +9,7 @@ import {
 import {
   StreamRedactor,
   PersistentTranscriptStore,
+  TRANSCRIPT_REDACTION_PLACEHOLDER,
   type TranscriptRecord,
   type TranscriptView,
   type StreamRedactionPolicy,
@@ -138,12 +139,17 @@ interface SessionRecord extends WorkerSessionIdentity {
   historyTruncated: boolean;
   started: boolean;
   failure: boolean;
+  exitSeen: boolean;
+  // Only events admitted in this observation lifetime may mutate a record.
+  liveBinding: { accessMode: TerminalSessionRequest["accessMode"]; admitted: boolean; ready: Promise<boolean> } | null;
   persistenceError: Error | null;
   queue: Promise<void>;
-  redactors: Map<"stdout" | "stderr", StreamRedactorSession>;
+  redactors: Map<OutputChannel, StreamRedactorSession>;
   liveActivityEvents: LiveActivityEvent[];
   liveActivityState: LiveActivityEvent["transition"]["to"] | null;
 }
+
+type OutputChannel = Extract<TerminalSessionEvent, { type: "TERMINAL_OUTPUT" }>["payload"]["stream"];
 
 const sessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const sessionsDirectoryName = "sessions";
@@ -277,7 +283,10 @@ export class WorkerSessionStream {
     const record = this.sessions.get(sessionId);
     if (!record) throw new Error("worker_session_not_found");
     const transcript = this.transcriptFor(record);
-    const terminalSnapshot = this.terminals.list().find((item) => item.terminalSessionId === sessionId) ?? null;
+    // A historical ID is not proof that a manager session belongs to this lifecycle.
+    const terminalSnapshot = record.liveBinding?.admitted && !record.persistenceError
+      ? this.terminals.list().find((item) => matchesTerminalSnapshot(record, item) && item.status === record.state) ?? null
+      : null;
     return Object.freeze({
       ...this.descriptor(record),
       terminalSnapshot,
@@ -314,15 +323,20 @@ export class WorkerSessionStream {
     const sessionKey = request.terminalSessionId.toLowerCase();
     if (this.sessionKeys.has(sessionKey)) throw new Error("worker_session_id_already_exists");
     const record = this.recordFromRequest(request);
+    let settleAdmission!: (accepted: boolean) => void;
+    const ready = new Promise<boolean>((resolveAdmission) => { settleAdmission = resolveAdmission; });
+    record.liveBinding = { accessMode: request.accessMode, admitted: false, ready };
     this.sessions.set(record.sessionId, record);
     this.sessionKeys.add(sessionKey);
     try {
       const handle = await this.terminals.start(request);
+      record.liveBinding.admitted = true;
+      settleAdmission(true);
       const completion = handle.completion.then(async (result) => {
         await record.queue;
         if (record.persistenceError) throw record.persistenceError;
         // A settled terminal process is not proof that its terminal event was committed.
-        if (!record.terminal || result.status !== record.state) {
+        if (!record.terminal || result.status !== record.state || !matchesTerminalSnapshot(record, result)) {
           throw new Error("worker_session_terminal_persistence_failed");
         }
         return Object.freeze({
@@ -334,6 +348,7 @@ export class WorkerSessionStream {
       });
       return Object.freeze({ sessionId: record.sessionId, completion });
     } catch (error) {
+      settleAdmission(false);
       this.sessions.delete(record.sessionId);
       this.sessionKeys.delete(sessionKey);
       throw error;
@@ -345,13 +360,21 @@ export class WorkerSessionStream {
     assertSessionId(sessionId);
     const record = this.sessions.get(sessionId);
     if (!record) throw new Error("worker_session_not_found");
-    await record.queue;
-    try {
-      const result = await record.eventLog.replay(record.contractId, cursor, limit);
-      return this.mapReplay(record, result);
-    } catch {
-      return this.invalidReplay(record);
-    }
+    // Serialize the read with the same persistence queue. A replay cannot
+    // silently incorporate an authenticated append outside this lifecycle.
+    const replay = record.queue.then(async () => {
+      try {
+        const result = await record.eventLog.replay(record.contractId, cursor, limit);
+        if (result.status !== "invalid" && result.headSequence !== record.nextSequence - 1) {
+          return this.invalidReplay(record);
+        }
+        return this.mapReplay(record, result);
+      } catch {
+        return this.invalidReplay(record);
+      }
+    });
+    record.queue = replay.then(() => undefined);
+    return replay;
   }
 
   async close(): Promise<void> {
@@ -458,11 +481,14 @@ export class WorkerSessionStream {
       historyTruncated: false,
       started: false,
       failure: false,
+      exitSeen: false,
+      liveBinding: null,
       persistenceError: null,
       queue: Promise.resolve(),
       redactors: new Map([
         ["stdout", this.redactor.start(redactorMaximumPendingBytes)],
         ["stderr", this.redactor.start(redactorMaximumPendingBytes)],
+        ["terminal", this.redactor.start(redactorMaximumPendingBytes)],
       ]),
       liveActivityEvents: [],
       liveActivityState: null,
@@ -476,9 +502,9 @@ export class WorkerSessionStream {
   }
 
   private async acceptTerminalEvent(event: TerminalSessionEvent): Promise<void> {
-    if (this.closed) return;
-    const record = this.sessions.get(event.terminalSessionId);
-    if (!record) {
+    if (this.closed || !sessionIdPattern.test(event.terminalSessionId)) return;
+    let current = this.sessions.get(event.terminalSessionId);
+    if (!current) {
       if (event.type !== "TERMINAL_SESSION_STARTED") return;
       const identity: WorkerSessionIdentity = {
         sessionId: event.terminalSessionId,
@@ -490,19 +516,30 @@ export class WorkerSessionStream {
         workspaceId: event.workspaceId,
         workspaceRoot: event.payload.cwd,
       };
-      assertSessionId(identity.sessionId);
       const sessionKey = identity.sessionId.toLowerCase();
-      // A terminal started outside the stream must not bind an alias to existing history.
       if (this.sessionKeys.has(sessionKey)) return;
-      this.sessions.set(identity.sessionId, this.newRecord(identity, this.eventLogFor(identity.sessionId), "starting", "online", false));
+      // Only a fresh manager START with matching canonical identity can be observed.
+      const managerSnapshot = this.terminals.list().find(item => item.terminalSessionId === identity.terminalSessionId);
+      if (!managerSnapshot || !matchesIdentity(identity, managerSnapshot) || managerSnapshot.accessMode !== event.accessMode) return;
+      current = this.newRecord(identity, this.eventLogFor(identity.sessionId), "starting", "online", false);
+      current.liveBinding = { accessMode: event.accessMode, admitted: true, ready: Promise.resolve(true) };
+      this.sessions.set(identity.sessionId, current);
       this.sessionKeys.add(sessionKey);
     }
-    const current = this.sessions.get(event.terminalSessionId)!;
-    current.queue = current.queue.then(async () => {
-      // An earlier gap makes every later event untrustworthy, even if storage recovers.
-      if (!current.persistenceError) await this.persistTerminalEvent(current, event);
-    }).catch(() => this.markPersistenceFailure(current));
-    await current.queue;
+    const binding = current.liveBinding;
+    // Rehydration never grants a new process authority over a historical ID.
+    if (!binding) return;
+    const admittedRecord = current;
+    // Capture the manager event before another observer can mutate its payload.
+    let detached: TerminalSessionEvent;
+    try { detached = cloneData(event); } catch { this.markPersistenceFailure(admittedRecord); return; }
+    admittedRecord.queue = admittedRecord.queue.then(async () => {
+      // A competing manager start cannot write while our reservation is unconfirmed.
+      if (await binding.ready && !admittedRecord.persistenceError) {
+        await this.persistTerminalEvent(admittedRecord, detached);
+      }
+    }).catch(() => this.markPersistenceFailure(admittedRecord));
+    await admittedRecord.queue;
   }
 
   private markPersistenceFailure(record: SessionRecord): void {
@@ -515,8 +552,7 @@ export class WorkerSessionStream {
   private async persistTerminalEvent(record: SessionRecord, event: TerminalSessionEvent): Promise<void> {
     assertEventIdentity(record, event);
     if (!terminalEventTypes.has(event.type)) throw new Error("worker_session_event_invalid");
-    if (!record.started && event.type !== "TERMINAL_SESSION_STARTED") throw new Error("worker_session_start_missing");
-    if (record.terminal && event.type !== "TERMINAL_SESSION_EXITED") throw new Error("worker_session_event_after_terminal");
+    assertLifecycleTransition(record, event.type);
     if (event.sequence <= record.lastTerminalSequence) throw new Error("worker_session_terminal_order_invalid");
 
     if (event.type === "TERMINAL_OUTPUT") {
@@ -546,12 +582,13 @@ export class WorkerSessionStream {
   }
 
   private async redactedOutput(record: SessionRecord, event: Extract<TerminalSessionEvent, { type: "TERMINAL_OUTPUT" }>): Promise<Record<string, any> | null> {
-    const stream = event.payload.stream === "stderr" ? "stderr" : "stdout";
+    const stream = event.payload.stream;
+    if (!isOutputChannel(stream)) throw new Error("worker_session_output_channel_invalid");
     const redactor = record.redactors.get(stream);
     if (!redactor) throw new Error("worker_session_redactor_unavailable");
     const fragment = redactor.push(event.payload.data);
     if (!fragment.text) return null;
-    return { stream: event.payload.stream, data: fragment.text, redactionCount: fragment.redactionCount };
+    return { stream, data: fragment.text, redactionCount: fragment.redactionCount };
   }
 
   private async flushRedactors(record: SessionRecord): Promise<void> {
@@ -632,10 +669,24 @@ export class WorkerSessionStream {
   }
 
   private sanitizeStartedPayload(payload: Extract<TerminalSessionEvent, { type: "TERMINAL_SESSION_STARTED" }>["payload"]): Record<string, any> {
+    if (typeof payload.command !== "string" || !Array.isArray(payload.args)
+      || !payload.args.every((argument) => typeof argument === "string")) {
+      throw new Error("worker_session_start_payload_invalid");
+    }
+    const command = this.redactor.redact(payload.command).text;
+    const args = payload.args.map((argument) => this.redactor.redact(argument).text);
+    // The policy recognizes sensitive CLI/assignment values in context. An argv
+    // vector is not a shell string: quoting and whitespace have already been
+    // resolved. If any member or the full context needs redaction, mask the
+    // complete argument vector rather than risk exposing part of a value.
+    const context = [payload.command, ...payload.args].join(" ");
+    const sensitive = command !== payload.command
+      || args.some((argument, index) => argument !== payload.args[index] || argument === TRANSCRIPT_REDACTION_PLACEHOLDER)
+      || this.redactor.redact(context).text !== context;
     return {
       ...cloneData(payload),
-      command: this.redactor.redact(payload.command).text,
-      args: payload.args.map((argument) => this.redactor.redact(argument).text),
+      command,
+      args: sensitive ? payload.args.map(() => TRANSCRIPT_REDACTION_PLACEHOLDER) : args,
     };
   }
 
@@ -645,9 +696,10 @@ export class WorkerSessionStream {
     payload: Record<string, any>,
     synthetic: boolean,
   ): Promise<void> {
-    const stream = terminalEvent.type === "TERMINAL_OUTPUT"
-      ? payload.stream === "stderr" ? "stderr" : payload.stream === "terminal" ? "terminal" : "stdout"
-      : "system";
+    if (terminalEvent.type === "TERMINAL_OUTPUT" && !isOutputChannel(payload.stream)) {
+      throw new Error("worker_session_output_channel_invalid");
+    }
+    const stream = terminalEvent.type === "TERMINAL_OUTPUT" ? payload.stream as OutputChannel : "system";
     const content = terminalEvent.type === "TERMINAL_OUTPUT" ? payload.data : JSON.stringify(payload);
     if (typeof content !== "string") throw new Error("worker_session_transcript_payload_invalid");
     const writer = this.transcript.beginRecord({
@@ -743,6 +795,7 @@ export class WorkerSessionStream {
       return;
     }
     if (event.type === "TERMINAL_SESSION_EXITED") {
+      record.exitSeen = true;
       record.terminal = true;
       record.liveness = record.failure ? "failed" : "terminal";
       record.state = record.failure
@@ -759,22 +812,13 @@ export class WorkerSessionStream {
   }
 
   private applyStoredEvent(record: SessionRecord, stored: StoredSessionPayload, type: TerminalSessionEvent["type"], sequence: number, occurredAt: string): void {
-    if (stored.sessionId !== record.sessionId || stored.contractId !== record.contractId
-      || stored.terminalSessionId !== record.terminalSessionId || stored.agentInstanceId !== record.agentInstanceId
-      || stored.roleId !== record.roleId || stored.runtimeId !== record.runtimeId
-      || stored.workspaceId !== record.workspaceId || stored.workspaceRoot !== record.workspaceRoot) {
-      throw new Error("worker_session_identity_drift");
-    }
-    if (!stored.synthetic && stored.terminalSequence <= record.lastTerminalSequence) {
+    this.assertStoredPublicPayload(record, stored, type);
+    assertLifecycleTransition(record, type);
+    if ((!stored.synthetic && stored.terminalSequence <= record.lastTerminalSequence)
+      || (stored.synthetic && stored.terminalSequence < record.lastTerminalSequence)) {
       throw new Error("worker_session_terminal_order_invalid");
     }
-    if (stored.synthetic && stored.payload.stream === undefined) throw new Error("worker_session_flush_invalid");
-    record.lastTerminalSequence = Math.max(record.lastTerminalSequence, stored.terminalSequence);
-    if (stored.payload.stream === "stdout" || stored.payload.stream === "stderr") {
-      if (typeof stored.payload.data !== "string" || this.redactor.redact(stored.payload.data).text !== stored.payload.data) {
-        throw new Error("worker_session_output_not_redacted");
-      }
-    }
+    record.lastTerminalSequence = stored.terminalSequence;
     if (type === "TERMINAL_SESSION_STARTED") {
       if (record.started || stored.synthetic) throw new Error("worker_session_start_invalid");
       record.started = true;
@@ -789,6 +833,7 @@ export class WorkerSessionStream {
       record.state = "failed";
       record.liveness = "failed";
     } else if (type === "TERMINAL_SESSION_EXITED") {
+      record.exitSeen = true;
       record.terminal = true;
       record.liveness = record.failure ? "failed" : "terminal";
       const payload = stored.payload;
@@ -806,6 +851,29 @@ export class WorkerSessionStream {
       throw new Error("worker_session_flush_invalid");
     }
     this.appendLiveActivity(record, { type, occurredAt, payload: stored.payload });
+  }
+
+  private assertStoredPublicPayload(record: SessionRecord, stored: StoredSessionPayload, type: TerminalSessionEvent["type"]): void {
+    if (stored.sessionId !== record.sessionId || stored.workspaceRoot !== record.workspaceRoot || !matchesIdentity(record, stored)) {
+      throw new Error("worker_session_identity_drift");
+    }
+    if (stored.synthetic && type !== "TERMINAL_OUTPUT") throw new Error("worker_session_flush_invalid");
+    if (type === "TERMINAL_SESSION_STARTED") {
+      const payload = stored.payload;
+      if (typeof payload.cwd !== "string" || !sameWorkspaceRoot(record.workspaceRoot, payload.cwd)) {
+        throw new Error("worker_session_identity_drift");
+      }
+      const sanitized = this.sanitizeStartedPayload(payload as Extract<TerminalSessionEvent, { type: "TERMINAL_SESSION_STARTED" }>["payload"]);
+      if (sanitized.command !== payload.command || JSON.stringify(sanitized.args) !== JSON.stringify(payload.args)) {
+        throw new Error("worker_session_start_not_redacted");
+      }
+    }
+    if (type === "TERMINAL_OUTPUT") {
+      if (!isOutputChannel(stored.payload.stream) || typeof stored.payload.data !== "string"
+        || this.redactor.redact(stored.payload.data).text !== stored.payload.data) {
+        throw new Error("worker_session_output_not_redacted");
+      }
+    }
   }
 
   private publicEvent(record: SessionRecord, event: MorrowEvent<StoredSessionPayload>, sequence: number, payload: Record<string, any>): WorkerSessionStreamEvent {
@@ -839,6 +907,7 @@ export class WorkerSessionStream {
       headSequence: result.headSequence,
       events: Object.freeze(result.events.map((event, index) => {
         const stored = parseStoredEvent(event, record.sessionId, result.cursor.sequence + index + 1);
+        this.assertStoredPublicPayload(record, stored, event.type as TerminalSessionEvent["type"]);
         return this.publicEvent(record, event as MorrowEvent<StoredSessionPayload>, result.cursor.sequence + index + 1, stored.payload);
       })),
     });
@@ -894,7 +963,8 @@ export class WorkerSessionStream {
     const view = this.transcript.inspect("worker-session-stream");
     const records = view.records.filter((item) => item.contractId === record.contractId
       && item.terminalSessionId === record.terminalSessionId
-      && item.agentInstanceId === record.agentInstanceId);
+      && item.agentInstanceId === record.agentInstanceId
+      && item.stepId === "worker-session-stream" && item.writerId === "worker-session-stream");
     return Object.freeze({
       ...view,
       records: Object.freeze(records),
@@ -940,12 +1010,44 @@ function parseStoredEvent(value: MorrowEvent, sessionId: string, sequence: numbe
   return payload as unknown as StoredSessionPayload;
 }
 
+function sameWorkspaceRoot(left: string, right: string): boolean {
+  if (typeof left !== "string" || typeof right !== "string" || !isAbsolute(left) || !isAbsolute(right)) return false;
+  const a = resolve(left), b = resolve(right);
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+function matchesIdentity(record: WorkerSessionIdentity, item: Omit<WorkerSessionIdentity, "sessionId">): boolean {
+  return item.terminalSessionId === record.terminalSessionId && item.agentInstanceId === record.agentInstanceId
+    && item.contractId === record.contractId && item.roleId === record.roleId && item.runtimeId === record.runtimeId
+    && item.workspaceId === record.workspaceId && sameWorkspaceRoot(record.workspaceRoot, item.workspaceRoot);
+}
+
+function matchesTerminalSnapshot(record: SessionRecord, item: TerminalSessionSnapshot): boolean {
+  return record.liveBinding?.admitted === true && item.accessMode === record.liveBinding.accessMode && matchesIdentity(record, item);
+}
+
 function assertEventIdentity(record: SessionRecord, event: TerminalSessionEvent): void {
   if (event.terminalSessionId !== record.terminalSessionId || event.agentInstanceId !== record.agentInstanceId
     || event.contractId !== record.contractId || event.roleId !== record.roleId
-    || event.runtimeId !== record.runtimeId || event.workspaceId !== record.workspaceId) {
+    || event.runtimeId !== record.runtimeId || event.workspaceId !== record.workspaceId
+    || event.accessMode !== record.liveBinding?.accessMode
+    || (event.type === "TERMINAL_SESSION_STARTED" && !sameWorkspaceRoot(record.workspaceRoot, event.payload.cwd))) {
     throw new Error("worker_session_identity_drift");
   }
+}
+
+function assertLifecycleTransition(record: SessionRecord, type: TerminalSessionEvent["type"]): void {
+  if (type === "TERMINAL_SESSION_STARTED" && record.started) throw new Error("worker_session_start_invalid");
+  if (!record.started && type !== "TERMINAL_SESSION_STARTED") throw new Error("worker_session_start_missing");
+  // The manager may emit FAILED followed by the one physical EXIT. Neither
+  // duplicate EXIT nor any new START/output after a terminal outcome is valid.
+  if (record.terminal && !(record.failure && !record.exitSeen && type === "TERMINAL_SESSION_EXITED")) {
+    throw new Error("worker_session_event_after_terminal");
+  }
+}
+
+function isOutputChannel(value: unknown): value is OutputChannel {
+  return value === "stdout" || value === "stderr" || value === "terminal";
 }
 
 async function ensureSafeDirectory(path: string): Promise<void> {

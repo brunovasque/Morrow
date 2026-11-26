@@ -1,6 +1,6 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   defaultWorkerPrivateStateRoot,
@@ -734,10 +734,13 @@ export class PersistentEventLogAuthority {
       format: eventLogBindingFormat, authorityRef: this.authorityRef, eventLogId, historyStarted: false,
       bindingTag: await hmacHex(key, eventLogBindingDomain, canonicalBinding({ format: eventLogBindingFormat, authorityRef: this.authorityRef, eventLogId, historyStarted: false })),
     };
-    try { await writeFile(bindingPath, `${JSON.stringify(binding)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 }); }
-    catch (createError) {
-      if (!isAlreadyExists(createError)) throw new Error("event_log_authority_binding_failed");
-      return await this.readBinding(eventLogId);
+    try {
+      if (!await publishNewAuthorityFile(bindingPath, `${JSON.stringify(binding)}\n`)) {
+        return await this.readBinding(eventLogId);
+      }
+    } catch (createError) {
+      if (createError instanceof Error && createError.message.startsWith("event_log_authority_")) throw createError;
+      throw new Error("event_log_authority_binding_failed");
     }
     return binding;
   }
@@ -789,10 +792,16 @@ export class PersistentEventLogAuthority {
     catch (error) {
       if (!createIfMissing || (error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("event_log_authority_unavailable");
       const entries = await (await import("node:fs/promises")).readdir(this.authorityRoot);
-      if (entries.some((entry) => entry.endsWith(".binding.json") || entry.endsWith(".head.journal"))) throw new Error("event_log_authority_rebootstrap_denied");
-      try { await writeFile(this.keyPath, randomBytes(eventLogAuthorityKeyBytes), { flag: "wx", mode: 0o600 }); }
-      catch (createError) { if (!isAlreadyExists(createError)) throw new Error("event_log_authority_unavailable"); }
-      this.authorityKey = await readKeyFile(this.keyPath);
+      if (entries.some((entry) => entry.endsWith(".binding.json") || entry.endsWith(".head.journal"))) {
+        // Another bootstrap may have finished between our ENOENT and readdir.
+        // Read only the published key; never create one when history exists.
+        try { this.authorityKey = await readKeyFile(this.keyPath); }
+        catch { throw new Error("event_log_authority_rebootstrap_denied"); }
+      } else {
+        try { await publishNewAuthorityFile(this.keyPath, randomBytes(eventLogAuthorityKeyBytes)); }
+        catch { throw new Error("event_log_authority_unavailable"); }
+        this.authorityKey = await readKeyFile(this.keyPath);
+      }
     }
     return Buffer.from(this.authorityKey);
   }
@@ -1012,6 +1021,32 @@ function sameAnchorSummary(left: EventLogHeadAnchor | { generation: number; sequ
   if (left === null || right === null) return left === right;
   return left.generation === right.generation && left.sequence === right.sequence
     && constantTimeHexEqual(left.eventTag, right.eventTag);
+}
+
+// Publish an immutable bootstrap file only after its contents have been
+// completely written and flushed. Hard-link creation is exclusive: a loser
+// reads the winner rather than replacing the established key or binding.
+async function publishNewAuthorityFile(path: string, content: string | Buffer): Promise<boolean> {
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, content, { flag: "wx", mode: 0o600, flush: true });
+  } catch (error) {
+    if (!isAlreadyExists(error)) {
+      await unlink(temporary).catch((cleanupError: NodeJS.ErrnoException) => {
+        if (cleanupError.code !== "ENOENT") throw cleanupError;
+      });
+    }
+    throw error;
+  }
+  try {
+    await link(temporary, path);
+    return true;
+  } catch (error) {
+    if (isAlreadyExists(error)) return false;
+    throw error;
+  } finally {
+    await unlink(temporary);
+  }
 }
 
 async function readKeyFile(path: string): Promise<Buffer> {

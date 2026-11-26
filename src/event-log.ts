@@ -1,6 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { constants } from "node:fs";
-import { createReadStream } from "node:fs";
 import { lstat, mkdir, open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { defaultEventLogAuthority, type EventLogAuthorityCapability, type EventLogHeadAnchor, type EventLogRecord, type EventLogStreamCapability } from "./governance-registries.ts";
@@ -188,7 +187,6 @@ export class JsonlEventLog implements EventLog {
     const eventIds = new EventIdBloom();
     let bytes = 0;
     let records = 0;
-    let input: ReturnType<typeof createReadStream> | undefined;
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     let openedFileIdentity: { dev: number; ino: number } | undefined;
     const anchorList = await this.authority.readAnchors();
@@ -245,9 +243,14 @@ export class JsonlEventLog implements EventLog {
       const opened = await handle.stat();
       if (!sameFileIdentity(pathBefore, opened)) throw new Error("morrow_event_log_path_race");
       openedFileIdentity = { dev: opened.dev, ino: opened.ino };
-      input = createReadStream(this.filePath, { fd: handle.fd, autoClose: false });
-      for await (const chunk of input) {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      // One FileHandle owns the descriptor for the entire bounded scan.
+      // Destroying a ReadStream built from handle.fd also closes that raw fd,
+      // even with autoClose:false; a second close can race descriptor reuse.
+      for (;;) {
+        const chunk = Buffer.allocUnsafe(64 * 1024);
+        const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+        if (bytesRead === 0) break;
+        const buffer = chunk.subarray(0, bytesRead);
         bytes += buffer.length;
         if (bytes > maximumEventLogBytes) throw new Error("morrow_event_log_too_large");
         let offset = 0;
@@ -291,8 +294,7 @@ export class JsonlEventLog implements EventLog {
       if (error instanceof Error && error.message.startsWith("event_log_")) throw new Error("morrow_event_log_anchor_invalid");
       throw new Error("morrow_event_log_read_failed");
     } finally {
-      if (input && !input.destroyed) input.destroy();
-      await handle?.close().catch(() => undefined);
+      await handle?.close().catch(() => { throw new Error("morrow_event_log_read_failed"); });
     }
     const reconciledAnchors = await reconcileAnchors(this.authority, anchors, heads, lastHashes);
     return { bytes, records, heads, lastHashes, eventIds, anchors: reconciledAnchors, fileIdentity: openedFileIdentity };

@@ -242,7 +242,7 @@ try {
 
   currentStage = "remove-fixture";
   assertFixtureCleanupScope(fixtureRoot);
-  await rm(fixtureRoot, { recursive: true, force: false });
+  await rm(fixtureRoot, { recursive: true, force: false, maxRetries: 5, retryDelay: 100 });
   fixtureRemoved = true;
   const report = {
     ok: true,
@@ -265,7 +265,7 @@ try {
   try {
     if (!fixtureRemoved) {
       assertFixtureCleanupScope(fixtureRoot);
-      await rm(fixtureRoot, { recursive: true, force: true });
+      await rm(fixtureRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   } finally {
     clearTimeout(hardDeadline);

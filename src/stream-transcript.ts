@@ -19,7 +19,7 @@ export const TRANSCRIPT_FORMAT = "morrow.transcript/1.0" as const;
 export const TRANSCRIPT_REDACTION_PLACEHOLDER = "[REDACTED]" as const;
 export const SENSITIVE_INPUT_PLACEHOLDER = "[SENSITIVE_INPUT_REDACTED]" as const;
 
-export type TranscriptStream = "stdout" | "stderr" | "input" | "system";
+export type TranscriptStream = "stdout" | "stderr" | "terminal" | "input" | "system";
 
 export interface TranscriptRetentionPolicy {
   maxAgeMs: number;
@@ -2236,7 +2236,7 @@ function trustedNow(clock?: () => string | number | Date): string {
 }
 
 function isTranscriptStream(value: unknown): value is TranscriptStream {
-  return value === "stdout" || value === "stderr" || value === "input" || value === "system";
+  return value === "stdout" || value === "stderr" || value === "terminal" || value === "input" || value === "system";
 }
 
 function isIdentifier(value: unknown): value is string {

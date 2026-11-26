@@ -12,7 +12,7 @@ import {
   WorkerSessionStream,
   type WorkerSessionStreamEvent,
 } from "../src/worker-session-stream.ts";
-import { PersistentTranscriptStore } from "../src/stream-transcript.ts";
+import { PersistentTranscriptStore, StreamRedactor } from "../src/stream-transcript.ts";
 import { LIVE_ACTIVITY_MAX_EVENTS } from "../src/live-activity.ts";
 
 async function harness(t: test.TestContext, options: { maxEventsPerSession?: number } = {}) {
@@ -623,4 +623,259 @@ test("recovery adversarial: concurrent case-alias starts reserve exactly one ide
   assert.equal(terminals.list().length, 1);
   assert.equal(stream.list().length, 1);
   assert.equal((await stream.replay(successes[0]!.value.sessionId)).status, "ok");
+});
+
+async function reopenRecoveryStream(root: string, terminals: TerminalSessionManager) {
+  return WorkerSessionStream.open({
+    stateRoot: join(root, "session-stream"),
+    terminals,
+    redaction: { policyId: "p4-pr04-test", sensitiveLiterals: ["MORROW_SECRET_CANARY"] },
+  });
+}
+
+test("recovery P2-05: sensitive argument boundaries are sanitized before every public surface", { timeout: 30_000 }, async (t) => {
+  const { root, stream, workspaces } = await harness(t);
+  const scenarios = [
+    ["--password", "SYNTHETIC_VALUE_05 with spaces"],
+    ["--api-key=SYNTHETIC_VALUE_06 with spaces"],
+    ["Bearer", "SYNTHETIC_VALUE_07"],
+    ["TOKEN", "=", "SYNTHETIC_VALUE_08 with spaces"],
+    ["--authorization", "Bearer", "SYNTHETIC_VALUE_09"],
+    ["--safe", "SYNTHETIC_VALUE_10", "--token", "SYNTHETIC_VALUE_11"],
+  ];
+  const allLive: WorkerSessionStreamEvent[][] = [];
+  const failures: string[] = [];
+  for (const [index, argv] of scenarios.entries()) {
+    const sessionId = "T-argv-" + index;
+    const workspace = await workspaces.create({ workspaceId: "W-argv-" + index, contractId: "C-P4-PR04", roleId: "executor" });
+    const live: WorkerSessionStreamEvent[] = [];
+    allLive.push(live);
+    stream.subscribe(sessionId, event => live.push(event));
+    const req = request(workspace, sessionId, "process.stdout.write('SAFE PROCESS OUTPUT')");
+    req.args.push("--", ...argv);
+    const result = await (await stream.start(req)).completion;
+    assert.equal(result.status, "completed");
+    assert.ok(result.stdout.includes("SAFE PROCESS OUTPUT"));
+    const replay = await stream.replay(sessionId);
+    assert.equal(replay.status, "ok");
+    assert.deepEqual(live, replay.events);
+    const disk = await (await import("node:fs/promises")).readFile(join(root, "session-stream", "sessions", sessionId + ".event-log"), "utf8");
+    const value = JSON.stringify([live, replay, stream.snapshot(sessionId), result, disk]);
+    const marker = argv.flatMap(arg => arg.match(/SYNTHETIC_VALUE_\d+/g) ?? []).filter(x => x !== "SYNTHETIC_VALUE_10");
+    if (marker.some(x => value.includes(x))) failures.push(sessionId);
+  }
+  const safeWorkspace = await workspaces.create({workspaceId:"W-argv-safe",contractId:"C-P4-PR04",roleId:"executor"});
+  const safeRequest = request(safeWorkspace,"T-argv-safe","process.exit(0)");
+  safeRequest.args.push("--","--safe","ORDINARY_PUBLIC_ARGUMENT");
+  await (await stream.start(safeRequest)).completion;
+  assert.ok(JSON.stringify(await stream.replay("T-argv-safe")).includes("ORDINARY_PUBLIC_ARGUMENT"));
+  await stream.close();
+  const restarted = await reopenRecoveryStream(root, new TerminalSessionManager(join(root,"managed-workspaces")));
+  try {
+    for (const [index, argv] of scenarios.entries()) {
+      const sessionId = "T-argv-" + index;
+      const data = JSON.stringify([await restarted.replay(sessionId), restarted.snapshot(sessionId)]);
+      if (argv.flatMap(arg => arg.match(/SYNTHETIC_VALUE_\d+/g) ?? []).filter(x => x !== "SYNTHETIC_VALUE_10").some(x=>data.includes(x))) failures.push("restart:"+sessionId);
+    }
+    assert.deepEqual(failures, []);
+  } finally { await restarted.close(); }
+});
+
+test("recovery P2-06: historical snapshots never attach foreign or same-identity live manager sessions", {timeout:30_000}, async t => {
+  const {root, stream, workspaces, terminals} = await harness(t);
+  const original = await workspaces.create({workspaceId:"W-history-original",contractId:"C-original",roleId:"executor"});
+  const foreign = await workspaces.create({workspaceId:"W-history-foreign",contractId:"C-foreign",roleId:"reviewer"});
+  const originalRequest=request(original,"T-history-snapshot","process.exit(0)");
+  await (await stream.start(originalRequest)).completion;
+  assert.equal(stream.snapshot("T-history-snapshot").terminalSnapshot?.contractId,"C-original");
+  await stream.close();
+  for(const workspace of [foreign, original]) {
+    const manager = new TerminalSessionManager(join(root,"managed-workspaces"));
+    const reopened = await reopenRecoveryStream(root,manager);
+    try {
+      const handle = await manager.start(request(workspace,"T-history-snapshot","process.stdin.once('data',()=>process.exit(0))"));
+      const settled = handle.completion;
+      try {
+        assert.equal(reopened.snapshot("T-history-snapshot").terminalSnapshot,null);
+      } finally {
+        if(manager.snapshot("T-history-snapshot").status==="running"||manager.snapshot("T-history-snapshot").status==="starting") await manager.write("T-history-snapshot","finish\n");
+        await settled;
+      }
+    } finally { await reopened.close(); }
+  }
+  void terminals;
+});
+
+test("recovery P2-07: exact historical identity cannot acquire a new lifecycle or mutate durable history", {timeout:30_000}, async t => {
+  const {root,stream,workspaces,terminals}=await harness(t);
+  const oldWorkspace=await workspaces.create({workspaceId:"W-history-lifecycle",contractId:"C-P4-PR04",roleId:"executor"});
+  const live = new Promise<void>(resolve=>stream.subscribe("T-history-lifecycle",e=>{if(e.type==="TERMINAL_SESSION_STARTED")resolve()}));
+  const original=await stream.start({...request(oldWorkspace,"T-history-lifecycle","process.stdin.once('data',()=>process.exit(0))"),timeoutMs:20_000});
+  const originalOutcome=original.completion.then(()=>false,()=>true);
+  await live;
+  await stream.close();
+  await terminals.write("T-history-lifecycle","finish\n");
+  assert.equal(await originalOutcome,true);
+  const manager=new TerminalSessionManager(join(root,"managed-workspaces"));
+  const reopened=await reopenRecoveryStream(root,manager);
+  const before=await reopened.replay("T-history-lifecycle");
+  const beforeDescriptor=reopened.list().find(x=>x.sessionId==="T-history-lifecycle");
+  const beforeTranscript=reopened.transcriptRecords("T-history-lifecycle");
+  const observed: WorkerSessionStreamEvent[]=[];
+  reopened.subscribe("T-history-lifecycle",e=>observed.push(e));
+  const bump=await workspaces.create({workspaceId:"W-history-bump",contractId:"C-P4-PR04",roleId:"executor"});
+  await (await reopened.start(request(bump,"T-history-bump","process.stdout.write('BUMP')"))).completion;
+  const duplicate=await manager.start(request(oldWorkspace,"T-history-lifecycle","process.stdout.write('FOREIGN LIFECYCLE')"));
+  await duplicate.completion;
+  const after=await reopened.replay("T-history-lifecycle");
+  const afterDescriptor=reopened.list().find(x=>x.sessionId==="T-history-lifecycle");
+  const afterTranscript=reopened.transcriptRecords("T-history-lifecycle");
+  await reopened.close();
+  const again=await reopenRecoveryStream(root,new TerminalSessionManager(join(root,"managed-workspaces")));
+  try {
+    assert.deepEqual(after,before);
+    assert.deepEqual(afterDescriptor,beforeDescriptor);
+    assert.deepEqual(afterTranscript,beforeTranscript);
+    assert.deepEqual(observed,[]);
+    assert.equal(again.snapshot("T-history-lifecycle").state,"recoverable");
+    assert.deepEqual(await again.replay("T-history-lifecycle"),before);
+  } finally {await again.close()}
+});
+
+test("recovery P3-01 combined: two real ConPTY sessions preserve native channel through flush, redaction and restart", {timeout:40_000}, async t => {
+  const {WindowsConptyTerminalBackend}=await import("../src/windows-conpty-backend.ts");
+  const {mkdir}=await import("node:fs/promises");
+  assert.equal(process.platform,"win32");
+  const root=await mkdtemp(join(tmpdir(),"morrow-recovery-native-"));
+  const managed=join(root,"managed-workspaces");
+  const workspaces=new LocalWorkspaceManager(managed);
+  const manager=new TerminalSessionManager(managed,{backend:new WindowsConptyTerminalBackend()});
+  const stream=await reopenRecoveryStream(root,manager);
+  let restarted: WorkerSessionStream|undefined;
+  t.after(async()=>{
+    for(const session of manager.list())if(session.status==="starting"||session.status==="running")manager.stop(session.terminalSessionId);
+    await Promise.allSettled(manager.list().map(session=>manager.wait(session.terminalSessionId)));
+    await restarted?.close();
+    await stream.close();
+    await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});
+  });
+  const ids=["T-native-new-A","T-native-new-B"];
+  const live=new Map<string,WorkerSessionStreamEvent[]>();
+  const raw=new Map<string,Array<{stream:string;data:string}>>();
+  manager.subscribe(e=>{if(e.type==="TERMINAL_OUTPUT"){const list=raw.get(e.terminalSessionId)??[];list.push({...e.payload});raw.set(e.terminalSessionId,list)}});
+  const ready=ids.map(id=>new Promise<void>(resolve=>{live.set(id,[]);stream.subscribe(id,e=>{live.get(id)!.push(e);if(e.type==="TERMINAL_SESSION_STARTED")resolve()})}));
+  const requests=await Promise.all(ids.map(async id=>{
+    const workspace=await workspaces.create({workspaceId:"W-"+id,contractId:"C-P4-PR04",roleId:"executor"});
+    const profile=join(workspace.root,"profile");
+    const appData=join(profile,"AppData","Roaming"),localAppData=join(profile,"AppData","Local");
+    await mkdir(appData,{recursive:true});await mkdir(localAppData,{recursive:true});
+    const env:Record<string,string>={HOME:profile,USERPROFILE:profile,APPDATA:appData,LOCALAPPDATA:localAppData,POWERSHELL_TELEMETRY_OPTOUT:"1"};
+    for(const key of ["SystemRoot","WINDIR","TEMP","TMP"])if(process.env[key]!==undefined)env[key]=process.env[key]!;
+    const req=request(workspace,id,"process.stdin.once('data',()=>{process.stdout.write('"+id+" SAFE\\nMORROW_SECRET_CANARY\\n');setTimeout(()=>process.exit(0),100)})");
+    req.args.push("--","--password","NATIVE_SYNTHETIC_ARG_8842");
+    return {...req,env,timeoutMs:20_000};
+  }));
+  const handles=await Promise.all(requests.map(req=>stream.start(req)));
+  const outcomes=Promise.allSettled(handles.map(h=>h.completion));
+  await Promise.all(ready);
+  const concurrent=manager.list().filter(s=>s.status==="running");
+  assert.equal(concurrent.length,2);
+  assert.equal(new Set(concurrent.map(s=>s.pid)).size,2);
+  await assert.rejects(stream.start({...requests[1],terminalSessionId:ids[0].toLowerCase()}),/worker_session_id_already_exists/);
+  await Promise.all(ids.map(id=>manager.write(id,"go\r")));
+  const results=await outcomes;
+  assert.ok(results.every(x=>x.status==="fulfilled"&&x.value.status==="completed"));
+  const before=await Promise.all(ids.map(id=>stream.replay(id)));
+  const snapshots=ids.map(id=>stream.snapshot(id));
+  await stream.close();
+  restarted=await reopenRecoveryStream(root,new TerminalSessionManager(managed));
+  for(const [i,id] of ids.entries()){
+    const output=outputEvents(before[i].events);
+    assert.ok(output.length>0);
+    assert.ok(raw.get(id)?.length);
+    assert.ok(raw.get(id)!.every(chunk=>chunk.stream==="terminal"));
+    assert.ok(output.every(e=>e.payload.stream==="terminal"));
+    assert.deepEqual(live.get(id),before[i].events);
+    // ConPTY emits mutating VT controls; the existing fail-closed policy may mask
+    // safe-looking lines. Require actual raw fixture output and exact canonical
+    // redaction, rather than demanding weaker redaction of native VT sequences.
+    const rawText=raw.get(id)!.map(chunk=>chunk.data).join("");
+    assert.ok(rawText.includes(id+" SAFE"), "native process emitted its synthetic marker");
+    assert.ok(rawText.includes("MORROW_SECRET_CANARY"), "native process emitted its synthetic canary");
+    const expected=new StreamRedactor({policyId:"p4-pr04-test",sensitiveLiterals:["MORROW_SECRET_CANARY"]}).redact(rawText).text;
+    assert.equal(output.map(e=>e.payload.data).join(""),expected);
+    assert.equal(results[i].status==="fulfilled"?results[i].value.stdout:null,expected);
+    const transcriptOutput=snapshots[i].transcript.records.filter(r=>r.stream!=="system");
+    assert.ok(transcriptOutput.length>0);
+    assert.ok(transcriptOutput.every(r=>r.stream==="terminal"));
+    assert.equal(transcriptOutput.map(r=>r.content).join(""),expected);
+    assert.equal(JSON.stringify([before[i],snapshots[i],results[i]]).includes("MORROW_SECRET_CANARY"),false);
+    assert.equal(JSON.stringify([before[i],snapshots[i]]).includes("NATIVE_SYNTHETIC_ARG_8842"),false);
+    assert.deepEqual(await restarted.replay(id),before[i]);
+    assert.equal(restarted.snapshot(id).terminalSnapshot,null);
+    assert.ok(restarted.transcriptRecords(id).filter(r=>r.stream!=="system").every(r=>r.stream==="terminal"));
+  }
+});
+
+test("recovery adversarial: failed reservation cannot absorb a competing manager lifecycle; fresh external observation is sanitized", {timeout:30_000}, async t=>{
+  const {root,stream,terminals,workspaces}=await harness(t);
+  const reservedWorkspace=await workspaces.create({workspaceId:"W-reserved",contractId:"C-reserved",roleId:"executor"});
+  const externalWorkspace=await workspaces.create({workspaceId:"W-external",contractId:"C-external",roleId:"reviewer"});
+  const realStart=terminals.start.bind(terminals);
+  let release!:()=>void;
+  const barrier=new Promise<void>(resolve=>{release=resolve});
+  terminals.start=async req=>{await barrier;return realStart(req)};
+  const reserved=stream.start(request(reservedWorkspace,"T-reservation","process.exit(0)"));
+  const rejection=assert.rejects(reserved,/terminal_session_id_already_exists/);
+  try{
+    const external=await realStart(request(externalWorkspace,"T-reservation","process.stdout.write('FOREIGN RESERVATION')"));
+    await external.completion;
+    assert.equal(stream.snapshot("T-reservation").terminalSnapshot,null);
+  }finally{release();terminals.start=realStart;await rejection}
+  assert.equal(stream.list().some(x=>x.sessionId==="T-reservation"),false);
+  const files=await (await import("node:fs/promises")).readdir(join(root,"session-stream","sessions"));
+  assert.equal(files.some(name=>name.toLowerCase().startsWith("t-reservation.")),false);
+  const freshWorkspace=await workspaces.create({workspaceId:"W-fresh-external",contractId:"C-external",roleId:"reviewer"});
+  const req=request(freshWorkspace,"T-fresh-external","process.stdout.write('FRESH EXTERNAL SAFE')");
+  req.args.push("--","EXPLICIT_SYNTHETIC_INDEX_7261","EXPLICIT_SYNTHETIC_INDEX_7261");
+  req.sensitiveArgIndexes=[3];
+  const live:WorkerSessionStreamEvent[]=[];
+  stream.subscribe("T-fresh-external",e=>live.push(e));
+  const external=await realStart(req);
+  await external.completion;
+  const replay=await stream.replay("T-fresh-external");
+  assert.equal(replay.status,"ok");
+  assert.deepEqual(live,replay.events);
+  assert.equal(stream.snapshot("T-fresh-external").terminalSnapshot?.contractId,"C-external");
+  assert.equal(JSON.stringify([replay,stream.snapshot("T-fresh-external")]).includes("EXPLICIT_SYNTHETIC_INDEX_7261"),false);
+  const foreign=(stream as any).transcript.beginRecord({recordId:"same-agent-foreign-step",contractId:req.contractId,stepId:"foreign-step",terminalSessionId:req.terminalSessionId,agentInstanceId:req.agentInstanceId,stream:"stdout",writerId:"worker-session-stream"});
+  foreign.write("FOREIGN STEP SYNTHETIC");
+  await foreign.commit();
+  assert.equal(JSON.stringify(stream.snapshot("T-fresh-external")).includes("FOREIGN STEP SYNTHETIC"),false);
+  await stream.close();
+  const restarted=await reopenRecoveryStream(root,new TerminalSessionManager(join(root,"managed-workspaces")));
+  try{
+    assert.equal(restarted.list().length,1);
+    assert.deepEqual(await restarted.replay("T-fresh-external"),replay);
+    assert.equal(JSON.stringify(restarted.snapshot("T-fresh-external")).includes("FOREIGN STEP SYNTHETIC"),false);
+  }finally{await restarted.close()}
+});
+
+test("recovery adversarial: authenticated out-of-lifecycle append cannot be replayed or reopened as a valid history", {timeout:20_000}, async t=>{
+  const {root,stream,workspaces}=await harness(t);
+  const workspace=await workspaces.create({workspaceId:"W-extra-exit",contractId:"C-P4-PR04",roleId:"executor"});
+  const sessionId="T-extra-exit";
+  await (await stream.start(request(workspace,sessionId,"process.exit(0)"))).completion;
+  const before=await stream.replay(sessionId);
+  assert.equal(before.status,"ok");
+  const record=(stream as any).sessions.get(sessionId);
+  const stored=await record.eventLog.readAll();
+  const terminal=stored.at(-1);
+  assert.equal(terminal.type,"TERMINAL_SESSION_EXITED");
+  // Fixture-only authenticated append, not a tampered JSONL/HMAC.
+  await record.eventLog.append({...terminal,eventId:sessionId+":"+(stored.length+1),payload:{...terminal.payload,terminalSequence:terminal.payload.terminalSequence+1}});
+  assert.equal((await stream.replay(sessionId)).status,"invalid");
+  assert.equal((await stream.replay(sessionId,before.nextCursor)).status,"invalid");
+  await stream.close();
+  await assert.rejects(reopenRecoveryStream(root,new TerminalSessionManager(join(root,"managed-workspaces"))),/worker_session_event_after_terminal/);
 });
