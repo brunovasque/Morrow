@@ -13,26 +13,26 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR04`
 - `active_route_node`: `MULTI_SESSION_STREAM_API_OBSERVABILITY`
-- `active_subaction`: `P4_PR04_PR_OPENED_AWAITING_PRE_MERGE_AUDIT`
+- `active_subaction`: `P4_PR04_MERGE_READY_VERSIONED`
 - `expected_branch_prefix`: `mvo/p4-pr04-`
-- `write_execution_allowed`: `Pre-merge Auditor read-only; no technical writes, push or merge`
+- `write_execution_allowed`: `Integrator authorized only for fast-forward publication of documentary control root, PR 23 merge commit and required post-merge regression; no implementation or P5`
 - `next_authorized_action`: `START_P4_PR04`
-- `next_authorized_actor`: `Independent pre-merge Auditor P4-PR04, new read-only session`
+- `next_authorized_actor`: `Integrator P4-PR04 persistent (publish, merge and post-merge regression); then independent final Auditor`
 - `p4_pr03_execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
 - `p4_pr04_base_sha`: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`
 - `p4_pr04_branch`: `mvo/p4-pr04-multi-session-stream`
 - `execution_root_sha`: `2ed65f83ad2f56e797712475dab0a5fe3e3e7c99`
 - `candidate_sha`: `2ed65f83ad2f56e797712475dab0a5fe3e3e7c99`
 - `opening_control_root_sha`: `6f593eab2b843220572d4849c6f1ff1ab8e3a6ee`
-- `pr_identity_state`: `PR_OPENED`
+- `pr_identity_state`: `PR_IDENTITY_VERSIONED`
 - `pr_number`: `23`
 - `pr_head_sha_at_opening`: `712e34e1bfb6171600f9486245d63f348ad3eabc`
 - `pr_base_sha_at_opening`: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`
 - `pr_state_at_opening`: `OPEN`
-- `merge_ready_state`: `NOT_READY_AWAITING_PRE_MERGE_AUDIT`
-- `merge_ready_reason`: `PR_23_opened_exact_roots_pre_merge_audit_pending_merge_not_authorized`
-- `merge_authorized`: `no`
-- `pre_merge_control_root_sha`: `not_applicable`
+- `merge_ready_state`: `MERGE_READY`
+- `merge_ready_reason`: `MERGE_READY_MUST_BE_VERSIONED_BEFORE_MERGE`
+- `merge_authorized`: `yes`
+- `pre_merge_control_root_sha`: `capture_externally_as_SHA_of_this_documentary_commit`
 - `integrated_merge_sha`: `not_applicable`
 - `integrated_merge_parents`: `not_applicable`
 - `post_merge_regression_state`: `not_started`
@@ -45,7 +45,7 @@
 
 ## Próxima ação exata
 
-P4-PR04 permanece RUNNING, execution root `2ed65f83ad2f56e797712475dab0a5fe3e3e7c99`. PR #23 https://github.com/brunovasque/Morrow/pull/23 OPEN, head `712e34e1bfb6171600f9486245d63f348ad3eabc`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, identidade PR_kwDOUHJvgc8AAAABSLa17w; MERGEABLE/CLEAN, sem checks remotos reportados. Proximo ator unico: Auditor pre-merge independente em sessao read-only. Conferir identidade, genealogia, gates, provas validas e ausencia de drift; retornar MERGE_READY ou BLOCKED. Registro local documental, sem nova publicacao remota. Merge nao autorizado; sem escrita tecnica, deploy ou P5. Ver EVIDENCE.
+P4-PR04 permanece RUNNING, execution root `2ed65f83ad2f56e797712475dab0a5fe3e3e7c99`. PR #23 identidade versionada, head de abertura `712e34e1bfb6171600f9486245d63f348ad3eabc`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`. SECURITY_REVIEW_GREEN, REVIEW_READY_FOR_AUDITOR, AUDIT_GREEN e MERGE_READY versionados. Integrator persistente autorizado a capturar SHA deste commit como PRE_MERGE_CONTROL_ROOT_SHA, revalidar identidade e refs remotos, publicar fast-forward normal este control root, realizar merge commit da mesma PR com genealogia preservada e verificar arvore integrada; regressao pos-merge e REGRESSION_VETO obrigatorios. Nova elevacao temporaria somente mediante autorizacao expressa do operador. Sem force, squash, rebase, bypass, escrita tecnica, deploy ou P5. Auditor final independente e closure-record pendentes; nao declarar PROVEN. Ver EVIDENCE.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -457,3 +457,9 @@ Cerebro versiona o parecer somente nos quatro documentos canonicos, novo control
 - Guardian 20261126-145736-9afad85f COMPLETED, exit 0, sessao CLOSED, 14:57:57 BRT. As duas tentativas anteriores falharam no instrumento PowerShell antes do push; terceira execucao corrigida abriu PR #23, sem force ou merge. Prova original .morrow-test-tmp/p4-pr04-initial-integration-712e34e-20261126-145737/FINAL_VERIFICATION.json; 7 arquivos do manifesto reconferidos.
 - PR https://github.com/brunovasque/Morrow/pull/23; id PR_kwDOUHJvgc8AAAABSLa17w; OPEN, isDraft=false, MERGEABLE/CLEAN; head 712e34e1bfb6171600f9486245d63f348ad3eabc (mvo/p4-pr04-multi-session-stream); base 78e1bfdc7d32f2e150d03aaee80b62514c446d4f (phase-2/runtime-v0); execution root/candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99. Consulta independente gh e git ls-remote pelo DC confirmou ambos os refs exatos. StatusCheckRollup vazio: nenhum check remoto reportado, nao equivale a CI aprovado. Inventario e reconciliador pos-abertura GREEN na prova original. Nenhum novo teste necessario neste registro.
 - P4-PR04 permanece RUNNING. Security Review, Independent Reviewer e Audit GREEN preservados; risco residual ConPTY historico inconclusivo e nao bloqueante nos gates anteriores. Registro local exclusivamente nos quatro documentos canonicos, sem nova publicacao remota. Proximo ator Auditor pre-merge, sessao read-only, validar identidade remota, genealogia, gates e ausencia de drift, reutilizar provas validas e emitir MERGE_READY ou BLOCKED. Merge depende de MERGE_READY versionado e autorizacao propria; REGRESSION_VETO pos-merge e auditoria final pendentes. Sem merge, P5, deploy ou escrita tecnica.
+
+## 2026-11-26 - P4-PR04 MERGE_READY versionado e autorizacao de merge
+
+Execution root/candidato imutavel 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99. PR #23 https://github.com/brunovasque/Morrow/pull/23, id PR_kwDOUHJvgc8AAAABSLa17w; opening remote head 712e34e1bfb6171600f9486245d63f348ad3eabc; base 78e1bfdc7d32f2e150d03aaee80b62514c446d4f; control root local auditado ea8a3ebebd5be1610596c2829ffc16780b5f2dfe. Parecer MERGE_READY - MERGE_READY_MUST_BE_VERSIONED_BEFORE_MERGE conferido pelo Cerebro via DC em .morrow-test-tmp/p4-pr04-pr23-premerge-ea8a3eb/MERGE_READY.md, SHA256 91A33CB47CF75A90A33EB663ACA2F1A1FD66BE17604EFCFF991FDB7CB016415E, e FINAL_VERIFICATION.json. Guardian 20261126-150854-f372cca4 exit 0, sessao CLOSED. Duas falhas anteriores no instrumento de auditoria preservadas; corrigidas sem alteracao do produto. Identidade remota, genealogia, 16 blobs tecnicos, 65 entradas de manifestos, gates anteriores e provas originais GREEN. Nenhum check remoto ou protecao ativa da base reportados; nao presumir CI aprovado nem enforcement remoto. Risco residual historico ConPTY inconclusivo, nao bloqueante nos gates concluidos.
+
+Cerebro versiona MERGE_READY exclusivamente nos quatro documentos canonicos; SHA deste commit sera capturado externamente como PRE_MERGE_CONTROL_ROOT_SHA, sem autorreferencia. Integrator persistente autorizado somente a verificar novo control root, confirmar identidade/base/head atuais da mesma PR #23, publicar fast-forward normal os commits documentais autorizados, verificar novamente a PR e executar merge commit preservando genealogia, exclusivamente contra phase-2/runtime-v0. Nenhum force, squash, rebase, bypass administrativo, alteracao tecnica/dependencias ou outra PR. Bloquear se houver drift, conflito ou novo check obrigatorio nao satisfeito. Verificar merge SHA, dois parents exatos (base e pre-merge control root), equivalencia de arvore e baseline remoto; executar regressao pos-merge exigida pelo contrato e REGRESSION_VETO, com evidencias, continuidade e Guardian. Regressoes nativas de symlink requerem autorizacao administrativa temporaria nova e expressa do operador; nao reutilizar autorizacao anterior nem executar suite sabidamente incompleta para contornar gate. Sem P5, deploy ou declaracao PROVEN antes de auditoria final independente e closure-record. Retornar resultado da integracao e regressao ou BLOCKED fundamentado.
