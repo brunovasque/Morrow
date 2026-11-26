@@ -301,6 +301,10 @@ Candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99 aprovado no Security Review: 
 
 Candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99, Security Review e Independent Reviewer GREEN. 197 entradas, 16 blobs, cobertura e I1-I5 verificados, provas 286/286 e 73/73 preservadas, risco residual nao bloqueante. Proximo ator Auditor independente, nova sessao read-only. P4-PR04 RUNNING; sem integracao, merge ou P5. Ver EVIDENCE.
 
-## Estado atual - P4-PR04 AUDIT_GREEN (2026-11-26)
+## Registro anterior - P4-PR04 AUDIT_GREEN (2026-11-26)
 
 Candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99, Security Review, Independent Reviewer e Auditor GREEN. 307 entradas, 180 arquivos e 7 controles negativos aprovados. Integrator autorizado apenas ao push normal da branch e abertura da PR contra phase-2/runtime-v0, com identidade e gates pos-abertura. P4-PR04 RUNNING; sem merge ou P5. Ver EVIDENCE.
+
+## Estado atual - P4-PR04 PR_OPENED (2026-11-26)
+
+PR #23 OPEN, head 712e34e1bfb6171600f9486245d63f348ad3eabc, base 78e1bfdc7d32f2e150d03aaee80b62514c446d4f, execution root 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99. MERGEABLE/CLEAN; checks remotos nao reportados. Guardian exit 0, identidade remota confirmada. Proximo ator Auditor pre-merge independente, read-only. Merge nao autorizado; sem P5. Ver EVIDENCE.
