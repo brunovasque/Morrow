@@ -119,5 +119,5 @@ try {
   if (!isAbsolute(tempRoot) || rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error("conpty_fixture_cleanup_scope_invalid");
   }
-  await rm(fixturePath, { recursive: true, force: true });
+  await rm(fixturePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

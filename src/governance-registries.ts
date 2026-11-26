@@ -1,6 +1,6 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   defaultWorkerPrivateStateRoot,
@@ -490,6 +490,7 @@ const defaultEventLogAuthorities = new Map<string, PersistentEventLogAuthority>(
 interface StoredHeadState {
   anchors: Array<EventLogHeadAnchor>;
   tailTag: string;
+  unpublishedFirstPrepare?: boolean;
 }
 
 interface JournalRecord {
@@ -633,8 +634,8 @@ export class PersistentEventLogAuthority {
     });
   }
 
-  private async readHeadState(eventLogId: string): Promise<StoredHeadState> {
-    await this.ensureAuthorityBinding(eventLogId);
+  private async readHeadState(eventLogId: string, retryVisibility = true): Promise<StoredHeadState> {
+    const bindingAtStart = await this.ensureAuthorityBinding(eventLogId);
     const path = this.journalPath(eventLogId);
     let text: string;
     try {
@@ -653,7 +654,11 @@ export class PersistentEventLogAuthority {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         const binding = await this.readBinding(eventLogId);
-        if (binding.historyStarted) throw new Error("event_log_anchor_invalid");
+        if (binding.historyStarted) {
+          // A first publication may have completed since the initial lstat.
+          if (!bindingAtStart.historyStarted && retryVisibility) return await this.readHeadState(eventLogId, false);
+          throw new Error("event_log_anchor_invalid");
+        }
         return { anchors: [], tailTag: zeroJournalTag };
       }
       if (error instanceof Error && error.message === "event_log_anchor_invalid") throw error;
@@ -672,7 +677,17 @@ export class PersistentEventLogAuthority {
       tailTag = record.journalTag;
     }
     const binding = await this.readBinding(eventLogId);
-    if (!binding.historyStarted) throw new Error("event_log_anchor_invalid");
+    if (!binding.historyStarted) {
+      // The first PREPARE is published complete before the monotonic binding
+      // transition. It is not authoritative until that transition commits.
+      // A reader sees the old empty state; only the existing exclusive writer
+      // may discard this authenticated, never-admitted first preparation.
+      const first = anchors[0];
+      if (text.split("\n").length !== 2 || anchors.length !== 1 || !first
+        || first.phase !== "prepared" || first.sequence !== 1 || first.generation !== 1
+        || first.expectedPrevious !== null) throw new Error("event_log_anchor_invalid");
+      return { anchors: [], tailTag: zeroJournalTag, unpublishedFirstPrepare: true };
+    }
     return { anchors, tailTag };
   }
 
@@ -694,14 +709,26 @@ export class PersistentEventLogAuthority {
     const record: JournalRecord = { ...recordBase, journalTag: await hmacHex(await this.loadAuthorityKey(), eventLogHeadDomain, canonicalJournal(recordBase)) };
     const line = `${JSON.stringify(record)}\n`;
     if (Buffer.byteLength(line, "utf8") > maximumJournalRecordBytes) throw new Error("event_log_anchor_record_too_large");
-    await this.ensureBindingHistoryStarted(eventLogId);
     const path = this.journalPath(eventLogId);
+    const binding = await this.readBinding(eventLogId);
+    if (!binding.historyStarted) {
+      if (input.kind !== "PREPARE" || input.expectedPrevious !== null || input.previousJournalTag !== zeroJournalTag) {
+        throw new Error("event_log_anchor_transition_invalid");
+      }
+      // Publish the entire initial authenticated journal exclusively, then
+      // commit its binding atomically. A failed transition leaves a validated
+      // unpublished first PREPARE, not a truncated binding or journal.
+      if (!await publishNewAuthorityFile(path, line)) throw new Error("event_log_anchor_cas_conflict");
+      await this.ensureBindingHistoryStarted(eventLogId);
+      return;
+    }
     const pathBefore = await lstat(path).catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw new Error("event_log_anchor_path_unsafe");
     });
-    if (pathBefore && (!pathBefore.isFile() || pathBefore.isSymbolicLink())) throw new Error("event_log_anchor_path_unsafe");
-    const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0), 0o600);
+    if (!pathBefore) throw new Error("event_log_anchor_invalid");
+    if (!pathBefore.isFile() || pathBefore.isSymbolicLink()) throw new Error("event_log_anchor_path_unsafe");
+    const handle = await open(path, constants.O_WRONLY | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0), 0o600);
     try {
       const before = await handle.stat();
       if (!before.isFile() || before.isSymbolicLink()) throw new Error("event_log_anchor_write_failed");
@@ -729,15 +756,25 @@ export class PersistentEventLogAuthority {
     try { return await this.readBinding(eventLogId); } catch (error) {
       if (!(error instanceof Error) || error.message !== "event_log_authority_binding_missing") throw error;
     }
+    // A missing binding with an existing journal is loss of authority, not
+    // permission to bootstrap another binding. Recheck for a concurrent winner.
+    const existingJournal = await lstat(this.journalPath(eventLogId)).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    if (existingJournal) return await this.readBinding(eventLogId);
     const key = await this.loadAuthorityKey(true);
     const binding: AuthorityBinding = {
       format: eventLogBindingFormat, authorityRef: this.authorityRef, eventLogId, historyStarted: false,
       bindingTag: await hmacHex(key, eventLogBindingDomain, canonicalBinding({ format: eventLogBindingFormat, authorityRef: this.authorityRef, eventLogId, historyStarted: false })),
     };
-    try { await writeFile(bindingPath, `${JSON.stringify(binding)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 }); }
-    catch (createError) {
-      if (!isAlreadyExists(createError)) throw new Error("event_log_authority_binding_failed");
-      return await this.readBinding(eventLogId);
+    try {
+      if (!await publishNewAuthorityFile(bindingPath, `${JSON.stringify(binding)}\n`)) {
+        return await this.readBinding(eventLogId);
+      }
+    } catch (createError) {
+      if (createError instanceof Error && createError.message.startsWith("event_log_authority_")) throw createError;
+      throw new Error("event_log_authority_binding_failed");
     }
     return binding;
   }
@@ -745,7 +782,11 @@ export class PersistentEventLogAuthority {
   private async readBinding(eventLogId: string): Promise<AuthorityBinding> {
     const path = this.bindingPath(eventLogId);
     let value: unknown;
-    try { value = JSON.parse(await readFile(path, "utf8")); }
+    try {
+      const info = await lstat(path);
+      if (!info.isFile() || info.isSymbolicLink() || info.size > 4096) throw new Error("event_log_authority_binding_invalid");
+      value = JSON.parse(await readFile(path, "utf8"));
+    }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("event_log_authority_binding_missing"); throw new Error("event_log_authority_binding_invalid"); }
     if (!isDataRecord(value) || exactKeys(value, ["format", "authorityRef", "eventLogId", "historyStarted", "bindingTag"])
       || value.format !== eventLogBindingFormat || value.authorityRef !== this.authorityRef || value.eventLogId !== eventLogId
@@ -764,18 +805,21 @@ export class PersistentEventLogAuthority {
     const bindingPath = this.bindingPath(eventLogId);
     const beforePath = await lstat(bindingPath);
     if (!beforePath.isFile() || beforePath.isSymbolicLink()) throw new Error("event_log_authority_binding_invalid");
-    const handle = await open(bindingPath, constants.O_WRONLY);
+    const temporary = `${bindingPath}.${process.pid}.${randomUUID()}.tmp`;
     try {
       const line = `${JSON.stringify(next)}\n`;
-      await handle.truncate(0);
-      const written = await handle.write(line, 0, "utf8");
-      if (written.bytesWritten !== Buffer.byteLength(line, "utf8")) throw new Error("event_log_authority_binding_failed");
-      await handle.sync();
-      const afterPath = await lstat(bindingPath);
-      if (beforePath.dev !== afterPath.dev || beforePath.ino !== afterPath.ino || afterPath.size !== Buffer.byteLength(line, "utf8")) {
+      await writeFile(temporary, line, { flag: "wx", mode: 0o600, flush: true });
+      const current = await lstat(bindingPath);
+      if (!sameFileMetadata(beforePath, current) || (await this.readBinding(eventLogId)).historyStarted) {
         throw new Error("event_log_authority_binding_failed");
       }
-    } finally { await handle.close().catch(() => undefined); }
+      await rename(temporary, bindingPath);
+      if (!(await this.readBinding(eventLogId)).historyStarted) throw new Error("event_log_authority_binding_failed");
+    } finally {
+      await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+      });
+    }
   }
 
   private journalPath(eventLogId: string): string { return join(this.authorityRoot, `${eventLogId}.head.journal`); }
@@ -789,18 +833,31 @@ export class PersistentEventLogAuthority {
     catch (error) {
       if (!createIfMissing || (error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("event_log_authority_unavailable");
       const entries = await (await import("node:fs/promises")).readdir(this.authorityRoot);
-      if (entries.some((entry) => entry.endsWith(".binding.json") || entry.endsWith(".head.journal"))) throw new Error("event_log_authority_rebootstrap_denied");
-      try { await writeFile(this.keyPath, randomBytes(eventLogAuthorityKeyBytes), { flag: "wx", mode: 0o600 }); }
-      catch (createError) { if (!isAlreadyExists(createError)) throw new Error("event_log_authority_unavailable"); }
-      this.authorityKey = await readKeyFile(this.keyPath);
+      if (entries.some((entry) => entry.endsWith(".binding.json") || entry.endsWith(".head.journal"))) {
+        // Another bootstrap may have finished between our ENOENT and readdir.
+        // Read only the published key; never create one when history exists.
+        try { this.authorityKey = await readKeyFile(this.keyPath); }
+        catch { throw new Error("event_log_authority_rebootstrap_denied"); }
+      } else {
+        try { await publishNewAuthorityFile(this.keyPath, randomBytes(eventLogAuthorityKeyBytes)); }
+        catch { throw new Error("event_log_authority_unavailable"); }
+        this.authorityKey = await readKeyFile(this.keyPath);
+      }
     }
     return Buffer.from(this.authorityKey);
   }
 
   private async withMutation<T>(eventLogId: string, operation: (state: StoredHeadState) => Promise<T>): Promise<T> {
     const lock = await this.privateStateRoot.acquireExclusive(this.authorityRef, eventLogId);
-    try { return await operation(await this.readHeadState(eventLogId)); }
-    finally { await lock.release(); }
+    try {
+      const state = await this.readHeadState(eventLogId);
+      if (state.unpublishedFirstPrepare) {
+        if ((await this.readBinding(eventLogId)).historyStarted) throw new Error("event_log_anchor_invalid");
+        await unlink(this.journalPath(eventLogId));
+        return await operation({ anchors: [], tailTag: zeroJournalTag });
+      }
+      return await operation(state);
+    } finally { await lock.release(); }
   }
 }
 
@@ -1012,6 +1069,32 @@ function sameAnchorSummary(left: EventLogHeadAnchor | { generation: number; sequ
   if (left === null || right === null) return left === right;
   return left.generation === right.generation && left.sequence === right.sequence
     && constantTimeHexEqual(left.eventTag, right.eventTag);
+}
+
+// Publish an immutable bootstrap file only after its contents have been
+// completely written and flushed. Hard-link creation is exclusive: a loser
+// reads the winner rather than replacing the established key or binding.
+async function publishNewAuthorityFile(path: string, content: string | Buffer): Promise<boolean> {
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, content, { flag: "wx", mode: 0o600, flush: true });
+  } catch (error) {
+    if (!isAlreadyExists(error)) {
+      await unlink(temporary).catch((cleanupError: NodeJS.ErrnoException) => {
+        if (cleanupError.code !== "ENOENT") throw cleanupError;
+      });
+    }
+    throw error;
+  }
+  try {
+    await link(temporary, path);
+    return true;
+  } catch (error) {
+    if (isAlreadyExists(error)) return false;
+    throw error;
+  } finally {
+    await unlink(temporary);
+  }
 }
 
 async function readKeyFile(path: string): Promise<Buffer> {

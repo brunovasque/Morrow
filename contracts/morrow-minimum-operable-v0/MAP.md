@@ -165,3 +165,150 @@ O campo `next_authorized_action` de `LIVE_STATUS.md` é a projeção humana dess
 - P4-PR03 está canonicamente `PROVEN`. P4-PR04 está autorizada porque P4-PR03 e P3-PR04 estão `PROVEN`; nenhuma dependência contratual adicional está faltando.
 - Próximo ator único: Orchestrator / Contract Engineer persistente. Próximo PR: P4-PR04. Objetivo: expor stream/API de múltiplas sessões e provar observabilidade ponta a ponta do Worker. Prova: duas sessões reais vistas ao vivo e reidratadas após restart.
 - Handoff obrigatório: usar base integrada exata `phase-2/runtime-v0` após a closure merge; iniciar kickoff/PRE_DISPATCH/TASK do Executor para P4-PR04; não reabrir P4-PR03, não repetir seus reviews/regressão sem causa, não alterar D-014..D-017 oportunisticamente, não iniciar P4-PR04 nesta sessão e não fazer deploy.
+
+## Estado atual — P4-PR04 `RUNNING` após kickoff
+
+- P4-PR03 e P3-PR04 estão `PROVEN`; P4-PR04 foi iniciada na base integrada exata `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`.
+- Branch dedicada: `mvo/p4-pr04-multi-session-stream`. O estado técnico novo ainda não tem candidate; este commit é kickoff/control-plane documental.
+- Objetivo único: expor stream/API local de múltiplas sessões e provar observabilidade ponta a ponta do Worker.
+- Prova de conclusão: duas sessões reais distintas observadas incrementalmente antes do término e reconstruídas após restart, sem mistura, duplicação ou perda por sessão.
+- Próximo ator: Executor P4-PR04 persistente. `SESSION_REUSE_BY_DEFAULT`; sessões independentes somente para Security Reviewer e Reviewer/Auditor quando os gates exigirem.
+- P4-PR04 não inclui UI/P5, panes/xterm, chat, reunião, notifications, Nexus, deploy, refactors oportunistas, D-013, P4-PR03 ou Enova/outros repositórios.
+
+## Registro anterior — P4-PR04 candidate congelado, Security GREEN
+
+- O candidate HEAD é `8c89bf7af2fc5609cc02acf70966098b3c6261e1`, na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`; o kickoff/control root de abertura é `6f593eab2b843220572d4849c6f1ff1ab8e3a6ee`.
+- A correção de durabilidade terminal foi validada: sem evento terminal durável, `completion` rejeita `worker_session_terminal_persistence_failed`; live fica `failed`, reopen fica `recoverable/offline`, replay não fabrica EXIT e a sessão B permanece isolada.
+- Security Review independente emitiu `SECURITY_REVIEW_GREEN — P4_PR04_READY_FOR_INDEPENDENT_REVIEW`; focused `5/5`, regressões relacionadas `121/121`, diff-check GREEN, reconciliador `allowed=true` e nenhum P1/P2. O Executor também registrou `156/156` nas regressões das superfícies tocadas e full `256/256`.
+- P4-PR04 continua `RUNNING`, candidate `FROZEN_FOR_INDEPENDENT_REVIEW`; não há PR, merge, deploy ou owner decision. `START_P4_PR04` permanece somente como a autorização coarse de unidade; não autoriza nova escrita técnica.
+- Próximo ator único: Reviewer independente, sessão nova e read-only. Deve conferir mecanicamente candidate/roots, delta e allowlist, Security Review, cobertura, regressão, limites e ausência de drift; não deve corrigir, commitar, abrir PR, fazer merge ou iniciar outra unidade.
+
+## Registro anterior — P4-PR04 Reviewer BLOCKED, retorno ao Executor
+
+- O Reviewer independente bloqueou o candidate `8c89bf7af2fc5609cc02acf70966098b3c6261e1` por lacuna técnica/coverage: `WorkerSessionStream` não está ligado às primitivas `LiveActivity`, `PersistentTranscriptStore`, snapshot e `WorkerRecoveryCoordinator` exigidas pela rota desta unidade.
+- O focused independente reportado ficou `1/5`; quatro casos falharam antes do harness por `EPERM` ao criar diretório temporário em `TEMP`. A prova é inconclusiva e não pode ser promovida a GREEN.
+- A rota retorna ao Executor P4-PR04 persistente na mesma unidade/branch. Ele deve integrar somente as primitivas já provadas, manter P4-PR04 sem UI/rede/Nexus/deploy, provar live/replay/disco/reopen, resolver o ambiente sem mascarar falhas e repetir regressões antes do novo Reviewer.
+- `START_P4_PR04` permanece coarse; não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
+
+## Registro anterior — P4-PR04 candidate b1347fe, Security Review pendente
+
+- O Relay congelou mecanicamente o candidate `b1347fe004355eca8615c4f7662d77de7ee6f294` para a unidade atual P4-PR04; o candidate anterior `8c89bf7af2fc5609cc02acf70966098b3c6261e1` permanece somente como histórico.
+- O delta técnico está restrito a `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts` e compõe as primitivas já provadas de transcript, recovery, Live Activity e snapshot. Nenhuma prova de segurança ou teste é promovida nesta reconciliação.
+- P4-PR04 permanece `RUNNING`; o candidate está `FROZEN_FOR_SECURITY_REVIEW`; o próximo ator único é Security Reviewer independente, em sessão nova e read-only, revisando exatamente `b1347fe004355eca8615c4f7662d77de7ee6f294`.
+- `START_P4_PR04` permanece coarse e não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
+
+## Registro anterior — P4-PR04 candidate 42146b1, Security Review pendente
+
+- O Relay congelou mecanicamente o candidate `42146b10350ebacb778ffbbfba93500eb93bd7dd` para a unidade atual P4-PR04, após a recuperação de Git do Executor; `b1347fe004355eca8615c4f7662d77de7ee6f294` permanece somente como histórico.
+- O delta técnico do candidate congelado está restrito a `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`. Esta reconciliação não promove prova de teste ou segurança.
+- P4-PR04 permanece `RUNNING`; o candidate está `FROZEN_FOR_SECURITY_REVIEW`; o próximo ator único é Security Reviewer independente, em sessão nova e read-only, revisando exatamente `42146b10350ebacb778ffbbfba93500eb93bd7dd`.
+- `START_P4_PR04` permanece coarse e não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
+
+## Registro anterior — P4-PR04 candidate 2ab1968, Security Review pendente
+
+- O Relay congelou mecanicamente o candidate `2ab1968fe654223bb727ce55e90ffef2d5f77948` para a unidade atual P4-PR04, após a recuperação de Git do Executor; `42146b10350ebacb778ffbbfba93500eb93bd7dd` permanece somente como histórico.
+- O delta técnico do candidate congelado está restrito a `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`. Esta reconciliação não promove prova de teste ou segurança.
+- P4-PR04 permanece `RUNNING`; o candidate está `FROZEN_FOR_SECURITY_REVIEW`; o próximo ator único é Security Reviewer independente, em sessão nova e read-only, revisando exatamente `2ab1968fe654223bb727ce55e90ffef2d5f77948`.
+- `START_P4_PR04` permanece coarse e não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
+
+## Registro anterior — P4-PR04 candidate 98a32e7, Security Review pendente
+
+- O Relay congelou mecanicamente o candidate `98a32e7a7184801c855572bbb67192d4b1ec98a2` para a unidade atual P4-PR04, após a recuperação de Git do Executor; `2ab1968fe654223bb727ce55e90ffef2d5f77948` permanece somente como histórico.
+- O delta técnico do candidate congelado está restrito a `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`. Esta reconciliação não promove prova de teste ou segurança.
+- P4-PR04 permanece `RUNNING`; o candidate está `FROZEN_FOR_SECURITY_REVIEW`; o próximo ator único é Security Reviewer independente, em sessão nova e read-only, revisando exatamente `98a32e7a7184801c855572bbb67192d4b1ec98a2`.
+- `START_P4_PR04` permanece coarse e não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
+
+## Registro anterior — P4-PR04 candidate a6aee3e, Security Review pendente
+
+- O Relay congelou mecanicamente o candidate `a6aee3e90a6af810ce52a425a6e16ea6281b54a7` para a unidade atual P4-PR04, após a recuperação de Git do Executor; `98a32e7a7184801c855572bbb67192d4b1ec98a2` permanece somente como histórico.
+- O delta técnico do candidate congelado está restrito a `src/worker-session-stream.ts` e `test/worker-session-stream.test.ts`. Esta reconciliação não promove prova de teste ou segurança.
+- P4-PR04 permanece `RUNNING`; o candidate está `FROZEN_FOR_SECURITY_REVIEW`; o próximo ator único é Security Reviewer independente, em sessão nova e read-only, revisando exatamente `a6aee3e90a6af810ce52a425a6e16ea6281b54a7`.
+- `START_P4_PR04` permanece coarse e não autoriza push, PR, merge ou deploy. CONTRACT.md, TARGET.md e a lista/ordem das 42 PRs permanecem intocados.
+
+## Registro anterior — P4-PR04 Security Review BLOCKED, retorno ao Executor (2026-11-25)
+
+Candidate `a6aee3e90a6af810ce52a425a6e16ea6281b54a7` bloqueado por quatro P2 (redaction no retorno, durabilidade terminal, isolamento entre agentes, colisao case-insensitive Windows) e regressao RED (EBUSY, EPERM, SGR e um teste ignorado a diagnosticar). Ver registro detalhado em EVIDENCE.md. Rota: Executor persistente → reproducao/contraprovas e correcoes causais em lote → regressao → novo candidate → Security Reviewer independente → Reviewer/Auditor e integracao somente sob gates canonicos. Preservar P4-PR04 RUNNING e impedir P5, push, PR, merge e deploy. Nenhuma mudanca de destino ou ordem contratual.
+
+## Registro anterior - P4-PR04 candidate recuperado congelado, Security Review PENDING (2026-11-25)
+
+- Candidate/Execution Root `08e2df00ca87c27f403e835fe63a7479e68a293c`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`; anterior `a6aee3e90a6af810ce52a425a6e16ea6281b54a7` SUPERSEDED/INVALIDATED.
+- Freeze autorizado sem alteracao funcional; delta tecnico contra base: runtime/MULTI_SESSION_STREAM_API.md, schema/worker-session-stream.v1.schema.json, src/worker-session-stream.ts, test/codex-conpty-adapter.test.ts, test/stream-transcript.test.ts e test/worker-session-stream.test.ts; contra anterior, os mesmos exceto schema. Evidencias em EVIDENCE.md e freeze-01/SHA256SUMS.txt.
+- Cumulativa serial 269/269 PASS sem SKIP; focused 17/17; ambos symlinks GREEN. Primeira elevada 267/269, focused ConPTY 0/2 e controles diretos GREEN preservados. Intermitencia ConPTY sob carga pendente de avaliacao independente; REGRESSION_VETO nao iniciado.
+- P4-PR04 RUNNING; FROZEN_FOR_SECURITY_REVIEW / SECURITY_REVIEW_PENDING. Proximo ator: Security Reviewer independente read-only. START_P4_PR04 coarse; sem nova escrita tecnica, elevacao, push, PR, merge, deploy ou P5. CONTRACT, TARGET e ordem das 42 PRs preservados.
+
+## Registro anterior - P4-PR04 Security Review BLOCKED (2026-11-25)
+
+Candidate `08e2df00ca87c27f403e835fe63a7479e68a293c` bloqueado pelos novos P2-05..07 e P3-01. Quatro P2 anteriores GREEN. Cumulativa independente 265/269, zero SKIP; EPERM, bootstrap/EBADF e ConPTY requerem diagnostico. Proximo ator Executor persistente, conforme EVIDENCE. Sem freeze, push, PR, merge, deploy ou P5.
+
+## Registro anterior - P4-PR04 candidate recuperado congelado, Security Review PENDING (2026-11-26)
+
+- Candidate/Execution Root `6372857cb645f994d31125bdb4ed8baef97591c8`, parent `c7b905a4bb451b3c82ca3bfc207bae16b30fec26`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`; anterior `08e2df00ca87c27f403e835fe63a7479e68a293c` SUPERSEDED/INVALIDATED. Bloqueios e reviews anteriores preservados como historico.
+- Freeze local autorizado sem alteracao funcional; nove arquivos tecnicos validados preservados. Delta tecnico contra base: 12 arquivos, 2355 insercoes/42 remocoes; contra anterior: 9 arquivos, 525 insercoes/71 remocoes. Patches, paths, blobs e hashes em EVIDENCE.md e .morrow-test-tmp/p4-pr04-recovery-c7b905a/freeze-01/SHA256SUMS.txt.
+- Cumulativa serial 276/276 PASS sem FAIL/SKIP/CANCELLED/TODO; focused worker 23/23 e governance 24/24; ambos symlinks GREEN, bootstrap/EBADF e ConPTY passaram. Zero interferencias externas detectadas em 57 amostras; processos elevados encerrados. Exit code direto Node nao registrado; launcher 0, stderr vazio; duas tentativas preliminares abortadas por falso positivo do monitor. Revisor deve obter prova com exit code direto corretamente capturado, avaliar intermitencia ConPTY sob carga e alteracoes causais em modulos anteriores. REGRESSION_VETO nao iniciado.
+- P4-PR04 RUNNING; FROZEN_FOR_SECURITY_REVIEW / SECURITY_REVIEW_PENDING. Proximo ator: Security Reviewer independente read-only. START_P4_PR04 coarse; sem nova escrita tecnica, elevacao sem nova autorizacao, push, PR, merge, deploy ou P5. CONTRACT, TARGET e ordem das 42 PRs preservados.
+
+## Registro anterior - P4-PR04 Security Review BLOCKED, recuperacao por invariantes (2026-11-26)
+
+Candidate `6372857cb645f994d31125bdb4ed8baef97591c8` bloqueado pelos novos P2-08..12 e P3-02; oito achados anteriores GREEN. Cumulativa independente 274/276 (dois EPERM), estresse 64/64. Retorno ao Executor persistente: diagnostico de causas comuns, matriz I1-I5 em EVIDENCE, contraprovas e correcoes causais em lote, regressao integral e estresse; novo freeze somente autorizado. Mesma unidade, gates e contrato, sem push, PR, merge, deploy ou P5.
+
+## Registro anterior - P4-PR04 recuperacao por invariantes, I5 BLOCKED (2026-11-26)
+
+Worktree sobre f0a166b, sem freeze: 14 achados GREEN nas contraprovas, cumulativa 281/283 (dois EPERM nativos), estresse 69/70 seguido de 70/70, timeout ConPTY intermitente sem causa conclusiva. Ver EVIDENCE e recovery-f0a166b/SHA256SUMS.txt. P4-PR04 RUNNING; candidate anterior 6372857 permanece SECURITY_REVIEW_BLOCKED; proximo ator Executor persistente para diagnostico de I5, regressao com nova autorizacao pontual se necessaria, estresse isolado e somente depois gate de freeze. Sem push/PR/merge/P5.
+
+
+## Registro anterior - P4-PR04 I5: execucao GREEN, diagnostico BLOCKED (2026-11-26)
+
+Morrow cadastrado/validado pelo instalador oficial, demais frentes/regras/arquivos tecnicos preservados. Regressao serial elevada ORIGINAL283/283 e estresse ORIGINAL separado70/70, exit direto0/zero SKIP/sem interferencia detectada. Probe12sessoes e estresse instrumentado70/70 GREEN. Processos elevados encerrados. Pendencia unica: causa do timeout ConPTY historico nao estabelecida; nao atribuir recursos como causa nem aceitar risco por inferencia. Evidencias e hashes no EVIDENCE e p4-pr04-i5-closure/FINAL_VERIFICATION.json. P4-PR04 RUNNING, sem freeze, commit ou P5.
+
+## Registro anterior - P4-PR04 freeze autorizado apos provas I5 (2026-11-26)
+
+Worktree recuperado sobre f0a166b: serial original 283/283, stress original e instrumentado 70/70 cada, probe 12 sessoes, direct exits 0. Causa historica do timeout inconclusiva, risco residual a avaliar independentemente. Freeze local autorizado, sem presumir REGRESSION_VETO PASS; candidato 6372857 continua BLOCKED ate novo freeze. Ver EVIDENCE. Sem push, PR, merge ou P5.
+
+
+## Registro anterior - P4-PR04 FROZEN_AWAITING_SECURITY_REVIEW (2026-11-26)
+
+Candidato tecnico `2e0a54cef6ab4ae2cae8e08c13c16fb273b48479`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`; anterior `6372857cb645f994d31125bdb4ed8baef97591c8` SUPERSEDED/INVALIDATED. Codigo e evidencias validados preservados, commit documental separado. Regressao original 283/283, estresse original/instrumentado 70/70 cada e probe 12 sessoes, exit direto 0; nenhum novo teste ou elevacao no freeze. Intermitencia historica ConPTY inconclusiva registrada como risco residual para avaliacao independente, sem afirmar causa ou eliminacao. P4-PR04 RUNNING, FROZEN_FOR_SECURITY_REVIEW / SECURITY_REVIEW_PENDING. Proximo ator revisor independente em sessao nova no SHA exato; ver EVIDENCE e `.morrow-test-tmp/p4-pr04-freeze-f0a166b-01/FINAL_VERIFICATION.json`. Sem escrita tecnica, push, PR, merge, deploy ou P5.
+
+## Registro anterior - P4-PR04 I5 recuperacao restrita ao harness autorizada (2026-11-26)
+
+Candidato 2e0a54c SECURITY_REVIEW_BLOCKED; 14 achados e I1-I4 GREEN, stress independente 68/70. Diagnostico demonstra reutilizacao de PID e falso positivo liveness, sem atribuir os REDs historicos a concorrencia externa. Executor autorizado a corrigir somente testes/harness/probes, preservar runtime, repetir provas e retornar READY_FOR_FREEZE ou BLOCKED. Nova elevacao depende do operador; sem P5. Ver EVIDENCE.
+
+## Registro anterior - P4-PR04 I5 harness validado, BLOCKED EPERM (2026-11-26)
+
+Focus 14/14, stress 73/73, serial 284/286 (dois symlinks nativos EPERM), zero skips. PID+nascimento, unicidade simultanea e encerramento original comprovados, inclusive filho sobrevivente real. Runtime/I1-I4/dependencias e 173 arquivos protegidos intactos. Evidencias e manifestos em .morrow-test-tmp/p4-pr04-pid-harness-closure. Candidate 2e0a54c SECURITY_REVIEW_BLOCKED. Proxima acao: nova autorizacao administrativa para regressao integral monitorada 286/286; sem freeze, commit, push, merge ou P5.
+
+## Registro anterior - P4-PR04 I5 elevacao autorizada (2026-11-26)
+
+Operador autorizou exclusivamente regressao serial elevada 286/286 pelo DC/Guardian, preservando harness e runtime. Foco 14/14 e estresse 73/73 anteriores permanecem validos; dois EPERM pendentes ate nova prova. Sem freeze ou P5. Ver EVIDENCE.
+
+## Registro anterior - P4-PR04 I5 READY_FOR_FREEZE (2026-11-26)
+
+Harness validado: focus 14/14, stress 73/73, regressao serial elevada 286/286 PASS, exit direto 0, zero SKIP. Elevacao encerrada, 46 amostras sem interferencias externas detectadas, hashes protegidos intactos. Candidate anterior 2e0a54c SECURITY_REVIEW_BLOCKED; worktree recuperado READY_FOR_FREEZE, aguarda ordem expressa do Cerebro. Risco residual historico ConPTY preservado. Ver EVIDENCE e .morrow-test-tmp/p4-pr04-pid-elevated-closure. Sem commit, freeze ou P5.
+
+## Registro anterior - P4-PR04 I5 freeze autorizado (2026-11-26)
+
+Regressao 286/286, stress 73/73 e foco 14/14 PASS; hashes e exits conferidos. Freeze local autorizado pelo Cerebro, preservando runtime e evidencias. Nova revisao independente obrigatoria; sem merge ou P5. Ver EVIDENCE.
+
+## Registro anterior - P4-PR04 FROZEN_AWAITING_SECURITY_REVIEW (2026-11-26)
+
+Candidato tecnico `2ed65f83ad2f56e797712475dab0a5fe3e3e7c99` congelado, anterior `2e0a54cef6ab4ae2cae8e08c13c16fb273b48479` SUPERSEDED/INVALIDATED (PRO BLOCKED historico). Focus 14/14, stress 73/73 e regressao elevada 286/286 PASS, exit direto 0, zero skips. Runtime/I1-I4 intactos. Risco residual historico ConPTY mantido. Proximo ator revisor independente em sessao read-only; evidencias `.morrow-test-tmp/p4-pr04-pid-freeze-01` e EVIDENCE. Sem merge/P5.
+
+## Registro anterior - P4-PR04 SECURITY_REVIEW_GREEN (2026-11-26)
+
+Candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99 aprovado no Security Review: estresse independente 73/73, 14 achados e I1-I5 PASS, regressao congelada 286/286 conferida, risco residual ConPTY nao bloqueante neste gate. Proximo ator Independent Reviewer, nova sessao read-only. P4-PR04 RUNNING; sem integracao, merge ou P5. Ver EVIDENCE.
+
+## Registro anterior - P4-PR04 REVIEW_READY_FOR_AUDITOR (2026-11-26)
+
+Candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99, Security Review e Independent Reviewer GREEN. 197 entradas, 16 blobs, cobertura e I1-I5 verificados, provas 286/286 e 73/73 preservadas, risco residual nao bloqueante. Proximo ator Auditor independente, nova sessao read-only. P4-PR04 RUNNING; sem integracao, merge ou P5. Ver EVIDENCE.
+
+## Registro anterior - P4-PR04 AUDIT_GREEN (2026-11-26)
+
+Candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99, Security Review, Independent Reviewer e Auditor GREEN. 307 entradas, 180 arquivos e 7 controles negativos aprovados. Integrator autorizado apenas ao push normal da branch e abertura da PR contra phase-2/runtime-v0, com identidade e gates pos-abertura. P4-PR04 RUNNING; sem merge ou P5. Ver EVIDENCE.
+
+## Registro anterior - P4-PR04 PR_OPENED (2026-11-26)
+
+PR #23 OPEN, head 712e34e1bfb6171600f9486245d63f348ad3eabc, base 78e1bfdc7d32f2e150d03aaee80b62514c446d4f, execution root 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99. MERGEABLE/CLEAN; checks remotos nao reportados. Guardian exit 0, identidade remota confirmada. Proximo ator Auditor pre-merge independente, read-only. Merge nao autorizado; sem P5. Ver EVIDENCE.
+
+## Estado atual - P4-PR04 MERGE_READY versionado (2026-11-26)
+
+PR #23, candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99, base 78e1bfdc7d32f2e150d03aaee80b62514c446d4f; todos gates pre-merge GREEN. Integrator autorizado apenas a publicar control root documental final, revalidar refs e PR, executar merge commit e regressao pos-merge. Sem alteracao tecnica, P5 ou deploy. Auditor final e closure-record pendentes. Ver EVIDENCE.

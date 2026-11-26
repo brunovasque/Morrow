@@ -845,3 +845,22 @@ function workerConfiguration(root: string, clock: () => unknown = () => baseTime
     clock: clock as WorkerRecoveryConfiguration["clock"],
   };
 }
+
+test("I2/I4 P2-11: missing log with later prepared anchor cannot erase a committed predecessor", async t => {
+  const root=await makeRoot(t);
+  const managed=join(root,"managed"),authorityRoot=join(root,"authority");
+  await mkdir(managed,{recursive:true});
+  const file=join(managed,"missing-after-prepare.jsonl");
+  const authority=testEventAuthority(file,authorityRoot);
+  const log=new JsonlEventLog(file,{authority});
+  await log.append(event("C-P4-PR03","committed-1"));
+  const first=(await authority.readAnchors())[0]!;
+  const next=event("C-P4-PR03","prepared-2");
+  const prepared={...first,generation:first.generation+1,sequence:2,eventTag:await authenticatedEventTag(file,authority,next,2,first.eventTag),phase:"prepared" as const,expectedPrevious:{generation:first.generation,sequence:first.sequence,eventTag:first.eventTag}};
+  await authority.bindStream("C-P4-PR03",first.streamId).prepareHead(prepared,first);
+  await (await import("node:fs/promises")).unlink(file);
+  const reopened=new JsonlEventLog(file,{authority});
+  await assert.rejects(reopened.readAll(),/morrow_event_log_/);
+  assert.deepEqual((await authority.readAnchors())[0],prepared);
+  assert.equal((await reopened.replay("C-P4-PR03")).status,"invalid");
+});

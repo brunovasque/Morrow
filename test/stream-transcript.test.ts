@@ -74,13 +74,13 @@ async function append(
   return await writer.commit();
 }
 
-async function allFileText(root: string): Promise<string> {
+async function allFileText(root: string, excludedBinaryFile?: string): Promise<string> {
   const entries = await readdir(root, { withFileTypes: true });
   const contents: string[] = [];
   for (const entry of entries) {
     const path = join(root, entry.name);
-    if (entry.isDirectory()) contents.push(await allFileText(path));
-    else if (entry.isFile()) contents.push(await readFile(path, "utf8"));
+    if (entry.isDirectory()) contents.push(await allFileText(path, excludedBinaryFile));
+    else if (entry.isFile() && path !== excludedBinaryFile) contents.push(await readFile(path, "utf8"));
   }
   return contents.join("\n");
 }
@@ -736,6 +736,12 @@ test("does not release again for a newline just after an exact LF or CRLF batch 
 
 test("preserves SGR-only output across chunks and every transcript channel", async (t) => {
   const root = await makeRoot(t);
+  // Seed only this empty, isolated test fixture with a binary key containing ESC.
+  const initialized = await PersistentTranscriptStore.open(configuration(root));
+  await initialized.close();
+  const fixtureKeyPath = join(root, ".transcript-redaction-key");
+  const fixtureKey = Buffer.alloc(32, 0x1b);
+  await writeFile(fixtureKeyPath, fixtureKey);
   const store = await PersistentTranscriptStore.open(configuration(root));
   const writer = store.beginRecord(request("record-safe-sgr"));
   const fragments = [
@@ -748,12 +754,22 @@ test("preserves SGR-only output across chunks and every transcript channel", asy
   const liveText = fragments.map((fragment) => fragment.text).join("");
   const inspected = store.inspect("operator").records[0]?.content ?? "";
   await store.close();
-  const disk = await allFileText(root);
+  // The deterministic binary key contains ESC by design; it is not terminal output.
+  assert.equal((await readFile(fixtureKeyPath)).equals(fixtureKey), true);
+  assert.equal((await allFileText(root)).includes("\u001b"), true);
+  const disk = await allFileText(root, fixtureKeyPath);
 
   assert.equal(liveText, "hello");
   assert.equal(inspected, "hello");
   assert.equal(disk.includes("\u001b"), false);
+  assert.equal(disk.includes("\\u001b"), false);
   assert.match(disk, /hello/);
+  const reopened = await PersistentTranscriptStore.open(configuration(root));
+  try {
+    assert.equal(reopened.inspect("operator").records[0]?.content, "hello");
+  } finally {
+    await reopened.close();
+  }
 });
 
 test("drops complete 7-bit and C1 string controls with equivalent textual semantics", () => {
@@ -1468,7 +1484,7 @@ test("fails closed on hostile policy collections without invoking accessors", ()
   session.abort();
 });
 
-test("refuses a symbolic snapshot and a junction ancestor without reading outside its canonical root", async (t) => {
+test("refuses a symbolic file snapshot without reading outside its canonical root", async (t) => {
   const container = await makeRoot(t);
   const root = join(container, "owned-state");
   const initialized = await PersistentTranscriptStore.open(configuration(root));
@@ -1478,21 +1494,18 @@ test("refuses a symbolic snapshot and a junction ancestor without reading outsid
   await writeFile(controlledTarget, "controlled-outside-snapshot", "utf8");
   const snapshotLink = join(root, "transcript-v1.json");
   await rm(snapshotLink);
-  try {
-    await symlink(controlledTarget, snapshotLink, "file");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EPERM") {
-      t.skip("symbolic links unavailable in this Windows environment");
-      return;
-    }
-    throw error;
-  }
+  // This is a mandatory native file-symlink proof. An EPERM is an explicit
+  // environment blocker, not a successful or skipped security test.
+  await symlink(controlledTarget, snapshotLink, "file");
   await assert.rejects(
     PersistentTranscriptStore.open(configuration(root)),
     /transcript_snapshot_too_large_or_invalid/,
   );
   await rm(snapshotLink);
+});
 
+test("refuses a native junction ancestor without reading outside its canonical root", async (t) => {
+  const container = await makeRoot(t);
   const actualParent = join(container, "actual-parent");
   const junctionParent = join(container, "junction-parent");
   await mkdir(actualParent);

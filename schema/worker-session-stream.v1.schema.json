@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://morrow.local/schema/worker-session-stream.v1.schema.json",
+  "title": "Morrow local worker session stream v1",
+  "oneOf": [
+    { "$ref": "#/$defs/event" },
+    { "$ref": "#/$defs/cursor" }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "eventType": {
+      "enum": [
+        "TERMINAL_SESSION_STARTED",
+        "TERMINAL_OUTPUT",
+        "TERMINAL_INPUT_WRITTEN",
+        "TERMINAL_INPUT_ENDED",
+        "TERMINAL_RESIZED",
+        "TERMINAL_INTERRUPT_REQUESTED",
+        "TERMINAL_SESSION_EXITED",
+        "TERMINAL_SESSION_FAILED"
+      ]
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "schemaVersion", "eventId", "sequence", "occurredAt",
+        "sessionId", "terminalSessionId", "agentInstanceId", "contractId",
+        "roleId", "runtimeId", "workspaceId", "type", "payload"
+      ],
+      "properties": {
+        "schema": { "const": "morrow.worker-session-stream" },
+        "schemaVersion": { "const": "1.0" },
+        "eventId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "occurredAt": { "$ref": "#/$defs/timestamp" },
+        "sessionId": { "$ref": "#/$defs/sessionId" },
+        "terminalSessionId": { "$ref": "#/$defs/identifier" },
+        "agentInstanceId": { "$ref": "#/$defs/identifier" },
+        "contractId": { "$ref": "#/$defs/identifier" },
+        "roleId": { "$ref": "#/$defs/identifier" },
+        "runtimeId": { "$ref": "#/$defs/identifier" },
+        "workspaceId": { "$ref": "#/$defs/identifier" },
+        "type": { "$ref": "#/$defs/eventType" },
+        "payload": { "type": "object" }
+      }
+    },
+    "cursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["streamId", "sequence"],
+      "properties": {
+        "streamId": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "sequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    }
+  }
+}

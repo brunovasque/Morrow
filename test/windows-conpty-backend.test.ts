@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { execFile, fork } from "node:child_process";
+import { execFile, fork, spawn } from "node:child_process";
+import { WindowsProcessIdentityProbe, assertBirthWindow, assertConcurrentIdentities, assertDistinctLifetimes, assertOriginalsExited } from "../src/probes/process-identity.ts";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -122,7 +123,10 @@ test("Windows ConPTY refuses concurrency above the measured MVO capacity", {
 test("simultaneous ConPTY exits use distinct native host processes", {
   skip: !windowsConptyAvailable,
   timeout: 20_000,
-}, async () => {
+}, async (t) => {
+  const observer = new WindowsProcessIdentityProbe();
+  t.after(() => observer.close());
+  await observer.capture([process.pid]);
   const root = await mkdtemp(join(tmpdir(), "morrow-conpty-host-isolation-"));
   const workspaceRoot = join(root, "managed-workspaces");
   const workspaces = new LocalWorkspaceManager(workspaceRoot);
@@ -152,11 +156,23 @@ test("simultaneous ConPTY exits use distinct native host processes", {
     env: await controlledWindowsEnvironment(workspace.root),
     timeoutMs: 10_000,
   });
+  const beganMs = Date.now();
   const [first, second] = await Promise.all([
     start("one", firstWorkspace),
     start("two", secondWorkspace),
   ]);
 
+  const readyDeadline = Date.now() + 8_000;
+  while (startEvents.length < 2) {
+    if (Date.now() >= readyDeadline) throw new Error("process_identity_start_timeout");
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  const originals = await observer.capture(startEvents.flatMap(event => [event.payload.pid, event.payload.backendHostPid]));
+  for (let i=0;i<startEvents.length;i++) {
+    assertBirthWindow(originals[i*2], beganMs, startEvents[i].occurredAt);
+    assertBirthWindow(originals[i*2+1], beganMs, startEvents[i].occurredAt);
+  }
+  assertConcurrentIdentities(originals);
   await Promise.all([
     terminals.write(first.terminalSessionId, "exit-now\r"),
     terminals.write(second.terminalSessionId, "exit-now\r"),
@@ -171,31 +187,29 @@ test("simultaneous ConPTY exits use distinct native host processes", {
   assert.equal(new Set(terminalPids).size, 2);
   assert.equal(new Set(hostPids).size, 2);
   assert.equal(hostPids.every((pid) => pid !== null && pid !== process.pid && !terminalPids.includes(pid)), true);
-  assert.equal([...terminalPids, ...hostPids].every((pid) => pid !== null && !processIsAlive(pid)), true);
+  await observer.assertExited(originals);
 });
-
-function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 test("native host termination is contained to its managed ConPTY tree", {
   skip: !windowsConptyAvailable,
   timeout: 20_000,
-}, async () => {
+}, async (t) => {
+  const observer = new WindowsProcessIdentityProbe();
+  t.after(() => observer.close());
+  await observer.capture([process.pid]);
   const root = await mkdtemp(join(tmpdir(), "morrow-conpty-host-crash-"));
   const workspaceRoot = join(root, "managed-workspaces");
   const workspaces = new LocalWorkspaceManager(workspaceRoot);
   const workspace = await workspaces.create({ workspaceId: "W1", contractId: "C1", roleId: "executor" });
   const terminals = new TerminalSessionManager(workspaceRoot, { backend: new WindowsConptyTerminalBackend() });
   let output = "";
+  let readyAt: string | undefined;
   let startEvent: Extract<TerminalSessionEvent, { type: "TERMINAL_SESSION_STARTED" }> | null = null;
   terminals.subscribe((event) => {
-    if (event.type === "TERMINAL_OUTPUT") output += event.payload.data;
+    if (event.type === "TERMINAL_OUTPUT") {
+      output += event.payload.data;
+      if (!readyAt && /__MORROW_CRASH_TREE_\d+__/.test(output)) readyAt = event.occurredAt;
+    }
     if (event.type === "TERMINAL_SESSION_STARTED") startEvent = event;
   });
   const childScript = [
@@ -204,6 +218,7 @@ test("native host termination is contained to its managed ConPTY tree", {
     "process.stdout.write('__MORROW_CRASH_TREE_'+child.pid+'__\\n')",
     "setInterval(()=>{},60000)",
   ].join(";");
+  const beganMs = Date.now();
   const handle = await terminals.start({
     terminalSessionId: "T-crash",
     agentInstanceId: "A-crash",
@@ -228,16 +243,22 @@ test("native host termination is contained to its managed ConPTY tree", {
   const terminalPid = startEvent.payload.pid;
   const hostPid = startEvent.payload.backendHostPid;
   assert.ok(terminalPid && hostPid);
+  const originals = await observer.capture([terminalPid, hostPid, descendantPid]);
+  assert.ok(readyAt);
+  assertBirthWindow(originals[0], beganMs, startEvent.occurredAt);
+  assertBirthWindow(originals[1], beganMs, startEvent.occurredAt);
+  assertBirthWindow(originals[2], beganMs, readyAt);
+  assertConcurrentIdentities(originals);
   process.kill(hostPid);
 
   const result = await handle.completion;
   assert.equal(result.status, "failed");
   assert.match(result.error ?? "", /terminal_conpty_host_exited/);
   const cleanupDeadline = Date.now() + 5_000;
-  while ([terminalPid, hostPid, descendantPid].some(processIsAlive) && Date.now() < cleanupDeadline) {
+  while ((await observer.alive(originals)).some(Boolean) && Date.now() < cleanupDeadline) {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
   }
-  assert.equal([terminalPid, hostPid, descendantPid].every((pid) => !processIsAlive(pid)), true);
+  await observer.assertExited(originals);
 });
 
 test("real Windows ConPTY preserves state, terminal bytes, resize and both interrupts", {
@@ -542,9 +563,9 @@ test("real Windows ConPTY multiplexes sessions and cleans timeout, cancel and de
     timedOut: number;
     stopped: number;
     collisionRefusals: number;
-    distinctRootPids: number;
-    distinctDescendantPids: number;
-    distinctNativeHostPids: number;
+    distinctRootIdentities: number;
+    distinctDescendantIdentities: number;
+    distinctNativeHostIdentities: number;
     identityBoundEvents: number;
     inputIsolation: boolean;
     noOrphans: boolean;
@@ -558,13 +579,59 @@ test("real Windows ConPTY multiplexes sessions and cleans timeout, cancel and de
     timedOut: 3,
     stopped: 3,
     collisionRefusals: 12,
-    distinctRootPids: 12,
-    distinctDescendantPids: 12,
-    distinctNativeHostPids: 12,
+    distinctRootIdentities: 12,
+    distinctDescendantIdentities: 12,
+    distinctNativeHostIdentities: 12,
     identityBoundEvents: proof.identityBoundEvents,
     inputIsolation: true,
     noOrphans: true,
     fixtureRemoved: true,
   });
   assert.ok(proof.identityBoundEvents >= 48);
+});
+
+
+test("I5 process identity accepts sequential PID reuse but refuses simultaneous collision", () => {
+  const old = { pid: 77, birth: "100" }, next = { pid: 77, birth: "200" };
+  assert.throws(() => assertConcurrentIdentities([old, next]), /concurrent_collision/);
+  assert.throws(() => assertDistinctLifetimes([old, old]), /lifetime_collision/);
+  assert.doesNotThrow(() => assertDistinctLifetimes([old, next]));
+  assert.doesNotThrow(() => assertOriginalsExited([old], [{ ...next, state: "live" }]));
+  assert.throws(() => assertOriginalsExited([old,next], [{ ...next, state: "live" }]), /survived/);
+});
+
+test("I5 process identity fails closed on missing, invalid and older observations", () => {
+  const identity = { pid: 77, birth: "200" };
+  assert.throws(() => assertOriginalsExited([identity], []), /identity_unknown/);
+  assert.throws(() => assertOriginalsExited([identity], [{ pid:77, state:"live", birth:"" }]), /identity_unknown/);
+  assert.throws(() => assertOriginalsExited([identity], [{ pid:77, state:"live", birth:"100" }]), /birth_regression/);
+  assert.throws(() => assertOriginalsExited([identity], [{ ...identity,state:"live" }]), /survived/);
+  assert.doesNotThrow(() => assertOriginalsExited([identity], [{ ...identity,state:"exited" }]));
+  const epoch = 621355968000000000n;
+  const began = Date.parse("2026-01-01T00:00:00.000Z");
+  const during = {pid:77,birth:String(epoch+BigInt(began+5)*10000n)};
+  assert.doesNotThrow(()=>assertBirthWindow(during,began,new Date(began+10).toISOString()));
+  assert.throws(()=>assertBirthWindow(during,began,new Date(began+4).toISOString()),/birth_outside_session/);
+  assert.throws(()=>assertBirthWindow(during,began+6,new Date(began+10).toISOString()),/birth_outside_session/);
+});
+
+test("I5 Windows original process really survives until its own child exits", { skip: process.platform !== "win32", timeout: 15_000 }, async (t) => {
+  const observer = new WindowsProcessIdentityProbe();
+  t.after(() => observer.close());
+  await observer.capture([process.pid]);
+  const child = spawn(process.execPath, ["-e", "process.stdin.resume();process.stdin.once('end',()=>process.exit(0));setTimeout(()=>process.exit(2),10000)"], { stdio:["pipe","ignore","ignore"],windowsHide:true });
+  const closed = new Promise<number|null>((resolve,reject)=>{child.once("close",resolve);child.once("error",reject)});
+  try {
+    assert.ok(child.pid);
+    const identities = await observer.capture([child.pid]);
+    await assert.rejects(observer.assertExited(identities), /process_identity_survived/);
+    assert.deepEqual(await observer.alive(identities),[true]);
+    child.stdin.end();
+    assert.equal(await closed,0);
+    await observer.assertExited(identities);
+  } finally {
+    child.stdin.end();
+    if (child.exitCode === null) child.kill();
+    await closed;
+  }
 });

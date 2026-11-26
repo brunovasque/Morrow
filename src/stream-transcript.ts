@@ -19,7 +19,7 @@ export const TRANSCRIPT_FORMAT = "morrow.transcript/1.0" as const;
 export const TRANSCRIPT_REDACTION_PLACEHOLDER = "[REDACTED]" as const;
 export const SENSITIVE_INPUT_PLACEHOLDER = "[SENSITIVE_INPUT_REDACTED]" as const;
 
-export type TranscriptStream = "stdout" | "stderr" | "input" | "system";
+export type TranscriptStream = "stdout" | "stderr" | "terminal" | "input" | "system";
 
 export interface TranscriptRetentionPolicy {
   maxAgeMs: number;
@@ -221,6 +221,13 @@ export class StreamRedactor {
     }
   }
 
+  // Extend the canonical policy for a single observation lifetime. Never
+  // expose the declared literals through a public event or persisted policy.
+  withSensitiveLiterals(literals: readonly string[]): StreamRedactor {
+    const combined = [...new Set([...this.#literals, ...literals.filter(literal => literal !== "")])];
+    return new StreamRedactor({ policyId: this.policyId, sensitiveLiterals: combined });
+  }
+
   start(maxPendingBytes: number): StreamRedactorSession {
     if (!Number.isSafeInteger(maxPendingBytes) || maxPendingBytes < 1) {
       throw transcriptError("redaction_pending_limit_invalid");
@@ -340,6 +347,15 @@ export class StreamRedactorSession {
     this.#pendingSinceReleaseBytes = 0;
     this.#terminalScanState = { mode: "normal" };
     return result;
+  }
+
+  finishInterrupted(): RedactedStreamFragment {
+    if (this.#finished) throw transcriptError("redaction_session_finished");
+    // Observation ended before the producer's final byte. Its unresolved
+    // holdback may be a prefix of a sensitive value; never publish it raw.
+    const hasPending = this.#pendingBytes > 0;
+    this.abort();
+    return deepFreeze({ text: hasPending ? TRANSCRIPT_REDACTION_PLACEHOLDER : "", redactionCount: hasPending ? 1 : 0 });
   }
 
   abort(): void {
@@ -2236,7 +2252,7 @@ function trustedNow(clock?: () => string | number | Date): string {
 }
 
 function isTranscriptStream(value: unknown): value is TranscriptStream {
-  return value === "stdout" || value === "stderr" || value === "input" || value === "system";
+  return value === "stdout" || value === "stderr" || value === "terminal" || value === "input" || value === "system";
 }
 
 function isIdentifier(value: unknown): value is string {
