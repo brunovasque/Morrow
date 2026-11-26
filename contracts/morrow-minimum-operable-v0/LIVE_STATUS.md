@@ -13,16 +13,16 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR04`
 - `active_route_node`: `MULTI_SESSION_STREAM_API_OBSERVABILITY`
-- `active_subaction`: `P4_PR04_SECURITY_REVIEW_BLOCKED_INVARIANT_RECOVERY`
+- `active_subaction`: `P4_PR04_FROZEN_AWAITING_SECURITY_REVIEW`
 - `expected_branch_prefix`: `mvo/p4-pr04-`
-- `write_execution_allowed`: `Executor may make only causal P4-PR04 technical writes after PRE_DISPATCH and invariant diagnosis; no push/PR/merge`
+- `write_execution_allowed`: `Only independent security review of frozen candidate; no technical writes, push, PR or merge`
 - `next_authorized_action`: `START_P4_PR04`
-- `next_authorized_actor`: `Executor P4-PR04 persistente`
+- `next_authorized_actor`: `Independent Security Reviewer P4-PR04, new read-only session`
 - `p4_pr03_execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
 - `p4_pr04_base_sha`: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`
 - `p4_pr04_branch`: `mvo/p4-pr04-multi-session-stream`
-- `execution_root_sha`: `6372857cb645f994d31125bdb4ed8baef97591c8`
-- `candidate_sha`: `6372857cb645f994d31125bdb4ed8baef97591c8`
+- `execution_root_sha`: `2e0a54cef6ab4ae2cae8e08c13c16fb273b48479`
+- `candidate_sha`: `2e0a54cef6ab4ae2cae8e08c13c16fb273b48479`
 - `opening_control_root_sha`: `6f593eab2b843220572d4849c6f1ff1ab8e3a6ee`
 - `pr_identity_state`: `NOT_OPEN`
 - `pr_number`: `none`
@@ -30,7 +30,7 @@
 - `pr_base_sha_at_opening`: `not_applicable`
 - `pr_state_at_opening`: `not_applicable`
 - `merge_ready_state`: `NOT_READY_BEFORE_INDEPENDENT_REVIEW`
-- `merge_ready_reason`: `P2_08_to_12_and_P3_02_require_invariant_recovery`
+- `merge_ready_reason`: `independent_security_review_and_residual_ConPTY_risk_assessment_pending`
 - `merge_authorized`: `no`
 - `pre_merge_control_root_sha`: `not_applicable`
 - `integrated_merge_sha`: `not_applicable`
@@ -40,12 +40,12 @@
 - `final_audit_state`: `not_started`
 - `p4_pr03_state`: `PROVEN`
 - `p4_pr04_state`: `RUNNING`
-- `candidate_state`: `SECURITY_REVIEW_BLOCKED`
-- `security_review_state`: `SECURITY_REVIEW_BLOCKED`
+- `candidate_state`: `FROZEN_FOR_SECURITY_REVIEW`
+- `security_review_state`: `SECURITY_REVIEW_PENDING`
 
 ## Próxima ação exata
 
-P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está `RUNNING` na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`, candidate recuperado e congelado em `6372857cb645f994d31125bdb4ed8baef97591c8`; anterior `08e2df00ca87c27f403e835fe63a7479e68a293c` SUPERSEDED/INVALIDATED, Security Review BLOCKED anterior historico. Security Review `BLOCKED` por P2-08..12/P3-02; proximo ator Executor persistente, recuperacao por invariantes conforme EVIDENCE. Oito achados anteriores GREEN; cumulativa independente 274/276 (EPERM), estresse 64/64. Nenhum merge, push, PR, deploy ou P5 autorizado.
+P4-PR04 permanece RUNNING, com candidato tecnico congelado `2e0a54cef6ab4ae2cae8e08c13c16fb273b48479` na branch `mvo/p4-pr04-multi-session-stream`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`. Estado FROZEN_FOR_SECURITY_REVIEW / SECURITY_REVIEW_PENDING. Proximo ator: revisor independente em sessao nova, usando exatamente esse SHA e as evidencias em `.morrow-test-tmp/p4-pr04-freeze-f0a166b-01`. O candidato anterior `6372857cb645f994d31125bdb4ed8baef97591c8` esta SUPERSEDED/INVALIDATED; seu parecer BLOCKED permanece historico, sem transferencia de aprovacoes. Regressao original 283/283, estresse original e instrumentado 70/70 cada, probe de 12 sessoes: exit direto 0, zero SKIP. A causa historica do timeout ConPTY segue inconclusiva e deve ser avaliada como risco residual pelo revisor, conforme autorizacao expressa de freeze. Freeze e reconciliacao nao equivalem a Security Review GREEN, merge, REGRESSION_VETO PASS ou PROVEN. Sem nova escrita tecnica, elevacao, push, PR, merge, deploy ou P5.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -328,3 +328,61 @@ DC conferiu sumula integral 276/276, zero fail/cancelled/skipped/todo, stderr va
 ## 2026-11-26 - Security Review BLOCKED, recuperacao por invariantes
 
 Parecer independente do candidate `6372857cb645f994d31125bdb4ed8baef97591c8`: P2-08..12 e P3-02 bloqueantes, oito anteriores GREEN, cumulativa 274/276 (dois EPERM) e estresse 64/64. Rota e matriz I1-I5 detalhadas em EVIDENCE.md. Executor persistente autorizado a diagnosticar, provar e corrigir causas comuns somente dentro de P4-PR04; sem freeze, elevacao sem nova autorizacao, push, PR, merge, deploy ou P5.
+
+## 2026-11-26 - P4-PR04 diagnostico por invariantes concluido
+
+PRE_DISPATCH GREEN em f0a166b; seis novos achados reproduzidos, oito anteriores preservados como regressao obrigatoria. Matriz causal I1-I5 registrada em EVIDENCE antes de qualquer mudanca funcional. Proxima acao: correcao causal das fronteiras existentes e testes permanentes. Sem freeze, elevacao ou P5.
+
+## 2026-11-26 - P4-PR04 correcoes e prova causal
+
+Worktree recuperado sobre f0a166b, ainda sem freeze: seis contraprovas RED permanentes, alteracoes causais nos limites existentes e prova focused 69/69 GREEN, exit direto 0, incluindo os 14 achados e dupla ConPTY reforcada. Uma falha inicial de fixture nativa foi diagnosticada e corrigida; evidencias brutas preservadas. Sobreposicoes externas detectadas durante focused e preflights impedem considerar I5 encerrado. Proximo gate: cumulativa integral serial e estresse concorrente separados, sem workloads externos observados, exit direto 0 e zero skips. Sem elevacao sem nova autorizacao, commit, freeze, push ou P5.
+
+## 2026-11-26 - P4-PR04 recuperacao f0a166b BLOCKED
+
+- Matriz I1-I5 cumprida no diagnostico, com seis novos achados reproduzidos em RED antes de modificar codigo e sete novas contraprovas permanentes (incluindo predecessor committed) mais reforco da dupla ConPTY. I1-I4: contraprovas dos 14 achados GREEN na cumulativa; I5: gate integral e estabilidade sob carga ainda BLOCKED. Correcao causal dos limites existentes, sem novos componentes de runtime, dependencias, relaxamento de controles ou alteracao de timeouts.
+- Estresse stress-02 repetido sem alteracao de codigo/teste/limites: 70/70 PASS, 0 FAIL/CANCELLED/SKIP/TODO, 46601.9455 ms, exit direto 0; 26 amostras e zero workloads externos detectados/erros. stress-01 69/70 e timeout de T-R1-input-a permanecem validos como evidencia. Serial GREEN nessa prova e repeticao GREEN comprovam intermitencia, nao causa nem eliminacao. Nao considerar I5 GREEN. A diferenca de desempenho das execucoes nao estabelece causalidade.
+- Cumulativa serial-03 281/283, exit direto 1, sem skips, 65 amostras limpas: faltam duas provas nativas de symlink por EPERM do Windows. Requer nova autorizacao expressa e pontual para regressao elevada, nao reutilizar autorizacao anterior. Antes de freeze, diagnosticar causalmente timeout ConPTY multiplex sob carga, repetir estresse e cumulativa integral sem interferencia observada, 283/283 ou total atualizado, exit direto 0. Monitor por amostragem, nao garantia absoluta. Nenhum processo externo interrompido.
+- Evidencias brutas em .morrow-test-tmp/p4-pr04-recovery-f0a166b/, SHA256SUMS.txt SHA256 A4FC8C57D73EC0970793A84354FB99273E3CA08BC5C168880DC57D80D4A5B161; technical-sha256-checkpoint.txt SHA256 F052EDDF592E897AF2E157C3FE00B7C725E62D0973E3A59B9C6FCCAE85060C6D (9 arquivos tecnicos). Serial log 99B5B6A244B445F2FEFAFC8597E8B62D174622CB2288EBCE7A2C33AB3DD104C3; stress-01 562D0E250780D517B57C088D6C891EB4C19436E605FD50654496F77DA17A69BE; stress-02 34B9D07CB67321E0527EF2C52384730CDC530C737964C87998ACCC0849316138. Direct exits 1/1/0, sem preencher retrospectivamente. Delta tecnico, logs RED/GREEN, abortos preflight e monitor preservados.
+- Disposicao BLOCKED, nao READY_FOR_FREEZE. HEAD f0a166bf241a1951d2f388fdb976d268a250f51b; arvore recuperada nao congelada e propositalmente dirty. Candidate 6372857cb645f994d31125bdb4ed8baef97591c8 permanece SECURITY_REVIEW_BLOCKED, nao transferir aprovacoes. P4-PR04 RUNNING, proximo ator Executor persistente para fechar I5 dentro de P4-PR04. Diff-check GREEN e package files sem delta contra base 78e1bfdc. Sem stage, commit, freeze, push, PR, merge, deploy, elevacao ou P5.
+
+## 2026-11-26 - Cerebro: fechamento dirigido de I5, autorizacao pendente
+
+DC conferiu checkpoint f0a166b, worktree recuperado, diff-check GREEN e package files sem delta. Conforme evidencias do Executor, 14 achados GREEN; I1-I4 aprovados nos testes, I5 BLOCKED por dois EPERM nativos e timeout T-R1-input-a no stress-01 (stress-02 70/70 sem mudanca). Nao reabrir correcao estrutural sem evidencia causal. Investigar especificamente a sequencia READY/input/exit do multiplex e tempos de execucao, distinguir produto de harness/ambiente com provas controladas e preservar limites/asserts. Regressao serial integral 283 esperados e estresse focado separado em janela sem testes externos, exit direto 0 e zero SKIP. Nova elevacao temporaria exclusivamente para a regressao Morrow depende de autorizacao expressa do operador; anterior consumida. Nenhum processo externo deve ser encerrado; sem commit, freeze, push, PR, merge ou P5. Nenhuma mudanca funcional ou permissao aplicada pelo Cerebro.
+
+## 2026-11-26 - Autorizacao do operador: fechamento I5 em janela de recursos adequada
+
+Operador autorizou expressamente nova elevacao temporaria, exclusivamente para a regressao serial integral do Morrow (283 testes esperados), via DC em D:\Morrow. Informou emulador do Atria aberto e possivel pressao de memoria. Preflight read-only do Cerebro mediu 15.94 GiB RAM total, 1.93 GiB disponiveis (87.9% em uso); esta amostra indica pouca folga, nao prova causa do timeout. Executor deve primeiro diagnosticar READY/input/exit do ConPTY com instrumentacao limitada, sem reabrir I1-I4 sem prova causal; coordenar janela sem testes pesados externos e com folga de memoria/CPU, registrar recursos antes/durante serial e estresse separado, nao encerrar emulador nem qualquer processo alheio. Se recursos insuficientes, aguardar liberacao coordenada, sem mascarar falhas. Elevacao apenas do processo temporario autorizado via UAC normal, sem elevar DC inteiro, alterar configuracoes/permissoes permanentes ou outros projetos; encerrar apos uso. Exigir exit direto do Node 0, zero SKIP, regressao integral e estresse, preservar logs RED/GREEN e hashes. Retornar READY_FOR_FREEZE ou BLOCKED. Sem commit, freeze, push, PR, merge ou P5. Autorizacao nao constitui prova de execucao. Nenhuma permissao ou processo alterado pelo Cerebro.
+
+
+## 2026-11-26 - I5: cadastro oficial validado e diagnostico retomado
+
+Operador autorizou exclusivamente cadastro Morrow e retomada I5. Incluida apenas entrada morrow no registry existente e executado workspace.ps1 -Action install -FrontId morrow. Conferidos 179 arquivos rastreados sem alteracao pelo cadastro, demais frentes e regras globais identicas. Primeira tentativa parou antes do cadastro por nomes Git cotados; segunda concluiu instalacao, verificacao final separada PASS apos corrigir enumeracao PowerShell. Evidencia completa em .morrow-test-tmp/p4-pr04-i5-closure/coordination-install e jobs Guardian 20261126-112600-b4a66000 / 20261126-112654-cec90ec9. Sessao morrow-i5-20261126 autorizada PASS.
+
+I1-I4 e os nove hashes tecnicos preservados. Diagnostico I5 usa copia instrumentada do probe e copia dos testes Windows apenas com URLs relocadas, dentro da pasta de evidencias; nenhum runtime/assert/timeout original alterado. Registrar START/READY/write/ACK/EXIT/completion e CPU/RAM; ainda nao ha causa provada do timeout historico. Autorizacao temporaria vigente exclusivamente para regressao integral 283 serial; estresse separado, sem interferir em outros projetos/emulador. Sem freeze, commit, push, merge ou P5.
+
+
+## 2026-11-26 - I5: diagnostico instrumentado e janela de recursos
+
+Probe isolado probe-01: exit direto0,12 sessoes/3rodadas,6completed+3timed_out intencionais+3stopped, sem orfaos. START->completion dos inputs1159.5-1173.8ms; READY e ACK observados. Monitor13amostras,0externos, RAMmin2800MiB, CPUmax29%. stress-trace-01 abortou antes do Node por CPU67% no preflight; nao e falha de teste. stress-trace-02:70/70 PASS,zero FAIL/CANCELLED/SKIP/TODO, exit direto0,35645.4431ms;19amostras,0externos, RAMmin2342MiB,CPUmax90%/media37.47%,0amostras de baixa memoria,0erros. Asserts/prazos originais preservados nas copias relocadas; nove hashes tecnicos intactos.
+
+Evidencias em .morrow-test-tmp/p4-pr04-i5-closure, incluindo traces por PID e monitor de processos/CPU/RAM. Provas atuais nao reproduzem o timeout historico nem estabelecem sua causa; nao atribuir a RAM/CPU por hipotese. Proxima etapa:283testes originais serialmente, processo temporario elevado autorizado, e estresseoriginal separado. Guardian/DC nao elevados; nao interferir em emulador/outros projetos. Sem freeze/commit/P5.
+
+
+## 2026-11-26 - I5: execucao GREEN, diagnostico BLOCKED
+
+Cadastro oficial Morrow validado, regras globais/demais frentes e codigo preservados. Regressao original 283/283 serial elevada e estresse original 70/70 separado PASS, exit direto 0, zero SKIP; probe isolado 12 sessoes e estresse instrumentado 70/70 tambem PASS. Zero interferencias detectadas por amostragem, recursos registrados, processo elevado encerrado e DC/Guardian nao elevados. Pendencia unica: causa do timeout ConPTY historico nao comprovada, sem nova falha reproduzida que justifique alterar codigo. I5 BLOCKED nesse ponto; evidencias completas e hashes em EVIDENCE e p4-pr04-i5-closure/FINAL_VERIFICATION.json. I1-I4 intactos; sem commit, freeze ou P5.
+
+## 2026-11-26 - Cerebro: freeze autorizado apos provas I5
+
+Conferencia independente via DC: serial original 283/283, stress original 70/70, stress instrumentado 70/70, probe 12 sessoes; todos direct.exit e runner.exit 0, zero FAIL/SKIP nos testes; hashes dos quatro logs e manifesto FA25AF3A960AAD7813320807352C7D6805FF6245ECA6CCF03D51039D0B66F035 conferidos; nove arquivos tecnicos conferem com checkpoint f0a166b, diff-check GREEN, dependencias intactas, PID elevado 4972 ausente. Coordenacao morrow registrada e validada. Amostras sem interferencia externa detectada; nao garantem exclusividade absoluta.
+
+Decisao: autorizar apenas freeze local do worktree recuperado para revisao independente. Causa historica do timeout T-R1-input-a permanece inconclusiva, sem reproducoes nas provas atuais, com margem medida de cerca de 8.7s; preservar evidencias RED/GREEN. A exigencia operacional anterior de localizar a causa exata antes do freeze fica substituida por avaliacao independente das provas atuais e do risco residual, sem alterar contrato, controles, gates, limites ou assertions. Nenhuma regressao comprovada pode ser aceita como debito; REGRESSION_VETO permanece nao iniciado, Security Review deve verificar suficiência da cobertura e se ha bloqueio material ou prova faltante. Nao declarar causa ambiental nem eliminacao definitiva, nao alterar codigo especulativamente. Freeze nao equivale a aprovacao, merge ou PROVEN. Executor: preservar artefatos e codigo, commit tecnico/documental separado, atualizar continuidade e reconciliar Git limpo; retornar FROZEN_AWAITING_SECURITY_REVIEW com SHA exato. Usar Guardian e coordenacao, sem nova elevacao (autorizacao consumida), push, PR, merge, deploy ou P5.
+
+
+## 2026-11-26 - P4-PR04 FROZEN_AWAITING_SECURITY_REVIEW
+
+Freeze local autorizado pelo operador e registrado pelo Cerebro, executado exclusivamente via DC/Guardian. Candidate/Execution Root tecnico `2e0a54cef6ab4ae2cae8e08c13c16fb273b48479`, parent `f0a166bf241a1951d2f388fdb976d268a250f51b`; anterior `6372857cb645f994d31125bdb4ed8baef97591c8` SUPERSEDED/INVALIDATED. Codigo validado preservado: nove arquivos tecnicos, SHA256 bruto e blobs Git identicos antes/depois do stage e commit. Evidencias anteriores preservadas: 66 arquivos da recuperacao e 131 do I5 reconferidos. Commit documental separado do tecnico.
+
+Provas preservadas: regressao original serial elevada 283/283, estresse original separado 70/70, estresse instrumentado 70/70 e probe 12 sessoes, todos com exit direto 0; zero FAIL/CANCELLED/SKIP/TODO nas suites. Nenhum novo teste, elevacao ou ajuste de codigo/limites neste freeze. Intermitencia historica ConPTY mantida como risco residual para avaliacao independente; causa ambiental ou eliminacao definitiva nao declaradas. REGRESSION_VETO permanece nao iniciado.
+
+Manifesto tecnico do freeze: 09B8EC9EB76C46C2DF753300D1C544C70D671A7612785F2A9960E1E7A756AF18. Identidade documental, Git limpo e resultado final do reconciliador sao registrados apos o commit documental em `.morrow-test-tmp/p4-pr04-freeze-f0a166b-01/FINAL_VERIFICATION.json`, com inventario final em FINAL-SHA256SUMS.txt. Proximo ator revisor independente; sem push, PR, merge, deploy ou P5.

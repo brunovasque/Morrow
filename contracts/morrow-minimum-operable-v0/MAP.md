@@ -247,6 +247,24 @@ Candidate `08e2df00ca87c27f403e835fe63a7479e68a293c` bloqueado pelos novos P2-05
 - Cumulativa serial 276/276 PASS sem FAIL/SKIP/CANCELLED/TODO; focused worker 23/23 e governance 24/24; ambos symlinks GREEN, bootstrap/EBADF e ConPTY passaram. Zero interferencias externas detectadas em 57 amostras; processos elevados encerrados. Exit code direto Node nao registrado; launcher 0, stderr vazio; duas tentativas preliminares abortadas por falso positivo do monitor. Revisor deve obter prova com exit code direto corretamente capturado, avaliar intermitencia ConPTY sob carga e alteracoes causais em modulos anteriores. REGRESSION_VETO nao iniciado.
 - P4-PR04 RUNNING; FROZEN_FOR_SECURITY_REVIEW / SECURITY_REVIEW_PENDING. Proximo ator: Security Reviewer independente read-only. START_P4_PR04 coarse; sem nova escrita tecnica, elevacao sem nova autorizacao, push, PR, merge, deploy ou P5. CONTRACT, TARGET e ordem das 42 PRs preservados.
 
-## Estado atual - P4-PR04 Security Review BLOCKED, recuperacao por invariantes (2026-11-26)
+## Registro anterior - P4-PR04 Security Review BLOCKED, recuperacao por invariantes (2026-11-26)
 
 Candidate `6372857cb645f994d31125bdb4ed8baef97591c8` bloqueado pelos novos P2-08..12 e P3-02; oito achados anteriores GREEN. Cumulativa independente 274/276 (dois EPERM), estresse 64/64. Retorno ao Executor persistente: diagnostico de causas comuns, matriz I1-I5 em EVIDENCE, contraprovas e correcoes causais em lote, regressao integral e estresse; novo freeze somente autorizado. Mesma unidade, gates e contrato, sem push, PR, merge, deploy ou P5.
+
+## Registro anterior - P4-PR04 recuperacao por invariantes, I5 BLOCKED (2026-11-26)
+
+Worktree sobre f0a166b, sem freeze: 14 achados GREEN nas contraprovas, cumulativa 281/283 (dois EPERM nativos), estresse 69/70 seguido de 70/70, timeout ConPTY intermitente sem causa conclusiva. Ver EVIDENCE e recovery-f0a166b/SHA256SUMS.txt. P4-PR04 RUNNING; candidate anterior 6372857 permanece SECURITY_REVIEW_BLOCKED; proximo ator Executor persistente para diagnostico de I5, regressao com nova autorizacao pontual se necessaria, estresse isolado e somente depois gate de freeze. Sem push/PR/merge/P5.
+
+
+## Registro anterior - P4-PR04 I5: execucao GREEN, diagnostico BLOCKED (2026-11-26)
+
+Morrow cadastrado/validado pelo instalador oficial, demais frentes/regras/arquivos tecnicos preservados. Regressao serial elevada ORIGINAL283/283 e estresse ORIGINAL separado70/70, exit direto0/zero SKIP/sem interferencia detectada. Probe12sessoes e estresse instrumentado70/70 GREEN. Processos elevados encerrados. Pendencia unica: causa do timeout ConPTY historico nao estabelecida; nao atribuir recursos como causa nem aceitar risco por inferencia. Evidencias e hashes no EVIDENCE e p4-pr04-i5-closure/FINAL_VERIFICATION.json. P4-PR04 RUNNING, sem freeze, commit ou P5.
+
+## Registro anterior - P4-PR04 freeze autorizado apos provas I5 (2026-11-26)
+
+Worktree recuperado sobre f0a166b: serial original 283/283, stress original e instrumentado 70/70 cada, probe 12 sessoes, direct exits 0. Causa historica do timeout inconclusiva, risco residual a avaliar independentemente. Freeze local autorizado, sem presumir REGRESSION_VETO PASS; candidato 6372857 continua BLOCKED ate novo freeze. Ver EVIDENCE. Sem push, PR, merge ou P5.
+
+
+## Estado atual - P4-PR04 FROZEN_AWAITING_SECURITY_REVIEW (2026-11-26)
+
+Candidato tecnico `2e0a54cef6ab4ae2cae8e08c13c16fb273b48479`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`; anterior `6372857cb645f994d31125bdb4ed8baef97591c8` SUPERSEDED/INVALIDATED. Codigo e evidencias validados preservados, commit documental separado. Regressao original 283/283, estresse original/instrumentado 70/70 cada e probe 12 sessoes, exit direto 0; nenhum novo teste ou elevacao no freeze. Intermitencia historica ConPTY inconclusiva registrada como risco residual para avaliacao independente, sem afirmar causa ou eliminacao. P4-PR04 RUNNING, FROZEN_FOR_SECURITY_REVIEW / SECURITY_REVIEW_PENDING. Proximo ator revisor independente em sessao nova no SHA exato; ver EVIDENCE e `.morrow-test-tmp/p4-pr04-freeze-f0a166b-01/FINAL_VERIFICATION.json`. Sem escrita tecnica, push, PR, merge, deploy ou P5.
