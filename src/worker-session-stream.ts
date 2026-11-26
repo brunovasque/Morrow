@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { constants as osConstants } from "node:os";
+import { validateTerminalBackendDescriptor, resolveTerminalPresentation, type TerminalProtocol } from "./terminal-backend.ts";
 import { mkdir, readdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
@@ -28,6 +30,7 @@ import {
 } from "./worker-recovery.ts";
 import {
   TerminalSessionManager,
+  redactorForTerminalRequest,
   type TerminalSessionSnapshot,
   type TerminalSessionEvent,
   type TerminalSessionRequest,
@@ -140,6 +143,10 @@ interface SessionRecord extends WorkerSessionIdentity {
   started: boolean;
   failure: boolean;
   exitSeen: boolean;
+  lastExit: Extract<TerminalSessionEvent, {type:"TERMINAL_SESSION_EXITED"}>["payload"] | null;
+  protocol: TerminalProtocol | null;
+  redactor: StreamRedactor;
+  transcriptIds: Set<string>;
   // Only events admitted in this observation lifetime may mutate a record.
   liveBinding: { accessMode: TerminalSessionRequest["accessMode"]; admitted: boolean; ready: Promise<boolean> } | null;
   persistenceError: Error | null;
@@ -285,7 +292,7 @@ export class WorkerSessionStream {
     const transcript = this.transcriptFor(record);
     // A historical ID is not proof that a manager session belongs to this lifecycle.
     const terminalSnapshot = record.liveBinding?.admitted && !record.persistenceError
-      ? this.terminals.list().find((item) => matchesTerminalSnapshot(record, item) && item.status === record.state) ?? null
+      ? this.terminals.list().find((item) => matchesTerminalSnapshot(record, item) && matchesDurableOutcome(record, item)) ?? null
       : null;
     return Object.freeze({
       ...this.descriptor(record),
@@ -319,6 +326,7 @@ export class WorkerSessionStream {
 
   async start(request: TerminalSessionRequest): Promise<{ sessionId: string; completion: Promise<TerminalSessionResult> }> {
     this.assertOpen();
+    request = cloneData(request);
     assertSessionId(request.terminalSessionId);
     const sessionKey = request.terminalSessionId.toLowerCase();
     if (this.sessionKeys.has(sessionKey)) throw new Error("worker_session_id_already_exists");
@@ -329,6 +337,10 @@ export class WorkerSessionStream {
     this.sessions.set(record.sessionId, record);
     this.sessionKeys.add(sessionKey);
     try {
+      // The authoritative scan includes external anchors even when the log is absent.
+      // Reserve the in-memory identity first, then refuse known history before process launch.
+      await this.assertUnusedHistory(record);
+      this.assertOpen();
       const handle = await this.terminals.start(request);
       record.liveBinding.admitted = true;
       settleAdmission(true);
@@ -336,13 +348,13 @@ export class WorkerSessionStream {
         await record.queue;
         if (record.persistenceError) throw record.persistenceError;
         // A settled terminal process is not proof that its terminal event was committed.
-        if (!record.terminal || result.status !== record.state || !matchesTerminalSnapshot(record, result)) {
+        if (!record.terminal || !matchesDurableOutcome(record, result) || !matchesTerminalSnapshot(record, result)) {
           throw new Error("worker_session_terminal_persistence_failed");
         }
         return Object.freeze({
           ...result,
-          stdout: this.redactor.redact(result.stdout).text,
-          stderr: this.redactor.redact(result.stderr).text,
+          stdout: record.redactor.redact(result.stdout).text,
+          stderr: record.redactor.redact(result.stderr).text,
           error: result.error === undefined ? undefined : "terminal_session_failed",
         });
       });
@@ -385,7 +397,7 @@ export class WorkerSessionStream {
     let flushError: Error | null = null;
     for (const record of this.sessions.values()) {
       record.queue = record.queue.then(async () => {
-        if (!record.terminal && !record.persistenceError) await this.flushRedactors(record);
+        if (!record.terminal && !record.persistenceError) await this.flushRedactors(record, true);
       }).catch(() => {
         this.markPersistenceFailure(record);
         flushError = record.persistenceError;
@@ -431,6 +443,22 @@ export class WorkerSessionStream {
       this.sessions.set(sessionId, record);
       this.sessionKeys.add(sessionKey);
     }
+    // Retained transcript evidence is a second existing witness to a session ID.
+    // Never reconstruct a successful descriptor from it, and never reset a
+    // missing authenticated log as a new session. Retention may omit old IDs;
+    // the per-ID authority scan in start remains mandatory.
+    for (const item of this.transcript.inspect("worker-session-stream").records) {
+      if (item.stepId !== "worker-session-stream" || item.writerId !== "worker-session-stream") continue;
+      assertSessionId(item.terminalSessionId);
+      const key = item.terminalSessionId.toLowerCase();
+      if (this.sessionKeys.has(key)) continue;
+      await this.eventLogFor(item.terminalSessionId).readAll();
+      this.sessionKeys.add(key);
+    }
+  }
+
+  private async assertUnusedHistory(record: SessionRecord): Promise<void> {
+    if ((await record.eventLog.readAll()).length !== 0) throw new Error("worker_session_id_already_exists");
   }
 
   private recordFromRequest(request: TerminalSessionRequest): SessionRecord {
@@ -444,7 +472,8 @@ export class WorkerSessionStream {
       workspaceId: request.workspaceId,
       workspaceRoot: request.workspace.root,
     };
-    return this.newRecord(identity, this.eventLogFor(identity.sessionId), "starting", "online", false);
+    const redactor = redactorForTerminalRequest(request, this.redactor);
+    return this.newRecord(identity, this.eventLogFor(identity.sessionId), "starting", "online", false, redactor);
   }
 
   private recordFromStored(stored: StoredSessionPayload, eventLog: JsonlEventLog): SessionRecord {
@@ -468,7 +497,9 @@ export class WorkerSessionStream {
     state: WorkerSessionState,
     liveness: WorkerSessionLiveness,
     terminal: boolean,
+    redactor = this.redactor,
   ): SessionRecord {
+    assertCanonicalIdentity(identity, redactor);
     return {
       ...identity,
       eventLog,
@@ -482,13 +513,17 @@ export class WorkerSessionStream {
       started: false,
       failure: false,
       exitSeen: false,
+      lastExit: null,
+      protocol: null,
+      redactor,
+      transcriptIds: new Set(),
       liveBinding: null,
       persistenceError: null,
       queue: Promise.resolve(),
       redactors: new Map([
-        ["stdout", this.redactor.start(redactorMaximumPendingBytes)],
-        ["stderr", this.redactor.start(redactorMaximumPendingBytes)],
-        ["terminal", this.redactor.start(redactorMaximumPendingBytes)],
+        ["stdout", redactor.start(redactorMaximumPendingBytes)],
+        ["stderr", redactor.start(redactorMaximumPendingBytes)],
+        ["terminal", redactor.start(redactorMaximumPendingBytes)],
       ]),
       liveActivityEvents: [],
       liveActivityState: null,
@@ -505,7 +540,9 @@ export class WorkerSessionStream {
     if (this.closed || !sessionIdPattern.test(event.terminalSessionId)) return;
     let current = this.sessions.get(event.terminalSessionId);
     if (!current) {
-      if (event.type !== "TERMINAL_SESSION_STARTED") return;
+      if (event.type === "TERMINAL_OUTPUT") return;
+      const managerSnapshot = this.terminals.list().find(item => item.terminalSessionId === event.terminalSessionId);
+      if (!managerSnapshot) return;
       const identity: WorkerSessionIdentity = {
         sessionId: event.terminalSessionId,
         terminalSessionId: event.terminalSessionId,
@@ -514,17 +551,32 @@ export class WorkerSessionStream {
         roleId: event.roleId,
         runtimeId: event.runtimeId,
         workspaceId: event.workspaceId,
-        workspaceRoot: event.payload.cwd,
+        workspaceRoot: managerSnapshot.workspaceRoot,
       };
       const sessionKey = identity.sessionId.toLowerCase();
       if (this.sessionKeys.has(sessionKey)) return;
-      // Only a fresh manager START with matching canonical identity can be observed.
-      const managerSnapshot = this.terminals.list().find(item => item.terminalSessionId === identity.terminalSessionId);
-      if (!managerSnapshot || !matchesIdentity(identity, managerSnapshot) || managerSnapshot.accessMode !== event.accessMode) return;
-      current = this.newRecord(identity, this.eventLogFor(identity.sessionId), "starting", "online", false);
-      current.liveBinding = { accessMode: event.accessMode, admitted: true, ready: Promise.resolve(true) };
-      this.sessions.set(identity.sessionId, current);
+      if (!matchesIdentity(identity, managerSnapshot) || managerSnapshot.accessMode !== event.accessMode) return;
+      // Direct manager calls are privileged, independent of stream.start.
+      // Observation may bind only a new canonical lifecycle, never old history.
       this.sessionKeys.add(sessionKey);
+      try {
+        const redactor = this.terminals.observationRedactor(identity.sessionId, this.redactor);
+        const admitted = this.newRecord(identity, this.eventLogFor(identity.sessionId), "starting", "online", false, redactor);
+        const ready = this.assertUnusedHistory(admitted).then(() => {
+          if (this.closed) return false;
+          admitted.liveBinding!.admitted = true;
+          return true;
+        }, () => {
+          this.sessions.delete(identity.sessionId);
+          return false;
+        });
+        admitted.liveBinding = { accessMode: event.accessMode, admitted: false, ready };
+        current = admitted;
+        this.sessions.set(identity.sessionId, current);
+      } catch {
+        // A policy that cannot safely represent declared literals cannot be observed.
+        return;
+      }
     }
     const binding = current.liveBinding;
     // Rehydration never grants a new process authority over a historical ID.
@@ -551,8 +603,9 @@ export class WorkerSessionStream {
 
   private async persistTerminalEvent(record: SessionRecord, event: TerminalSessionEvent): Promise<void> {
     assertEventIdentity(record, event);
-    if (!terminalEventTypes.has(event.type)) throw new Error("worker_session_event_invalid");
-    assertLifecycleTransition(record, event.type);
+    assertTerminalEventEnvelope(event);
+    assertCanonicalPayload(record, event.type, event.payload, false);
+    assertLifecycleTransition(record, event.type, event.payload);
     if (event.sequence <= record.lastTerminalSequence) throw new Error("worker_session_terminal_order_invalid");
 
     if (event.type === "TERMINAL_OUTPUT") {
@@ -560,6 +613,7 @@ export class WorkerSessionStream {
       record.lastTerminalSequence = event.sequence;
       if (output) {
         this.assertLiveActivityCapacity(record, event);
+        assertCanonicalPayload(record, event.type, output, true);
         await this.recordTranscript(record, event, output, false);
         await this.appendPublicEvent(record, event, output, false);
       }
@@ -571,14 +625,14 @@ export class WorkerSessionStream {
     }
     record.lastTerminalSequence = event.sequence;
     const payload = event.type === "TERMINAL_SESSION_STARTED"
-      ? this.sanitizeStartedPayload(event.payload)
+      ? this.sanitizeStartedPayload(event.payload, record.redactor)
       : event.type === "TERMINAL_SESSION_FAILED"
       ? { error: "terminal_session_failed", durationMs: event.payload.durationMs }
       : cloneData(event.payload);
     this.assertLiveActivityCapacity(record, event);
+    assertCanonicalPayload(record, event.type, payload, true);
     await this.recordTranscript(record, event, payload, false);
     await this.appendPublicEvent(record, event, payload, false);
-    this.applyLiveState(record, event);
   }
 
   private async redactedOutput(record: SessionRecord, event: Extract<TerminalSessionEvent, { type: "TERMINAL_OUTPUT" }>): Promise<Record<string, any> | null> {
@@ -591,9 +645,9 @@ export class WorkerSessionStream {
     return { stream, data: fragment.text, redactionCount: fragment.redactionCount };
   }
 
-  private async flushRedactors(record: SessionRecord): Promise<void> {
+  private async flushRedactors(record: SessionRecord, interrupted = false): Promise<void> {
     for (const [stream, redactor] of record.redactors) {
-      const fragment = redactor.finish();
+      const fragment = interrupted ? redactor.finishInterrupted() : redactor.finish();
       if (!fragment.text) continue;
       const syntheticEvent = {
         sequence: record.lastTerminalSequence,
@@ -609,6 +663,7 @@ export class WorkerSessionStream {
         payload: { stream, data: fragment.text },
       } satisfies TerminalSessionEvent;
       this.assertLiveActivityCapacity(record, syntheticEvent);
+      assertCanonicalPayload(record, syntheticEvent.type, { stream, data: fragment.text, redactionCount: fragment.redactionCount }, true);
       await this.recordTranscript(record, syntheticEvent, { stream, data: fragment.text, redactionCount: fragment.redactionCount }, true);
       await this.appendPublicEvent(record, syntheticEvent, { stream, data: fragment.text, redactionCount: fragment.redactionCount }, true);
     }
@@ -641,6 +696,7 @@ export class WorkerSessionStream {
       synthetic,
       payload: cloneData(payload),
     };
+    this.assertStoredPublicPayload(record, stored, terminalEvent.type);
     const event: MorrowEvent<StoredSessionPayload> = {
       eventId,
       contractId: record.contractId,
@@ -653,9 +709,10 @@ export class WorkerSessionStream {
     };
     await record.eventLog.append(event);
     record.nextSequence += 1;
-    this.appendLiveActivity(record, terminalEvent);
+    record.transcriptIds.add(transcriptRecordId(record.sessionId, sequence, stored.terminalSequence, terminalEvent.type, stored.payload, synthetic));
+    this.applyCanonicalState(record, terminalEvent.type, stored.payload);
+    this.appendLiveActivity(record, { ...terminalEvent, payload: stored.payload });
     this.publish(record, this.publicEvent(record, event, sequence, stored.payload));
-    if (terminalEvent.type === "TERMINAL_SESSION_STARTED") record.started = true;
   }
 
   private assertLiveActivityCapacity(
@@ -668,13 +725,13 @@ export class WorkerSessionStream {
     }
   }
 
-  private sanitizeStartedPayload(payload: Extract<TerminalSessionEvent, { type: "TERMINAL_SESSION_STARTED" }>["payload"]): Record<string, any> {
+  private sanitizeStartedPayload(payload: Extract<TerminalSessionEvent, { type: "TERMINAL_SESSION_STARTED" }>["payload"], redactor = this.redactor): Record<string, any> {
     if (typeof payload.command !== "string" || !Array.isArray(payload.args)
       || !payload.args.every((argument) => typeof argument === "string")) {
       throw new Error("worker_session_start_payload_invalid");
     }
-    const command = this.redactor.redact(payload.command).text;
-    const args = payload.args.map((argument) => this.redactor.redact(argument).text);
+    const command = redactor.redact(payload.command).text;
+    const args = payload.args.map((argument) => redactor.redact(argument).text);
     // The policy recognizes sensitive CLI/assignment values in context. An argv
     // vector is not a shell string: quoting and whitespace have already been
     // resolved. If any member or the full context needs redaction, mask the
@@ -682,7 +739,7 @@ export class WorkerSessionStream {
     const context = [payload.command, ...payload.args].join(" ");
     const sensitive = command !== payload.command
       || args.some((argument, index) => argument !== payload.args[index] || argument === TRANSCRIPT_REDACTION_PLACEHOLDER)
-      || this.redactor.redact(context).text !== context;
+      || redactor.redact(context).text !== context;
     return {
       ...cloneData(payload),
       command,
@@ -703,9 +760,7 @@ export class WorkerSessionStream {
     const content = terminalEvent.type === "TERMINAL_OUTPUT" ? payload.data : JSON.stringify(payload);
     if (typeof content !== "string") throw new Error("worker_session_transcript_payload_invalid");
     const writer = this.transcript.beginRecord({
-      recordId: createHash("sha256")
-        .update(`morrow.worker-session-stream/transcript/v1|${record.sessionId}|${record.nextSequence}|${terminalEvent.sequence}|${terminalEvent.type}|${stream}|${synthetic ? "synthetic" : "terminal"}`, "utf8")
-        .digest("hex"),
+      recordId: transcriptRecordId(record.sessionId, record.nextSequence, terminalEvent.sequence, terminalEvent.type, payload, synthetic),
       contractId: record.contractId,
       stepId: "worker-session-stream",
       terminalSessionId: record.terminalSessionId,
@@ -723,15 +778,13 @@ export class WorkerSessionStream {
   ): void {
     if (record.liveActivityState && (record.liveActivityState === "done" || record.liveActivityState === "failed")) return;
     const transitions: Array<{ to: LiveActivityEvent["transition"]["to"]; sourceKind: LiveActivityEvent["transition"]["sourceKind"] }> = [];
-    if (terminalEvent.type === "TERMINAL_SESSION_STARTED" && !record.liveActivityState) {
-      transitions.push({ to: "dispatch", sourceKind: "kernel" }, { to: "process", sourceKind: "process" });
-    } else if (terminalEvent.type === "TERMINAL_OUTPUT") {
+    if (!record.liveActivityState) transitions.push({ to: "dispatch", sourceKind: "kernel" });
+    if (terminalEvent.type === "TERMINAL_SESSION_STARTED" || terminalEvent.type === "TERMINAL_OUTPUT") {
       transitions.push({ to: "process", sourceKind: "process" });
     } else if (terminalEvent.type === "TERMINAL_INPUT_WRITTEN" || terminalEvent.type === "TERMINAL_INPUT_ENDED"
       || terminalEvent.type === "TERMINAL_RESIZED" || terminalEvent.type === "TERMINAL_INTERRUPT_REQUESTED") {
       transitions.push({ to: "tool", sourceKind: "tool" });
     } else if (terminalEvent.type === "TERMINAL_SESSION_FAILED") {
-      if (!record.liveActivityState) transitions.push({ to: "dispatch", sourceKind: "kernel" });
       transitions.push({ to: "failed", sourceKind: "kernel" });
     } else if (terminalEvent.type === "TERMINAL_SESSION_EXITED") {
       transitions.push({ to: terminalEvent.payload.exitCode === 0 && !terminalEvent.payload.timedOut && !terminalEvent.payload.stopped ? "done" : "failed", sourceKind: "process" });
@@ -780,76 +833,37 @@ export class WorkerSessionStream {
     }
   }
 
-  private applyLiveState(record: SessionRecord, event: TerminalSessionEvent): void {
-    if (event.type === "TERMINAL_SESSION_STARTED") {
+  private applyCanonicalState(record: SessionRecord, type: TerminalSessionEvent["type"], payload: Record<string, any>): void {
+    if (type === "TERMINAL_SESSION_STARTED") {
       record.started = true;
+      record.protocol = payload.terminalProtocol;
       record.state = "running";
       record.liveness = "online";
-      return;
-    }
-    if (event.type === "TERMINAL_SESSION_FAILED") {
+    } else if (type === "TERMINAL_SESSION_FAILED") {
       record.failure = true;
       record.state = "failed";
       record.liveness = "failed";
       record.terminal = true;
-      return;
-    }
-    if (event.type === "TERMINAL_SESSION_EXITED") {
+    } else if (type === "TERMINAL_SESSION_EXITED") {
       record.exitSeen = true;
+      record.lastExit = cloneData(payload) as SessionRecord["lastExit"];
       record.terminal = true;
-      record.liveness = record.failure ? "failed" : "terminal";
-      record.state = record.failure
-        ? "failed"
-        : event.payload.timedOut
-          ? "timed_out"
-          : event.payload.stopped
-            ? "stopped"
-            : event.payload.exitCode === 0
-              ? "completed"
-              : "failed";
+      record.state = record.failure ? "failed" : payload.timedOut ? "timed_out" : payload.stopped ? "stopped" : payload.exitCode === 0 ? "completed" : "failed";
       if (record.state === "failed") record.failure = true;
+      record.liveness = record.failure ? "failed" : "terminal";
     }
   }
 
   private applyStoredEvent(record: SessionRecord, stored: StoredSessionPayload, type: TerminalSessionEvent["type"], sequence: number, occurredAt: string): void {
     this.assertStoredPublicPayload(record, stored, type);
-    assertLifecycleTransition(record, type);
+    assertLifecycleTransition(record, type, stored.payload);
     if ((!stored.synthetic && stored.terminalSequence <= record.lastTerminalSequence)
       || (stored.synthetic && stored.terminalSequence < record.lastTerminalSequence)) {
       throw new Error("worker_session_terminal_order_invalid");
     }
     record.lastTerminalSequence = stored.terminalSequence;
-    if (type === "TERMINAL_SESSION_STARTED") {
-      if (record.started || stored.synthetic) throw new Error("worker_session_start_invalid");
-      record.started = true;
-      record.state = "running";
-      record.liveness = "online";
-    } else if (!record.started) {
-      throw new Error("worker_session_start_missing");
-    }
-    if (type === "TERMINAL_SESSION_FAILED") {
-      record.failure = true;
-      record.terminal = true;
-      record.state = "failed";
-      record.liveness = "failed";
-    } else if (type === "TERMINAL_SESSION_EXITED") {
-      record.exitSeen = true;
-      record.terminal = true;
-      record.liveness = record.failure ? "failed" : "terminal";
-      const payload = stored.payload;
-      record.state = record.failure
-        ? "failed"
-        : payload.timedOut === true
-          ? "timed_out"
-          : payload.stopped === true
-            ? "stopped"
-            : payload.exitCode === 0
-              ? "completed"
-              : "failed";
-      if (record.state === "failed") record.failure = true;
-    } else if (type !== "TERMINAL_OUTPUT" && stored.synthetic) {
-      throw new Error("worker_session_flush_invalid");
-    }
+    record.transcriptIds.add(transcriptRecordId(record.sessionId, sequence, stored.terminalSequence, type, stored.payload, stored.synthetic));
+    this.applyCanonicalState(record, type, stored.payload);
     this.appendLiveActivity(record, { type, occurredAt, payload: stored.payload });
   }
 
@@ -858,20 +872,12 @@ export class WorkerSessionStream {
       throw new Error("worker_session_identity_drift");
     }
     if (stored.synthetic && type !== "TERMINAL_OUTPUT") throw new Error("worker_session_flush_invalid");
+    assertCanonicalPayload(record, type, stored.payload, true);
     if (type === "TERMINAL_SESSION_STARTED") {
       const payload = stored.payload;
-      if (typeof payload.cwd !== "string" || !sameWorkspaceRoot(record.workspaceRoot, payload.cwd)) {
-        throw new Error("worker_session_identity_drift");
-      }
-      const sanitized = this.sanitizeStartedPayload(payload as Extract<TerminalSessionEvent, { type: "TERMINAL_SESSION_STARTED" }>["payload"]);
+      const sanitized = this.sanitizeStartedPayload(payload as Extract<TerminalSessionEvent, {type:"TERMINAL_SESSION_STARTED"}>["payload"], record.redactor);
       if (sanitized.command !== payload.command || JSON.stringify(sanitized.args) !== JSON.stringify(payload.args)) {
         throw new Error("worker_session_start_not_redacted");
-      }
-    }
-    if (type === "TERMINAL_OUTPUT") {
-      if (!isOutputChannel(stored.payload.stream) || typeof stored.payload.data !== "string"
-        || this.redactor.redact(stored.payload.data).text !== stored.payload.data) {
-        throw new Error("worker_session_output_not_redacted");
       }
     }
   }
@@ -964,7 +970,8 @@ export class WorkerSessionStream {
     const records = view.records.filter((item) => item.contractId === record.contractId
       && item.terminalSessionId === record.terminalSessionId
       && item.agentInstanceId === record.agentInstanceId
-      && item.stepId === "worker-session-stream" && item.writerId === "worker-session-stream");
+      && item.stepId === "worker-session-stream" && item.writerId === "worker-session-stream"
+      && record.transcriptIds.has(item.recordId));
     return Object.freeze({
       ...view,
       records: Object.freeze(records),
@@ -986,7 +993,10 @@ export class WorkerSessionStream {
 }
 
 function parseStoredEvent(value: MorrowEvent, sessionId: string, sequence: number): StoredSessionPayload {
-  if (!isPlainRecord(value.payload) || value.eventId !== `${sessionId}:${sequence}`
+  if (!isPlainRecord(value) || !hasExactKeys(value, ["eventId","contractId","type","occurredAt","actor","payload","correlationId","schemaVersion"])
+    || !isPlainRecord(value.actor) || !hasExactKeys(value.actor, ["kind","id"]) || value.actor.kind !== "kernel" || value.actor.id !== "worker-session-stream"
+    || value.correlationId !== sessionId || !canonicalTime(value.occurredAt)
+    || !isPlainRecord(value.payload) || value.eventId !== `${sessionId}:${sequence}`
     || value.schemaVersion !== "0.1" || !terminalEventTypes.has(value.type as TerminalSessionEvent["type"])) {
     throw new Error("worker_session_event_invalid");
   }
@@ -1003,7 +1013,7 @@ function parseStoredEvent(value: MorrowEvent, sessionId: string, sequence: numbe
     || !isIdentifier(payload.terminalSessionId) || !isIdentifier(payload.agentInstanceId)
     || !isIdentifier(payload.contractId) || !isIdentifier(payload.roleId) || !isIdentifier(payload.runtimeId)
     || !isIdentifier(payload.workspaceId) || typeof payload.workspaceRoot !== "string"
-    || !Number.isSafeInteger(payload.terminalSequence) || payload.terminalSequence < 0
+    || !Number.isSafeInteger(payload.terminalSequence) || payload.terminalSequence < 1
     || typeof payload.synthetic !== "boolean" || !isPlainRecord(payload.payload)) {
     throw new Error("worker_session_payload_invalid");
   }
@@ -1026,6 +1036,97 @@ function matchesTerminalSnapshot(record: SessionRecord, item: TerminalSessionSna
   return record.liveBinding?.admitted === true && item.accessMode === record.liveBinding.accessMode && matchesIdentity(record, item);
 }
 
+function matchesDurableOutcome(record: SessionRecord, item: TerminalSessionSnapshot): boolean {
+  if (item.status !== record.state) return false;
+  const exit = record.lastExit;
+  if (exit) return exit.exitCode === item.exitCode && exit.signal === item.signal
+    && exit.timedOut === item.timedOut && exit.stopped === item.stopped;
+  return !record.terminal || (record.failure && item.exitCode === null && item.signal === null);
+}
+
+function assertCanonicalIdentity(identity: WorkerSessionIdentity, redactor: StreamRedactor): void {
+  if (identity.sessionId !== identity.terminalSessionId || !sessionIdPattern.test(identity.sessionId)
+    || ![identity.terminalSessionId, identity.agentInstanceId, identity.contractId, identity.roleId, identity.runtimeId, identity.workspaceId].every(isIdentifier)
+    || typeof identity.workspaceRoot !== "string" || !isAbsolute(identity.workspaceRoot)
+    || Object.values(identity).some(value => redactor.redact(value).text !== value)) {
+    throw new Error("worker_session_identity_invalid");
+  }
+}
+
+function canonicalTime(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+}
+
+function assertTerminalEventEnvelope(event: TerminalSessionEvent): void {
+  if (!isPlainRecord(event) || !hasExactKeys(event, ["sequence","occurredAt","terminalSessionId","agentInstanceId","contractId","roleId","runtimeId","workspaceId","accessMode","type","payload"])
+    || !Number.isSafeInteger(event.sequence) || event.sequence < 1 || !canonicalTime(event.occurredAt)
+    || !terminalEventTypes.has(event.type) || !["local","api","quota-session"].includes(event.accessMode)) {
+    throw new Error("worker_session_event_invalid");
+  }
+}
+
+function assertCanonicalPayload(record: SessionRecord, type: TerminalSessionEvent["type"], payload: Record<string, any>, publicPayload: boolean): void {
+  const invalid = () => { throw new Error("worker_session_payload_invalid"); };
+  if (!isPlainRecord(payload)) invalid();
+  const keys = (expected: string[]) => { if (!hasExactKeys(payload, expected)) invalid(); };
+  const integer = (value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER) => typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
+  const clean = (value: unknown) => typeof value === "string" && record.redactor.redact(value).text === value;
+  const pid = (value: unknown) => value === null || integer(value, 1);
+  switch (type) {
+    case "TERMINAL_SESSION_STARTED": {
+      keys(["pid","backendHostPid","cwd","command","args","backend","backendImplementationId","terminalProtocol","capabilities","presentation"]);
+      if (!pid(payload.pid) || !pid(payload.backendHostPid) || !sameWorkspaceRoot(record.workspaceRoot, payload.cwd)
+        || typeof payload.command !== "string" || !payload.command.length
+        || !Array.isArray(payload.args) || !payload.args.every((arg:unknown)=>typeof arg==="string")) invalid();
+      let presentation;
+      try {
+        const descriptor = validateTerminalBackendDescriptor({
+          kind: payload.backend, implementationId: payload.backendImplementationId, protocol: payload.terminalProtocol, capabilities: payload.capabilities,
+        });
+        presentation = resolveTerminalPresentation(descriptor);
+      } catch { return invalid(); }
+      if (!isPlainRecord(payload.presentation) || !hasExactKeys(payload.presentation,["mode","fullTerminal","missing"])
+        || payload.presentation.mode !== presentation.mode || payload.presentation.fullTerminal !== presentation.fullTerminal
+        || JSON.stringify(payload.presentation.missing) !== JSON.stringify(presentation.missing)
+        || (payload.terminalProtocol === "separate-pipes" && payload.backendHostPid !== null)) invalid();
+      if (publicPayload && (!clean(payload.command) || !payload.args.every(clean) || !clean(payload.cwd) || !clean(payload.backendImplementationId))) invalid();
+      break;
+    }
+    case "TERMINAL_OUTPUT":
+      keys(publicPayload ? ["stream","data","redactionCount"] : ["stream","data"]);
+      if (!isOutputChannel(payload.stream) || typeof payload.data !== "string"
+        || (record.protocol !== null && (record.protocol === "conpty-vt" ? payload.stream !== "terminal" : payload.stream === "terminal"))
+        || (publicPayload && (!integer(payload.redactionCount) || !clean(payload.data)))) invalid();
+      break;
+    case "TERMINAL_INPUT_WRITTEN":
+      keys(["bytes"]); if (!integer(payload.bytes)) invalid(); break;
+    case "TERMINAL_INPUT_ENDED":
+      keys([]); break;
+    case "TERMINAL_RESIZED":
+      keys(["columns","rows"]); if (!integer(payload.columns,1,32767) || !integer(payload.rows,1,32767) || record.protocol === "separate-pipes") invalid(); break;
+    case "TERMINAL_INTERRUPT_REQUESTED":
+      keys(["kind"]); if (!["ctrl-c","ctrl-break"].includes(payload.kind) || record.protocol === "separate-pipes") invalid(); break;
+    case "TERMINAL_SESSION_EXITED":
+      keys(["exitCode","signal","timedOut","stopped","durationMs"]);
+      if (!(payload.exitCode === null || integer(payload.exitCode,-Number.MAX_SAFE_INTEGER))
+        || !(payload.signal === null || (typeof payload.signal === "string" && Object.hasOwn(osConstants.signals,payload.signal)))
+        || (payload.exitCode !== null && payload.signal !== null)
+        || typeof payload.timedOut !== "boolean" || typeof payload.stopped !== "boolean" || !integer(payload.durationMs)) invalid();
+      break;
+    case "TERMINAL_SESSION_FAILED":
+      keys(["error","durationMs"]);
+      if (typeof payload.error !== "string" || !payload.error.length || !integer(payload.durationMs)
+        || (publicPayload && payload.error !== "terminal_session_failed")) invalid();
+      break;
+    default: invalid();
+  }
+}
+
+function transcriptRecordId(sessionId: string, sequence: number, terminalSequence: number, type: TerminalSessionEvent["type"], payload: Record<string, any>, synthetic: boolean): string {
+  const stream = type === "TERMINAL_OUTPUT" ? payload.stream : "system";
+  return createHash("sha256").update("morrow.worker-session-stream/transcript/v1|"+sessionId+"|"+sequence+"|"+terminalSequence+"|"+type+"|"+stream+"|"+(synthetic?"synthetic":"terminal"),"utf8").digest("hex");
+}
+
 function assertEventIdentity(record: SessionRecord, event: TerminalSessionEvent): void {
   if (event.terminalSessionId !== record.terminalSessionId || event.agentInstanceId !== record.agentInstanceId
     || event.contractId !== record.contractId || event.roleId !== record.roleId
@@ -1036,13 +1137,16 @@ function assertEventIdentity(record: SessionRecord, event: TerminalSessionEvent)
   }
 }
 
-function assertLifecycleTransition(record: SessionRecord, type: TerminalSessionEvent["type"]): void {
+function assertLifecycleTransition(record: SessionRecord, type: TerminalSessionEvent["type"], payload: Record<string, any>): void {
   if (type === "TERMINAL_SESSION_STARTED" && record.started) throw new Error("worker_session_start_invalid");
-  if (!record.started && type !== "TERMINAL_SESSION_STARTED") throw new Error("worker_session_start_missing");
-  // The manager may emit FAILED followed by the one physical EXIT. Neither
-  // duplicate EXIT nor any new START/output after a terminal outcome is valid.
+  // The manager may report a real launch failure before START, or a FAILED
+  // followed by the one physical EXIT. It can also accept control input while
+  // starting. A failure must never be rewritten as a fabricated START.
   if (record.terminal && !(record.failure && !record.exitSeen && type === "TERMINAL_SESSION_EXITED")) {
     throw new Error("worker_session_event_after_terminal");
+  }
+  if (!record.started && (type === "TERMINAL_OUTPUT" || (type === "TERMINAL_SESSION_EXITED" && !record.failure && !payload.stopped && !payload.timedOut))) {
+    throw new Error("worker_session_start_missing");
   }
 }
 
@@ -1134,15 +1238,7 @@ function liveActivityTransitionCount(
   terminalEvent: Pick<TerminalSessionEvent, "type" | "payload">,
 ): number {
   if (state === "done" || state === "failed") return 0;
-  if (terminalEvent.type === "TERMINAL_SESSION_STARTED" && state === null) return 2;
-  if (terminalEvent.type === "TERMINAL_SESSION_FAILED") return state === null ? 2 : 1;
-  if (terminalEvent.type === "TERMINAL_OUTPUT"
-    || terminalEvent.type === "TERMINAL_INPUT_WRITTEN"
-    || terminalEvent.type === "TERMINAL_INPUT_ENDED"
-    || terminalEvent.type === "TERMINAL_RESIZED"
-    || terminalEvent.type === "TERMINAL_INTERRUPT_REQUESTED"
-    || terminalEvent.type === "TERMINAL_SESSION_EXITED") return 1;
-  return 0;
+  return terminalEventTypes.has(terminalEvent.type) ? (state === null ? 2 : 1) : 0;
 }
 
 const liveActivityActiveStates = new Set(["dispatch", "gate", "tool", "process", "waiting-lock", "waiting-quota", "waiting-owner"]);

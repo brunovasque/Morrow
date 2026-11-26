@@ -1,5 +1,6 @@
 import { realpath, stat } from "node:fs/promises";
 import { relative, resolve } from "node:path";
+import { StreamRedactor } from "./stream-transcript.ts";
 import type { RuntimeAccessMode, RuntimeInvocation, RuntimeResult } from "./runtime-adapter.ts";
 import {
   ProcessPipesTerminalBackend,
@@ -364,6 +365,11 @@ export class TerminalSessionManager {
     return this.snapshotRecord(this.requireSession(terminalSessionId));
   }
 
+  /** Raw manager sessions are privileged; consumers receive a scoped policy, not its literals. */
+  observationRedactor(terminalSessionId: string, base: StreamRedactor): StreamRedactor {
+    return redactorForTerminalRequest(this.requireSession(terminalSessionId).request, base);
+  }
+
   history(terminalSessionId: string): TerminalSessionEvent[] {
     return [...this.requireSession(terminalSessionId).events];
   }
@@ -570,7 +576,7 @@ export class TerminalSessionManager {
   }
 
   private emit(record: SessionRecord, type: TerminalSessionEvent["type"], payload: unknown): void {
-    const event = {
+    const event = freezeTerminalData(structuredClone({
       sequence: ++this.sequence,
       occurredAt: new Date().toISOString(),
       terminalSessionId: record.request.terminalSessionId,
@@ -582,7 +588,7 @@ export class TerminalSessionManager {
       workspaceId: record.request.workspace.workspaceId,
       type,
       payload,
-    } as TerminalSessionEvent;
+    } as TerminalSessionEvent));
 
     record.events.push(event);
     if (record.events.length > this.maxEventsPerSession) {
@@ -605,13 +611,13 @@ export class TerminalSessionManager {
     if (record.timer) clearTimeout(record.timer);
     this.activeAgentInstances.delete(record.request.agentInstanceId);
     this.activeWorkspaceRoots.delete(record.workspaceRoot);
-    record.resolveCompletion({
+    record.resolveCompletion(freezeTerminalData({
       ...this.snapshotRecord(record),
       durationMs: this.duration(record),
       stdout: record.stdout,
       stderr: record.stderr,
       error: record.error,
-    });
+    }));
   }
 
   private fail(record: SessionRecord, error: string): void {
@@ -746,6 +752,19 @@ export class ManagedTerminalRuntimeAdapter {
 function samePath(left: string, right: string): boolean {
   if (process.platform === "win32") return left.toLowerCase() === right.toLowerCase();
   return left === right;
+}
+
+function freezeTerminalData<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const item of Object.values(value)) freezeTerminalData(item);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+export function redactorForTerminalRequest(request: TerminalSessionRequest, base: StreamRedactor): StreamRedactor {
+  validateSensitiveArgIndexes(request.args, request.sensitiveArgIndexes);
+  return base.withSensitiveLiterals((request.sensitiveArgIndexes ?? []).map(index => request.args[index]!));
 }
 
 function validateSensitiveArgIndexes(args: readonly string[], indexes: readonly number[] | undefined): void {

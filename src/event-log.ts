@@ -281,7 +281,7 @@ export class JsonlEventLog implements EventLog {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         if (anchors.size === 0) return { bytes: 0, records: 0, heads, lastHashes, eventIds, anchors };
         const prepared = [...anchors.values()].filter((anchor) => anchor.phase === "prepared");
-        if (prepared.length === anchors.size) {
+        if (prepared.length === anchors.size && prepared.every(anchor => anchor.expectedPrevious === null && anchor.sequence === 1 && anchor.generation === 1)) {
           for (const anchor of prepared) await this.streamAuthority(anchor.contractId).abortHead(anchor, anchorPrevious(anchor));
           return { bytes: 0, records: 0, heads, lastHashes, eventIds, anchors: new Map() };
         }

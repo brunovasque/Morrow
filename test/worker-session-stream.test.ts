@@ -750,6 +750,7 @@ test("recovery P3-01 combined: two real ConPTY sessions preserve native channel 
   const managed=join(root,"managed-workspaces");
   const workspaces=new LocalWorkspaceManager(managed);
   const manager=new TerminalSessionManager(managed,{backend:new WindowsConptyTerminalBackend()});
+  manager.subscribe(e=>{if(e.type==="TERMINAL_SESSION_EXITED"){try{(e.payload as any).exitCode=91}catch{};try{(e.payload as any).foreign="NATIVE_SYNTHETIC_ARG_8842"}catch{}}});
   const stream=await reopenRecoveryStream(root,manager);
   let restarted: WorkerSessionStream|undefined;
   t.after(async()=>{
@@ -771,8 +772,9 @@ test("recovery P3-01 combined: two real ConPTY sessions preserve native channel 
     await mkdir(appData,{recursive:true});await mkdir(localAppData,{recursive:true});
     const env:Record<string,string>={HOME:profile,USERPROFILE:profile,APPDATA:appData,LOCALAPPDATA:localAppData,POWERSHELL_TELEMETRY_OPTOUT:"1"};
     for(const key of ["SystemRoot","WINDIR","TEMP","TMP"])if(process.env[key]!==undefined)env[key]=process.env[key]!;
-    const req=request(workspace,id,"process.stdin.once('data',()=>{process.stdout.write('"+id+" SAFE\\nMORROW_SECRET_CANARY\\n');setTimeout(()=>process.exit(0),100)})");
+    const req=request(workspace,id,"process.stdin.once('data',()=>{const v=process.argv[2];process.stdout.write('"+id+" SAFE\\nMORROW_SECRET_CANARY\\n'+v+'\\n');setTimeout(()=>process.exit(0),100)})");
     req.args.push("--","--password","NATIVE_SYNTHETIC_ARG_8842");
+    req.sensitiveArgIndexes=[4];
     return {...req,env,timeoutMs:20_000};
   }));
   const handles=await Promise.all(requests.map(req=>stream.start(req)));
@@ -802,7 +804,9 @@ test("recovery P3-01 combined: two real ConPTY sessions preserve native channel 
     const rawText=raw.get(id)!.map(chunk=>chunk.data).join("");
     assert.ok(rawText.includes(id+" SAFE"), "native process emitted its synthetic marker");
     assert.ok(rawText.includes("MORROW_SECRET_CANARY"), "native process emitted its synthetic canary");
-    const expected=new StreamRedactor({policyId:"p4-pr04-test",sensitiveLiterals:["MORROW_SECRET_CANARY"]}).redact(rawText).text;
+    assert.ok(rawText.includes("NATIVE_SYNTHETIC_ARG_8842"),"native process echoed explicitly marked argv: "+JSON.stringify(rawText));
+    const expected=new StreamRedactor({policyId:"p4-pr04-test",sensitiveLiterals:["MORROW_SECRET_CANARY","NATIVE_SYNTHETIC_ARG_8842"]}).redact(rawText).text;
+    assert.equal(results[i].status==="fulfilled"?results[i].value.exitCode:null,0);
     assert.equal(output.map(e=>e.payload.data).join(""),expected);
     assert.equal(results[i].status==="fulfilled"?results[i].value.stdout:null,expected);
     const transcriptOutput=snapshots[i].transcript.records.filter(r=>r.stream!=="system");
@@ -878,4 +882,165 @@ test("recovery adversarial: authenticated out-of-lifecycle append cannot be repl
   assert.equal((await stream.replay(sessionId,before.nextCursor)).status,"invalid");
   await stream.close();
   await assert.rejects(reopenRecoveryStream(root,new TerminalSessionManager(join(root,"managed-workspaces"))),/worker_session_event_after_terminal/);
+});
+
+test("I1/P2-08: explicit argument values are redacted throughout the worker boundary, including fragmented echoes and external observation", {timeout:30_000}, async t=>{
+  const {root,stream,workspaces,terminals}=await harness(t);
+  const {readFile}=await import("node:fs/promises");
+  const canary="DECLARED_SYNTHETIC_VALUE_88261";
+  const ids=["T-explicit-managed","T-explicit-external"];
+  const replays=[];
+  for(const [i,id] of ids.entries()){
+    const workspace=await workspaces.create({workspaceId:"W-"+id,contractId:"C-P4-PR04",roleId:"executor"});
+    const req=request(workspace,id,"const v=process.argv[1];process.stdout.write('safe out\\n'+v.slice(0,12));process.stderr.write('safe err\\n'+v.slice(0,12));setTimeout(()=>{process.stdout.write(v.slice(12)+'\\nout tail\\n');process.stderr.write(v.slice(12)+'\\nerr tail\\n')},20)");
+    req.args.push("--",canary);
+    req.sensitiveArgIndexes=[3];
+    const live:WorkerSessionStreamEvent[]=[];
+    stream.subscribe(id,e=>live.push(e));
+    const result=i===0?await (await stream.start(req)).completion:await (await terminals.start(req)).completion;
+    assert.equal(result.status,"completed");
+    const replay=await stream.replay(id);
+    replays.push(replay);
+    assert.equal(replay.status,"ok");
+    assert.deepEqual(live,replay.events);
+    const stdout=outputEvents(replay.events).filter(e=>e.payload.stream==="stdout").map(e=>e.payload.data).join("");
+    const stderr=outputEvents(replay.events).filter(e=>e.payload.stream==="stderr").map(e=>e.payload.data).join("");
+    assert.ok(stdout.includes("safe out")&&stdout.includes("out tail"));
+    assert.ok(stderr.includes("safe err")&&stderr.includes("err tail"));
+    if(i===0){assert.equal(result.stdout,stdout);assert.equal(result.stderr,stderr)}
+    const disk=await readFile(join(root,"session-stream","sessions",id+".event-log"),"utf8");
+    const transcriptDisk=await readFile(join(root,"session-stream","transcript","transcript-v1.json"),"utf8");
+    assert.equal(JSON.stringify([live,replay,stream.snapshot(id),i===0?result:null,disk,transcriptDisk]).includes(canary),false);
+  }
+  await stream.close();
+  const restarted=await reopenRecoveryStream(root,new TerminalSessionManager(join(root,"managed-workspaces")));
+  try{
+    for(const [i,id] of ids.entries()){
+      assert.deepEqual(await restarted.replay(id),replays[i]);
+      assert.equal(JSON.stringify(restarted.snapshot(id)).includes(canary),false);
+    }
+  }finally{await restarted.close()}
+});
+
+test("I3/P2-09: earlier terminal observers cannot alter canonical history, nested payloads or completion", {timeout:30_000}, async t=>{
+  const {root,stream,workspaces}=await harness(t);
+  await stream.close();
+  const manager=new TerminalSessionManager(join(root,"managed-workspaces"));
+  const attacks:string[]=[];
+  manager.subscribe(event=>{
+    if(event.type==="TERMINAL_SESSION_STARTED"){
+      attacks.push("start");
+      try{event.payload.args.push("MORROW_SECRET_CANARY")}catch{}
+      try{(event.payload.capabilities as any).tty=true}catch{}
+    }
+    if(event.type==="TERMINAL_SESSION_EXITED"){
+      attacks.push("exit");
+      try{event.payload.exitCode=0}catch{}
+      try{(event.payload as any).extra="MORROW_SECRET_CANARY"}catch{}
+    }
+  });
+  const active=await reopenRecoveryStream(root,manager);
+  t.after(()=>active.close());
+  const w=await workspaces.create({workspaceId:"W-observer-new",contractId:"C-P4-PR04",roleId:"executor"});
+  const live:WorkerSessionStreamEvent[]=[];
+  active.subscribe("T-observer-new",e=>live.push(e));
+  const result=await (await active.start(request(w,"T-observer-new","process.stdout.write('SAFE');process.exitCode=7"))).completion;
+  assert.equal(result.status,"failed");
+  assert.equal(result.exitCode,7);
+  assert.deepEqual(attacks,["start","exit"]);
+  const history=manager.history("T-observer-new");
+  assert.equal(history.find(e=>e.type==="TERMINAL_SESSION_EXITED")?.payload.exitCode,7);
+  assert.ok(history.every(e=>Object.isFrozen(e)&&Object.isFrozen(e.payload)));
+  const replay=await active.replay("T-observer-new");
+  assert.equal(replay.status,"ok");
+  assert.deepEqual(live,replay.events);
+  assert.equal(replay.events.find(e=>e.type==="TERMINAL_SESSION_EXITED")?.payload.exitCode,7);
+  assert.equal(JSON.stringify(replay).includes("MORROW_SECRET_CANARY"),false);
+  assert.equal(active.snapshot("T-observer-new").state,"failed");
+  await active.close();
+  const restarted=await reopenRecoveryStream(root,new TerminalSessionManager(join(root,"managed-workspaces")));
+  try{assert.deepEqual(await restarted.replay("T-observer-new"),replay);assert.equal(restarted.snapshot("T-observer-new").state,"failed")}finally{await restarted.close()}
+});
+
+test("I3/P2-10: authenticated but malformed payloads of every terminal event type fail closed on reopen", {timeout:40_000}, async t=>{
+  const {root,stream,workspaces}=await harness(t);
+  const {JsonlEventLog}=await import("../src/event-log.ts");
+  const w=await workspaces.create({workspaceId:"W-schema-template",contractId:"C-P4-PR04",roleId:"executor"});
+  const id="T-schema-template";
+  await (await stream.start(request(w,id,"process.exit(0)"))).completion;
+  const template=(await (stream as any).sessions.get(id).eventLog.readAll())[0];
+  await stream.close();
+  const invalid=[
+    ["TERMINAL_SESSION_STARTED",{...template.payload.payload,pid:"bogus"}],
+    ["TERMINAL_OUTPUT",{stream:"stdout",data:"safe",redactionCount:-1,extra:"MORROW_SECRET_CANARY"}],
+    ["TERMINAL_INPUT_WRITTEN",{bytes:-1}],
+    ["TERMINAL_INPUT_ENDED",{extra:"MORROW_SECRET_CANARY"}],
+    ["TERMINAL_RESIZED",{columns:0,rows:12}],
+    ["TERMINAL_INTERRUPT_REQUESTED",{kind:"invalid"}],
+    ["TERMINAL_SESSION_EXITED",{exitCode:0,signal:null,timedOut:"true",stopped:false,durationMs:1,extra:"MORROW_SECRET_CANARY"}],
+    ["TERMINAL_SESSION_FAILED",{error:"MORROW_SECRET_CANARY",durationMs:-1}],
+  ] as const;
+  const accepted:string[]=[];
+  for(const [i,[kind,payload]] of invalid.entries()){
+    const sessionId="T-invalid-auth-"+i;
+    const stateRoot=join(root,"malformed-"+i);
+    const log=new JsonlEventLog(join(stateRoot,"sessions",sessionId+".event-log"));
+    const first={...template,eventId:sessionId+":1",correlationId:sessionId,payload:{...template.payload,sessionId,terminalSessionId:sessionId}};
+    if(kind==="TERMINAL_SESSION_STARTED"){await log.append({...first,payload:{...first.payload,payload}})}
+    else{
+      await log.append(first);
+      await log.append({...first,eventId:sessionId+":2",type:kind,payload:{...first.payload,terminalSequence:first.payload.terminalSequence+1,payload}});
+    }
+    let again:WorkerSessionStream|undefined;
+    try{again=await WorkerSessionStream.open({stateRoot,terminals:new TerminalSessionManager(join(root,"managed-workspaces")),redaction:{policyId:"p4-pr04-test",sensitiveLiterals:["MORROW_SECRET_CANARY"]}});accepted.push(kind)}
+    catch(error){assert.match(String(error),/worker_session_/)}
+    finally{await again?.close()}
+  }
+  assert.deepEqual(accepted,[]);
+});
+
+test("I2/I4/P2-11: deletion of a complete session log cannot permit a repeated real effect, including aliases and other contracts", {timeout:30_000}, async t=>{
+  const {root,stream,workspaces}=await harness(t);
+  const {unlink,stat}=await import("node:fs/promises");
+  const original=await workspaces.create({workspaceId:"W-deleted-log",contractId:"C-original",roleId:"executor"});
+  const foreign=await workspaces.create({workspaceId:"W-deleted-foreign",contractId:"C-other",roleId:"reviewer"});
+  const id="T-Deleted-Log";
+  await (await stream.start(request(original,id,"process.stdout.write('FIRST EFFECT')"))).completion;
+  await stream.close();
+  await unlink(join(root,"session-stream","sessions",id+".event-log"));
+  const manager=new TerminalSessionManager(join(root,"managed-workspaces"));
+  let reopened:WorkerSessionStream|undefined;
+  try{
+    try{reopened=await reopenRecoveryStream(root,manager)}catch(error){assert.match(String(error),/worker_session_|morrow_event_log_/)}
+    if(reopened){
+      for(const [workspace,sessionId] of [[original,id],[foreign,id.toLowerCase()]] as const){
+        const outcome=await reopened.start(request(workspace,sessionId,"require('node:fs').writeFileSync('repeat-effect.marker','bad')")).then(async handle=>{await handle.completion.catch(()=>undefined);return "accepted"},error=>String(error));
+        assert.match(outcome,/worker_session_|morrow_event_log_/);
+      }
+    }
+    assert.equal(manager.list().length,0);
+    for(const w of [original,foreign])await assert.rejects(stat(join(w.root,"repeat-effect.marker")),/ENOENT/);
+  }finally{await reopened?.close()}
+});
+
+test("I3/I4/P3-02: real launch failure is durably failed without a fabricated start", {timeout:30_000}, async t=>{
+  const {root,stream,workspaces}=await harness(t);
+  const w=await workspaces.create({workspaceId:"W-launch-failure",contractId:"C-P4-PR04",roleId:"executor"});
+  const id="T-launch-failure";
+  const req=request(w,id,"");
+  req.command=join(root,"synthetic-nonexistent-executable.exe");req.args=[];
+  const live:WorkerSessionStreamEvent[]=[];
+  stream.subscribe(id,e=>live.push(e));
+  const result=await (await stream.start(req)).completion;
+  assert.equal(result.status,"failed");
+  assert.equal(result.error,"terminal_session_failed");
+  const before=await stream.replay(id);
+  assert.equal(before.status,"ok");
+  assert.ok(before.events.some(e=>e.type==="TERMINAL_SESSION_FAILED"));
+  assert.equal(before.events.some(e=>e.type==="TERMINAL_SESSION_STARTED"),false);
+  assert.deepEqual(live,before.events);
+  assert.equal(stream.snapshot(id).state,"failed");
+  await stream.close();
+  const reopened=await reopenRecoveryStream(root,new TerminalSessionManager(join(root,"managed-workspaces")));
+  try{assert.deepEqual(await reopened.replay(id),before);assert.equal(reopened.snapshot(id).state,"failed");assert.equal(reopened.snapshot(id).terminal,true);assert.equal(reopened.snapshot(id).terminalSnapshot,null);assert.equal(reopened.snapshot(id).liveActivity.ok,true)}finally{await reopened.close()}
 });

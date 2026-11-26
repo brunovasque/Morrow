@@ -768,3 +768,89 @@ test("bootstrap publication never exposes a partial authority key or binding to 
   }
   assert.deepEqual(findings,[]);
 });
+
+test("I4/P2-12: first authority history publication is atomic to readers and recoverable across controlled I/O interruption", {timeout:45_000}, async t=>{
+  const fs=(await import("node:fs/promises")).default;
+  const {syncBuiltinESMExports}=await import("node:module");
+  const {constants}=await import("node:fs");
+  const {JsonlEventLog}=await import("../src/event-log.ts");
+  const {resolve}=await import("node:path");
+  const originalOpen=fs.open;
+  const originalRename=fs.rename;
+  const root=await mkdtemp(join(process.cwd(),".morrow-test-tmp","binding-publication-"));
+  t.after(async()=>await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:100}));
+  const findings:string[]=[];
+  for(const phase of ["concurrent-read","failure-before-publication","failure-after-publication"] as const){
+    const privateRoot=WorkerPrivateStateRoot.bootstrap({workerId:"binding-publication",privateRoot:join(root,phase,"authority"),managedRoots:[]});
+    const path=join(root,phase,"events","events.jsonl");
+    const eventLogId=createHash("sha256").update("morrow.event-log/id/v1|"+resolve(path).toLowerCase(),"utf8").digest("hex");
+    const make=()=>new PersistentEventLogAuthority(privateRoot,"binding-publication-authority").capability(eventLogId);
+    const initial=make();
+    await initial.readAnchors();
+    const bindingPath=join(privateRoot.privateRoot,"event-log-authority",eventLogId+".binding.json");
+    const prior=await fs.readFile(bindingPath,"utf8");
+    const event={eventId:"publication-1",contractId:"C-publication",type:"FIXTURE",occurredAt:new Date().toISOString(),actor:{kind:"kernel",id:"fixture"},payload:{safe:"data"},correlationId:"fixture",schemaVersion:"0.1"} as const;
+    let reached=false;
+    let pausedResolve!:()=>void;
+    const paused=new Promise<void>(resolve=>{pausedResolve=resolve});
+    let release!:()=>void;
+    const gate=new Promise<void>(resolve=>{release=resolve});
+    const boundary=async(publish:()=>Promise<any>)=>{
+      reached=true;
+      if(phase==="failure-before-publication")throw new Error("synthetic_io_before_atomic_publication");
+      if(phase==="failure-after-publication"){await publish();throw new Error("synthetic_io_after_atomic_publication")}
+      pausedResolve();await gate;return await publish();
+    };
+    // RED path intercepts the old in-place native truncate; GREEN path
+    // intercepts publication of the complete replacement at the same boundary.
+    fs.open=async function(file,flags,...rest){
+      const h=await originalOpen.call(fs,file,flags,...rest);
+      if(String(file)===bindingPath&&flags===constants.O_WRONLY){
+        const truncate=h.truncate.bind(h);
+        h.truncate=async function(...args){
+          reached=true;
+          await truncate(...args);
+          if(phase!=="concurrent-read")throw new Error("synthetic_io_after_old_truncate");
+          pausedResolve();await gate;
+        };
+      }
+      return h;
+    };
+    fs.rename=async function(oldPath,newPath){if(String(newPath)===bindingPath)return await boundary(()=>originalRename.call(fs,oldPath,newPath));return await originalRename.call(fs,oldPath,newPath)};
+    syncBuiltinESMExports();
+    const outcome=new JsonlEventLog(path,{authority:initial}).append(event).then(()=>({ok:true}),error=>({ok:false,error:String(error)}));
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    try{
+      if(phase==="concurrent-read"){
+        const race=await Promise.race([paused.then(()=> "paused"),outcome.then(()=> "finished"),new Promise<string>(resolve=>{timer=setTimeout(()=>resolve("timeout"),10_000)})]);
+        assert.equal(race,"paused");
+        try{
+          assert.equal(await fs.readFile(bindingPath,"utf8"),prior);
+          assert.deepEqual(await make().readAnchors(),[]);
+          assert.deepEqual(await new JsonlEventLog(path,{authority:make()}).readAll(),[]);
+        }catch(error){findings.push(phase+": "+String(error))}
+      }
+    }finally{
+      if(timer)clearTimeout(timer);
+      release();
+      await outcome;
+      fs.open=originalOpen;fs.rename=originalRename;syncBuiltinESMExports();
+    }
+    const result=await outcome;
+    assert.equal(reached,true,"publication boundary exercised");
+    try{
+      if(phase==="concurrent-read"){assert.equal(result.ok,true)}
+      else{
+        assert.equal(result.ok,false);
+        assert.ok((await fs.stat(bindingPath)).size>0);
+        assert.deepEqual(await new JsonlEventLog(path,{authority:make()}).readAll(),[]);
+        await new JsonlEventLog(path,{authority:make()}).append(event);
+      }
+      assert.deepEqual(await new JsonlEventLog(path,{authority:make()}).readAll(),[event]);
+      // A published history flag must not silently tolerate loss of its journal.
+      await fs.unlink(join(privateRoot.privateRoot,"event-log-authority",eventLogId+".head.journal"));
+      await assert.rejects(make().readAnchors(),/event_log_anchor_invalid/);
+    }catch(error){findings.push(phase+": "+String(error))}
+  }
+  assert.deepEqual(findings,[]);
+});
