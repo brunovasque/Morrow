@@ -10,14 +10,14 @@
 - `target_id`: `morrow-core`
 - `integration_branch`: `phase-2/runtime-v0`
 - `proven_baseline_sha`: `ff0359c7cdf14735ae6a11dd65c8a82b7d688421`
-- `active_phase`: `P4`
-- `active_pr_id`: `P4-PR04`
-- `active_route_node`: `MULTI_SESSION_STREAM_API_OBSERVABILITY`
-- `active_subaction`: `P4_PR04_FINAL_AUDIT_GREEN_CLOSURE_AUTHORIZED`
-- `expected_branch_prefix`: `mvo/p4-pr04-`
-- `write_execution_allowed`: `Integrator authorized only for documentary closure-record and its PR integration; no technical writes or P5 implementation`
-- `next_authorized_action`: `START_P4_PR04`
-- `next_authorized_actor`: `Integrator P4-PR04 persistent (documentary closure only)`
+- `active_phase`: `P5`
+- `active_pr_id`: `P5-PR01`
+- `active_route_node`: `INTERFACE_STATE_OF_ART_ADR_SHELL`
+- `active_subaction`: `P5_PR01_READY_FOR_KICKOFF`
+- `expected_branch_prefix`: `mvo/p5-pr01-`
+- `write_execution_allowed`: `No implementation; P5-PR01 kickoff and contractual planning only after documentary closure integration; separate authorization required for implementation`
+- `next_authorized_action`: `START_P5_PR01`
+- `next_authorized_actor`: `Orchestrator / Contract Engineer (kickoff and planning only)`
 - `p4_pr03_execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
 - `p4_pr04_base_sha`: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`
 - `p4_pr04_branch`: `mvo/p4-pr04-multi-session-stream`
@@ -39,13 +39,13 @@
 - `regression_veto`: `PASS`
 - `final_audit_state`: `FINAL_AUDIT_GREEN`
 - `p4_pr03_state`: `PROVEN`
-- `p4_pr04_state`: `RUNNING`
+- `p4_pr04_state`: `PROVEN`
 - `candidate_state`: `INTEGRATED_FINAL_AUDIT_GREEN`
 - `security_review_state`: `SECURITY_REVIEW_GREEN`
 
 ## Próxima ação exata
 
-PR #23 MERGED em 7e50711f849577dfd332c508ce15a5a18aa75408, parents 78e1bfdc7d32f2e150d03aaee80b62514c446d4f e f1c91db3b6724c275899141d4722ef69d63c283d. Regressao pos-merge 286/286 PASS, quatro exits 0, zero skips, REGRESSION_VETO PASS e FINAL_AUDIT_GREEN versionado. Candidato tecnico 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99 preservado. Proximo ator unico: Integrator persistente, exclusivamente closure-record documental da P4, conforme EVIDENCE. Integrar uma unica PR documental na base exata 7e50711, sem drift tecnico, reconciliar P4 PROVEN somente apos integracao da closure e projetar P5-PR01 pronta para kickoff, sem iniciar P5. Retornar P4_PROVEN / P5_PR01_READY_FOR_KICKOFF ou BLOCKED. Nenhuma nova suite de produto, elevacao, alteracao tecnica ou deploy.
+P4-PR01..04 PROVEN com efeito somente apos integracao confirmada da closure-record exclusivamente documental mvo/p4-pr04-postmerge-proof contra phase-2/runtime-v0, base tecnica 7e50711f849577dfd332c508ce15a5a18aa75408. PR tecnica #23, candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99, parents 78e1bfdc7d32f2e150d03aaee80b62514c446d4f e f1c91db3b6724c275899141d4722ef69d63c283d preservados; 286/286 PASS, Node/runner/launcher/Guardian 0/0/0/0, zero FAIL/SKIP/CANCELLED/TODO, REGRESSION_VETO PASS, FINAL_AUDIT_GREEN (129 entradas verificadas, 16 blobs, 14 achados, sete grupos de cobertura, risco historico ConPTY inconclusivo nao bloqueante). Control root de auditoria final 864f5500eba76ce889735fe54e3cd7fdf3f9b5ac, autorizacao versionada d3cbd161c1280d1a0ebb5c0b06fdc2f8946a173b. Nenhuma suite repetida, elevacao, alteracao tecnica/dependencias ou deploy na closure. P5-PR01 READY_FOR_KICKOFF somente apos integracao; proxima acao START_P5_PR01 para Orchestrator / Contract Engineer, kickoff e planejamento contratual, sem implementar P5. Reconciliador deve respeitar prefixo de branch da proxima unidade; na base de integracao a divergencia esperada e exclusivamente git_branch_mismatch. Evidencias da closure e identidade remota externa em .morrow-test-tmp/p4-formal-closure-7e50711; nenhuma autorreferencia de SHA/numero antes da integracao.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -67,8 +67,8 @@ Reconciliacao factual adicional de 2026-09-09: o A-001 do candidate `ba350658a39
 | P1 | `PROVEN_BASELINE` | 25 testes em `ff0359c` |
 | P2 | `PROVEN` | Local Worker completo integrado em `06e2a4c` |
 | P3 | `PROVEN` | P3-PR04 integrada em `d4ccc73`; ConPTY 11/11 e suíte 164/164 verdes pós-merge, sem órfãos |
-| P4 | `RUNNING` | P4-PR02 e P4-PR03 `PROVEN`; closure-records integradas; P4-PR04 `RUNNING` na branch `mvo/p4-pr04-multi-session-stream`, base `78e1bfd`, rota multi-session stream/API/observability |
-| P5 | `BLOCKED` | depende de P4 |
+| P4 | `PROVEN` | P4-PR01..04 PROVEN apos integracao confirmada da closure-record documental; PR tecnica #23 e regressao 286/286 preservadas |
+| P5 | `READY_FOR_KICKOFF` | P5-PR01 pronta apos fechamento P4; apenas kickoff/planejamento, nenhuma implementacao iniciada |
 | P6 | `BLOCKED` | depende de P5 |
 | P7 | `BLOCKED` | depende de P0-P6 |
 | P8 | `BLOCKED` | depende de P7 |
@@ -473,3 +473,7 @@ PR #23 MERGED em 7e50711f849577dfd332c508ce15a5a18aa75408, parents 78e1bfdc7d32f
 Auditoria final independente FINAL_AUDIT_GREEN para candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99, PR #23, merge 7e50711f849577dfd332c508ce15a5a18aa75408, control root documental auditado 864f5500eba76ce889735fe54e3cd7fdf3f9b5ac. Cerebro confirmou via DC .morrow-test-tmp/p4-pr04-final-audit-7e50711/FINAL_AUDIT_GREEN.md, SHA256 5D9208344F37EADD9EA686C69B82060A12C6420498051C44F7394A47766B058C, FINAL_VERIFICATION.json e continuidade. Guardian 20261126-153129-d12497d7 exit 0, sessao CLOSED; tentativa anterior 20261126-153110-f9362094 falhou exclusivamente por nome esperado no TAP, controles nativos de symlink confirmados no codigo e linhas PASS, instrumento corrigido sem alteracao tecnica. 129 entradas em oito manifestos, 16 blobs tecnicos e 12 identidades canonicas historicas, 14 achados, sete grupos de cobertura, tres controles negativos e independencia operacional verificados. Regressao pos-merge 286/286, quatro exits 0, zero FAIL/SKIP/CANCELLED/TODO, REGRESSION_VETO PASS, todos gates anteriores validos. Autorizacao administrativa consumida e processo encerrado. Risco historico ConPTY inconclusivo, nao bloqueante; sem alegacao de estabilidade universal. Nenhum bloqueio contratual identificado.
 
 Cerebro autoriza exclusivamente o Integrator persistente a preparar e integrar closure-record documental da P4 na branch mvo/p4-pr04-postmerge-proof contra phase-2/runtime-v0, base exata 7e50711f849577dfd332c508ce15a5a18aa75408. Versionar FINAL_AUDIT_GREEN e os registros de encerramento nos quatro documentos canonicos, conforme precedente PR #22, preservando a trilha de evidencia, a identidade do merge tecnico e os debitos historicos. Registrar P4-PR04 e fase P4 como PROVEN com efeito somente apos integracao confirmada da closure-record; projetar proxima unidade P5-PR01 para kickoff/planejamento contratual, sem implementacao nem inicio efetivo de P5. Validar P4-PR01..04 PROVEN, delta exclusivamente documental (EVIDENCE, LIVE_STATUS, MAP, PRS), reconciliador, head/base/identidade da PR de closure, merge commit e equivalencia de arvore tecnica com 7e50711, Git limpo e refs locais/remotos. Push normal sem force; uma unica PR documental, sem squash/rebase, sem alteracao de codigo, testes, dependencias, workflow ou deploy. Nao repetir suites de produto nem elevar privilegios na closure exclusivamente documental. Bloquear em caso de drift ou inconsistencias reais. Registrar evidencias e Guardian, retornar P4_PROVEN / P5_PR01_READY_FOR_KICKOFF com numero da PR documental e SHA integrado, ou BLOCKED fundamentado. P5 nao iniciada; autorizacao de implementacao distinta e posterior.
+
+## 2026-11-26 - P4_PROVEN / P5_PR01_READY_FOR_KICKOFF (efetivo apos integracao da closure-record)
+
+P4-PR01..04 PROVEN com efeito somente apos integracao confirmada da closure-record exclusivamente documental mvo/p4-pr04-postmerge-proof contra phase-2/runtime-v0, base tecnica 7e50711f849577dfd332c508ce15a5a18aa75408. PR tecnica #23, candidato 2ed65f83ad2f56e797712475dab0a5fe3e3e7c99, parents 78e1bfdc7d32f2e150d03aaee80b62514c446d4f e f1c91db3b6724c275899141d4722ef69d63c283d preservados; 286/286 PASS, Node/runner/launcher/Guardian 0/0/0/0, zero FAIL/SKIP/CANCELLED/TODO, REGRESSION_VETO PASS, FINAL_AUDIT_GREEN (129 entradas verificadas, 16 blobs, 14 achados, sete grupos de cobertura, risco historico ConPTY inconclusivo nao bloqueante). Control root de auditoria final 864f5500eba76ce889735fe54e3cd7fdf3f9b5ac, autorizacao versionada d3cbd161c1280d1a0ebb5c0b06fdc2f8946a173b. Nenhuma suite repetida, elevacao, alteracao tecnica/dependencias ou deploy na closure. P5-PR01 READY_FOR_KICKOFF somente apos integracao; proxima acao START_P5_PR01 para Orchestrator / Contract Engineer, kickoff e planejamento contratual, sem implementar P5. Reconciliador deve respeitar prefixo de branch da proxima unidade; na base de integracao a divergencia esperada e exclusivamente git_branch_mismatch. Evidencias da closure e identidade remota externa em .morrow-test-tmp/p4-formal-closure-7e50711; nenhuma autorreferencia de SHA/numero antes da integracao.
