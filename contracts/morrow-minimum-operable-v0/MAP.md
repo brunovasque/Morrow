@@ -236,6 +236,13 @@ Candidate `a6aee3e90a6af810ce52a425a6e16ea6281b54a7` bloqueado por quatro P2 (re
 - Cumulativa serial 269/269 PASS sem SKIP; focused 17/17; ambos symlinks GREEN. Primeira elevada 267/269, focused ConPTY 0/2 e controles diretos GREEN preservados. Intermitencia ConPTY sob carga pendente de avaliacao independente; REGRESSION_VETO nao iniciado.
 - P4-PR04 RUNNING; FROZEN_FOR_SECURITY_REVIEW / SECURITY_REVIEW_PENDING. Proximo ator: Security Reviewer independente read-only. START_P4_PR04 coarse; sem nova escrita tecnica, elevacao, push, PR, merge, deploy ou P5. CONTRACT, TARGET e ordem das 42 PRs preservados.
 
-## Estado atual - P4-PR04 Security Review BLOCKED (2026-11-25)
+## Registro anterior - P4-PR04 Security Review BLOCKED (2026-11-25)
 
 Candidate `08e2df00ca87c27f403e835fe63a7479e68a293c` bloqueado pelos novos P2-05..07 e P3-01. Quatro P2 anteriores GREEN. Cumulativa independente 265/269, zero SKIP; EPERM, bootstrap/EBADF e ConPTY requerem diagnostico. Proximo ator Executor persistente, conforme EVIDENCE. Sem freeze, push, PR, merge, deploy ou P5.
+
+## Estado atual - P4-PR04 candidate recuperado congelado, Security Review PENDING (2026-11-26)
+
+- Candidate/Execution Root `6372857cb645f994d31125bdb4ed8baef97591c8`, parent `c7b905a4bb451b3c82ca3bfc207bae16b30fec26`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`; anterior `08e2df00ca87c27f403e835fe63a7479e68a293c` SUPERSEDED/INVALIDATED. Bloqueios e reviews anteriores preservados como historico.
+- Freeze local autorizado sem alteracao funcional; nove arquivos tecnicos validados preservados. Delta tecnico contra base: 12 arquivos, 2355 insercoes/42 remocoes; contra anterior: 9 arquivos, 525 insercoes/71 remocoes. Patches, paths, blobs e hashes em EVIDENCE.md e .morrow-test-tmp/p4-pr04-recovery-c7b905a/freeze-01/SHA256SUMS.txt.
+- Cumulativa serial 276/276 PASS sem FAIL/SKIP/CANCELLED/TODO; focused worker 23/23 e governance 24/24; ambos symlinks GREEN, bootstrap/EBADF e ConPTY passaram. Zero interferencias externas detectadas em 57 amostras; processos elevados encerrados. Exit code direto Node nao registrado; launcher 0, stderr vazio; duas tentativas preliminares abortadas por falso positivo do monitor. Revisor deve obter prova com exit code direto corretamente capturado, avaliar intermitencia ConPTY sob carga e alteracoes causais em modulos anteriores. REGRESSION_VETO nao iniciado.
+- P4-PR04 RUNNING; FROZEN_FOR_SECURITY_REVIEW / SECURITY_REVIEW_PENDING. Proximo ator: Security Reviewer independente read-only. START_P4_PR04 coarse; sem nova escrita tecnica, elevacao sem nova autorizacao, push, PR, merge, deploy ou P5. CONTRACT, TARGET e ordem das 42 PRs preservados.

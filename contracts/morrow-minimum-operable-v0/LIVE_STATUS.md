@@ -3,7 +3,7 @@
 ## Snapshot atual
 
 - `snapshot_version`: `1.0`
-- `updated_at`: `2026-11-25`
+- `updated_at`: `2026-11-26`
 - `contract_version`: `1.0`
 - `effective_addenda`: `none_for_P4_PR04; A-001 historical only for P4-PR02`
 - `contract_state`: `READY_FOR_EXECUTION`
@@ -13,16 +13,16 @@
 - `active_phase`: `P4`
 - `active_pr_id`: `P4-PR04`
 - `active_route_node`: `MULTI_SESSION_STREAM_API_OBSERVABILITY`
-- `active_subaction`: `P4_PR04_SECURITY_REVIEW_BLOCKED_RETURN_TO_EXECUTOR`
+- `active_subaction`: `P4_PR04_CANDIDATE_FROZEN_SECURITY_REVIEW_PENDING`
 - `expected_branch_prefix`: `mvo/p4-pr04-`
-- `write_execution_allowed`: `Executor may make only causal P4-PR04 technical writes after PRE_DISPATCH; no push/PR/merge`
+- `write_execution_allowed`: `no technical writes; independent Security Reviewer is read-only; no push/PR/merge`
 - `next_authorized_action`: `START_P4_PR04`
-- `next_authorized_actor`: `Executor P4-PR04 persistente`
+- `next_authorized_actor`: `Independent Security Reviewer P4-PR04`
 - `p4_pr03_execution_root_sha`: `d63a19c2fb5da3fe8f781dba18b7abe75b9f4d7a`
 - `p4_pr04_base_sha`: `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`
 - `p4_pr04_branch`: `mvo/p4-pr04-multi-session-stream`
-- `execution_root_sha`: `08e2df00ca87c27f403e835fe63a7479e68a293c`
-- `candidate_sha`: `08e2df00ca87c27f403e835fe63a7479e68a293c`
+- `execution_root_sha`: `6372857cb645f994d31125bdb4ed8baef97591c8`
+- `candidate_sha`: `6372857cb645f994d31125bdb4ed8baef97591c8`
 - `opening_control_root_sha`: `6f593eab2b843220572d4849c6f1ff1ab8e3a6ee`
 - `pr_identity_state`: `NOT_OPEN`
 - `pr_number`: `none`
@@ -30,7 +30,7 @@
 - `pr_base_sha_at_opening`: `not_applicable`
 - `pr_state_at_opening`: `not_applicable`
 - `merge_ready_state`: `NOT_READY_BEFORE_INDEPENDENT_REVIEW`
-- `merge_ready_reason`: `new_P2_and_P3_findings_and_unresolved_regression_require_recovery`
+- `merge_ready_reason`: `independent_reviewer_and_auditor_required`
 - `merge_authorized`: `no`
 - `pre_merge_control_root_sha`: `not_applicable`
 - `integrated_merge_sha`: `not_applicable`
@@ -40,12 +40,12 @@
 - `final_audit_state`: `not_started`
 - `p4_pr03_state`: `PROVEN`
 - `p4_pr04_state`: `RUNNING`
-- `candidate_state`: `SECURITY_REVIEW_BLOCKED`
-- `security_review_state`: `SECURITY_REVIEW_BLOCKED`
+- `candidate_state`: `FROZEN_FOR_SECURITY_REVIEW`
+- `security_review_state`: `SECURITY_REVIEW_PENDING`
 
 ## Próxima ação exata
 
-P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está `RUNNING` na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`, candidate recuperado e congelado em `08e2df00ca87c27f403e835fe63a7479e68a293c`; anterior `a6aee3e90a6af810ce52a425a6e16ea6281b54a7` SUPERSEDED/INVALIDATED; Security Review `BLOCKED` por P2-05..07 e P3-01; proximo ator Executor persistente. Cumulativa independente 265/269; intermitencias e EPERM pendentes. Nenhum merge, push, PR, deploy ou P5 autorizado.
+P4-PR02 está `PROVEN` após o merge commit `3738d7877cc1613e363adee8063322eefb595528` da PR #18, com closure-record integrada pela PR #19 no merge `a7f0f49efa630f927ac22f56d8cd0ce2032664cc`. A PR #21 foi integrada em `b95b15a61b549eaa779b26b034cea4d57adf9e74`, com parents `cd7113febd147925cc5a5ab3557cb1d2ea48d1dc` e `cf44e9b728884bcd1452a1e8e4fef0470e7d341e`, e o Auditor final independente emitiu `FINAL_AUDIT_GREEN`. P4-PR03 está `PROVEN`; a árvore integrada é equivalente ao head aprovado, sem drift; `npm ci`, focused P4-PR03 `29/29`, transcript `42/42`, retry `251/251`, `git diff --check` e `REGRESSION_VETO` passaram. A primeira full `251/252` por `EBADF` isolado foi não causal e não bloqueante; o reconciliador na base retornou somente a divergência branch-aware esperada. P4-PR04 está `RUNNING` na base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`, candidate recuperado e congelado em `6372857cb645f994d31125bdb4ed8baef97591c8`; anterior `08e2df00ca87c27f403e835fe63a7479e68a293c` SUPERSEDED/INVALIDATED, Security Review BLOCKED anterior historico. Security Review `PENDING`; proximo ator Security Reviewer independente read-only. Cumulativa serial elevada 276/276 PASS sem SKIP, zero interferencias detectadas em 57 amostras, processos elevados encerrados. ExitCode direto Node ausente e intermitencia ConPTY sob carga pendente de avaliacao; prova candidata com exit code direto corretamente capturado obrigatoria antes do gate de aprovacao, conforme EVIDENCE. Nenhum merge, push, PR, deploy ou P5 autorizado.
 
 O review local independente do candidate `79382d421a9a6e9df2956007fb701d32d00c5952` encontrou P2 real: ANSI cursor controls repetidos em uma única linha provocavam revarreduras completas por controle. Medição independente relatada: 8 KiB/54 ms, 15 KiB/215 ms, 30 KiB/659 ms e 60 KiB/3.460 ms. A reprodução local no código anterior mediu medianas 27,5/95,5/378,2/1.540,5 ms e o teste de 60 KiB falhou em 1.055,3 ms contra teto de 750 ms. O candidate anterior `a44daee73ac6bb9b91523a947a6e0154397efcee` eliminou as buscas bidirecionais por controle, fechou um range fail-closed por linha e preservou o início visível da linha sem revarrer backspaces; ele foi superseded/invalidated pelo microfix posterior `15e3ac733fc295d4cff3762de957f348a6e02c01`. Provas históricas do candidate `15e3ac7`: contraprova causal do prefixo de 30.720 maiúsculas em `1354,1 ms` RED contra teto `750 ms` e aproximadamente `24,8 ms` GREEN; contraprovas lexicais adicionais; focused `24/24`; regressão completa `196/196`. O Reviewer Luna xhigh independente emitiu `GREEN_MICROFIX`, que cobria somente o microfix e não equivaleu ao A-001 completo. `D-014`..`D-017` permanecem para P4-PR03.
 
@@ -284,3 +284,43 @@ Parecer independente em .morrow-test-tmp/p4-pr04-review-08e2df00/SECURITY_REVIEW
 - Cumulativa independente nao elevada 265/269, zero SKIP; dois EPERM antes das assercoes, bootstrap Event Log race e alias EBADF (3/3 em retries isolados cada), causas nao estabelecidas. Houve sobreposicao de probes. Prova serial anterior 269/269 valida historicamente, nao elimina intermitencia sob carga.
 
 Decisao: BLOCKED; retornar ao Executor persistente apos PRE_DISPATCH, corrigir os quatro novos achados no mesmo lote, preservar quatro P2 anteriores. Examinar todos os limites equivalentes de entrada/saida, identidade canonica, ciclo historico e canais (sem expandir escopo); contraprovas RED/GREEN individuais, combinadas e adversariais antes do freeze. Diagnosticar bootstrap/EBADF/ConPTY, executar cumulativa em host sem probes concorrentes e registrar condicoes, comandos, exit codes e hashes; nenhuma prova omitida, simulada ou relaxada. Nao usar autorizacao UAC anterior; se indispensavel solicitar nova autorizacao pontual. Entregar READY_FOR_FREEZE ou BLOCKED, sem novo freeze ate ordem. P4-PR04 RUNNING; sem push, PR, merge, deploy ou P5.
+
+### 2026-11-25 22:48 BRT ? P4-PR04 recovery checkpoint (BLOCKED)
+- Recovery base: c7b905a4bb451b3c82ca3bfc207bae16b30fec26; prior frozen candidate 08e2df00 remains BLOCKED, unchanged. Reconciliation allowed recovery, not freeze.
+- P2-05/06/07 and P3-01: 4/4 reproduced RED and corrected; prior 17 worker tests preserved; worker focused final 23/23 PASS, governance 24/24 PASS, zero skips. Combined native ConPTY and adversarial identity/admission/replay tests PASS.
+- Bootstrap partial-publication race reproduced deterministically and corrected; EBADF double descriptor ownership reproduced 8/8 and corrected to single FileHandle ownership; bounded ConPTY fixture cleanup added, with existing deadlines/orphan checks preserved. Full lifecycle/multiplex regression still pending; do not claim definitive elimination of intermittent failures.
+- Cumulative regression: NOT STARTED. Preflight at 22:48:48 found two external MKT Node test processes (24548, 29008). DC non-elevated; two mandatory native file-symlink proofs require fresh scoped temporary elevation. Prior elevation authorization consumed. No external project/process altered.
+- Next: obtain explicit fresh permission for only the Morrow elevated regression process; coordinate an exclusive host window, verify no external tests before/during execution, run complete serial suite (276 expected tests), record exits, logs, hashes and process termination. No skips, no persistent permission changes. If overlap or failure occurs, retain BLOCKED.
+- Evidence: .morrow-test-tmp/p4-pr04-recovery-c7b905a/; SHA256SUMS.txt hash BF22F63DB18E9777A983A2136B7236A77953523CB766A4573C729E19E733E5C7; technical-delta.patch and regression-preflight.txt preserved. No dependency changes, commit, push, freeze or P5.
+
+## 2026-11-25 - Cerebro: gate de regressao isolada e autorizacao pendente
+
+DC conferiu checkpoint do Executor, HEAD c7b905a, worktree recuperado preservado e diff-check GREEN. Consulta read-only encontrou processo Node de teste externo PID 17488 no momento da verificacao. Nao encerrar ou alterar processos de outros projetos. Cumulativa 276 testes ainda nao executada; nao declarar ConPTY ou regressao integral GREEN. Aguardar encerramento natural dos testes externos e coordenacao do operador para janela exclusiva; nova elevacao temporaria restrita ao processo de regressao do Morrow requer autorizacao explicita do operador, anterior consumida. Sem freeze, commit ou integracao. Nenhuma permissao alterada.
+
+## 2026-11-25 - Autorizacao do operador: regressao serial elevada e janela exclusiva P4-PR04
+
+Operador autorizou explicitamente nova elevacao administrativa temporaria, restrita ao processo de regressao completa do Morrow (276 testes esperados), via DC, em D:\Morrow. Operador informou quatro frentes simultaneas (Atria, Marketing, Morrow, Comercial); proposta de coordenacao: desenvolvimento simultaneo, mas uma regressao pesada por vez. Executor deve confirmar janela sem testes externos antes de iniciar, monitorar durante a execucao, nao executar contraprovas paralelas e nao interromper processos de outros projetos. Se houver sobreposicao, registrar e manter BLOCKED ate nova janela. Usar UAC normal se necessario, menor privilegio, sem elevar DC inteiro, alterar politicas ou permissoes permanentes, ou tocar outros projetos. Encerrar processo elevado ao concluir e registrar logs, hashes, exit codes, contexto de permissao, zero SKIP e integridade. Preservar todas as correcoes e evidencias. Retornar READY_FOR_FREEZE ou BLOCKED fundamentado; sem commit, freeze, push, PR, merge, deploy ou P5 ate nova ordem. Esta autorizacao nao constitui evidencia de execucao nem garante disponibilidade exclusiva do host.
+
+## 2026-11-25 23:01 BRT - P4-PR04 recovery READY_FOR_FREEZE (freeze nao autorizado)
+
+- Autorizacao temporaria do operador aplicada exclusivamente a regressao Morrow via DC em D:\Morrow; HEAD c7b905a4bb451b3c82ca3bfc207bae16b30fec26. Preflight inicial encontrou workloads Marketing e Comercial; aguardado encerramento natural. Nenhum processo externo encerrado, pausado ou alterado. Duas tentativas elevadas 01/02 encerradas antes de iniciar Node por falso positivo do proprio launcher DC e da consulta de acompanhamento; corrigido somente detector de workloads, sem alteracao de codigo/testes do Morrow. Registros originais preservados.
+- Terceira tentativa elevated-cumulative-03: processo elevado PID 19684, Node PID 21132, Node v24.14.1, comando node --experimental-strip-types --test --test-concurrency=1 test/*.test.ts. Regressao integral 276/276 PASS, 0 FAIL/CANCELLED/SKIP/TODO, 113587.1554 ms, stderr vazio. P2-01..07, P3-01, bootstrap deterministico e concorrente, alias/EBADF, D-015 e snapshot file symlink, SGR, ConPTY lifecycle/multiplex e integracao nativa simultanea passaram na mesma suite. Nenhum teste omitido ou relaxado nesta rodada.
+- Isolamento: 3 amostras nao elevadas antes de solicitar UAC; 57 amostras elevadas antes/durante/apos a suite, 0 observacoes de workload externo e 0 erros de monitoramento. Monitor por snapshots periodicos de processos de testes/builds; nao garante cobertura de processos muito breves entre amostras. Nao se afirma eliminacao definitiva da intermitencia ConPTY sob carga.
+- Processos elevados 9616, 19628 e 19684, Node 21132 e respectivos launchers confirmados encerrados; ultimo encerramento 23:01:21.0724300-03:00. DC permanece nao elevado; nenhuma politica/configuracao/permissao permanente alterada. Autorizacao temporaria consumida.
+- Ressalva de captura: launcher.exit = 0 observado; full.exit e worker.exit vazios por falha de captura de ExitCode do objeto Start-Process. Codigo de saida direto do Node UNRECORDED, nao presumido nem preenchido; consulta read-only ao log Security indisponivel sem privilegio adicional. Evidencia do PASS e a sumula integral explicita do runner, sem stderr, com processo encerrado. Executor considera suficiente para READY_FOR_FREEZE do worktree, sujeito a verificacao independente pelo Cerebro; nao equivale a REGRESSION_VETO PASS ou SECURITY_REVIEW_GREEN.
+- Evidencias .morrow-test-tmp/p4-pr04-recovery-c7b905a/: elevated-cumulative-03/full.log SHA256 ED2ADB26FFD45B12B525FC66069DA2F7AFC9678ADE986F66A2B3B1BF57115502; host-monitor.jsonl SHA256 E8D6463DAC07D01CD16C0E29D0343BB085DB8D0025BF8D155169104C60790DA0; FINAL_VERIFICATION.txt; FINAL-REGRESSION-SHA256SUMS.txt SHA256 60E53E87B9C7CCF674729B970E83A1850972AEBEF3A7533E179B4E72DCE57B5F, inventarios das 3 tentativas e preflight. Manifesto anterior BF22F63DB18E9777A983A2136B7236A77953523CB766A4573C729E19E733E5C7 reconferido integralmente; hashes tecnicos do checkpoint identicos, diff-check 0, dependencias sem delta. Nenhuma alteracao funcional nesta etapa.
+- Disposicao: READY_FOR_FREEZE apenas para worktree recuperado, ainda nao congelado; candidato anterior 08e2df00ca87c27f403e835fe63a7479e68a293c permanece SECURITY_REVIEW_BLOCKED. P4-PR04 RUNNING. Proximo: Cerebro verificar evidencia e autorizar expressamente novo freeze, depois revisao independente. Sem commit, freeze, push, PR, merge, deploy ou P5.
+
+- Reconciliacao apos registro final: `allowed: false`, `BLOCKED_STATE_DIVERGENCE`, motivo unico `git_worktree_dirty`, exit 1. O worktree recuperado e os registros ainda estao sem commit por ordem expressa de nao congelar. Isso nao altera a sumula 276/276 nem constitui autorizacao de merge; o gate de reconciliacao deve ser repetido apos freeze autorizado. READY_FOR_FREEZE descreve somente a disponibilidade tecnica para o proximo freeze.
+
+## 2026-11-26 - Cerebro: freeze autorizado com ressalva de captura
+
+DC conferiu sumula integral 276/276, zero fail/cancelled/skipped/todo, stderr vazio, launcher.exit 0, monitor 57 amostras sem observacao externa, hashes dos logs e dos nove arquivos tecnicos do checkpoint (zero divergencias), diff-check GREEN, package files sem delta e PIDs elevados/teste ausentes. Codigo de saida direto do Node e worker nao registrado (arquivos vazios); nao inferir nem preencher retrospectivamente. Corrigido erro de transcricao do SHA256 do monitor na documentacao, sem alterar evidencias brutas: E8D6463DAC07D01CD16C0E29D0343BB085DB8D0025BF8D155169104C60790DA0. Autorizar somente freeze local da arvore recuperada para revisao independente; nao equivale a REGRESSION_VETO PASS. Revisor deve conferir integralmente cobertura, seguranca, alteracoes causais nos modulos anteriores, intermitencia sob carga e obter prova candidata com exit code direto corretamente capturado antes do gate de aprovacao; nova elevacao exige autorizacao do operador. Executor deve preservar hashes, criar commit tecnico separado do documental, invalidar candidato anterior, atualizar LIVE_STATUS/EVIDENCE/MAP/PRS e confirmar reconciliador e Git limpo. Sem push, PR, merge, deploy ou P5. Nenhuma nova elevacao ou teste executado pelo Cerebro.
+
+## 2026-11-26 - P4-PR04 FROZEN_AWAITING_SECURITY_REVIEW
+
+- Freeze local autorizado pelo Cerebro, exclusivamente via DC em D:\Morrow. Candidate/Execution Root tecnico `6372857cb645f994d31125bdb4ed8baef97591c8`, parent `c7b905a4bb451b3c82ca3bfc207bae16b30fec26`, base `78e1bfdc7d32f2e150d03aaee80b62514c446d4f`, branch `mvo/p4-pr04-multi-session-stream`. Candidate anterior `08e2df00ca87c27f403e835fe63a7479e68a293c` SUPERSEDED/INVALIDATED; seu Security Review BLOCKED por P2-05..07/P3-01 permanece historico, sem transferir aprovacoes.
+- Os nove arquivos tecnicos recuperados conferem integralmente com o checkpoint validado, SHA256 antes/depois identicos e blobs Git antes do stage/no index/no commit identicos. Commit tecnico exclusivamente runtime/MULTI_SESSION_STREAM_API.md, src/event-log.ts, src/governance-registries.ts, src/probes/conpty-multiplex.ts, src/stream-transcript.ts, src/worker-session-stream.ts, test/fixtures/windows-conpty-lifecycle-child.ts, test/governance-registries.test.ts e test/worker-session-stream.test.ts: 9 arquivos, 525 insercoes/71 remocoes contra candidate anterior. Delta tecnico integral contra base inclui tambem schema/worker-session-stream.v1.schema.json, test/codex-conpty-adapter.test.ts e test/stream-transcript.test.ts: 12 arquivos, 2355 insercoes/42 remocoes. Diff-check GREEN; package.json/package-lock.json sem delta contra base. Nenhum novo teste, elevacao ou mudanca funcional no freeze.
+- Evidencias reconferidas: .morrow-test-tmp/p4-pr04-recovery-c7b905a/SHA256SUMS.txt, FINAL-REGRESSION-SHA256SUMS.txt e os tres inventarios elevated-cumulative-01/02/03. Freeze: freeze-01/SHA256SUMS.txt (SHA256 5056FED947EBDC8FE786CEE9990B4AA97FCAEDE25E10E56F7E7E2D9B4155E637) com SHA do candidate, hashes tecnicos e blobs antes/depois, patches integrais e tecnicos, paths e estatisticas contra base e candidate anterior. Manifesto final anterior 60E53E87B9C7CCF674729B970E83A1850972AEBEF3A7533E179B4E72DCE57B5F preservado. Cumulativa serial elevada 276/276 PASS, 0 FAIL/CANCELLED/SKIP/TODO, stderr vazio, log SHA256 ED2ADB26FFD45B12B525FC66069DA2F7AFC9678ADE986F66A2B3B1BF57115502; monitor SHA256 E8D6463DAC07D01CD16C0E29D0343BB085DB8D0025BF8D155169104C60790DA0, 57 amostras e zero interferencias detectadas. Worker focused 23/23, governance 24/24, P2 anteriores e novos/P3-01, contraprovas combinadas/adversariais, bootstrap, EBADF, SGR, ConPTY e symlinks nativos passaram. Todos os processos elevados encerrados; autorizacao temporaria consumida.
+- Ressalvas obrigatorias: duas tentativas iniciais abortadas antes dos testes por falsos positivos do monitor; monitor por amostragem nao garante ausencia de processos breves. Launcher exit 0 observado, full.exit e worker.exit vazios: exit code direto do Node nao registrado, sem preenchimento retroativo. ConPTY sob carga nao comprovadamente livre de intermitencia. Revisor independente deve avaliar cobertura, seguranca, alteracoes causais inclusive modulos anteriores, intermitencia e obter prova do candidate com exit code direto corretamente capturado antes do gate de aprovacao; nova elevacao exige autorizacao expressa do operador. Freeze nao equivale a REGRESSION_VETO PASS nem SECURITY_REVIEW_GREEN.
+- P4-PR04 RUNNING; candidate FROZEN_FOR_SECURITY_REVIEW; SECURITY_REVIEW_PENDING. Proximo ator unico: Independent Security Reviewer P4-PR04, sessao nova read-only, SHA exato contra base e candidate anterior. Registro documental separado do tecnico. START_P4_PR04 coarse; sem nova escrita tecnica, push, PR, merge, deploy ou P5.
