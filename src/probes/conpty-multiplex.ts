@@ -10,6 +10,7 @@ import {
 } from "../terminal-session.ts";
 import { WindowsConptyTerminalBackend } from "../windows-conpty-backend.ts";
 import { LocalWorkspaceManager } from "../workspace-manager.ts";
+import { WindowsProcessIdentityProbe, assertBirthWindow, assertConcurrentIdentities, assertDistinctLifetimes, identityKey, type ProcessIdentity } from "./process-identity.ts";
 
 const SOAK_ROUNDS = 3;
 const probeTempRoot = resolve(
@@ -33,6 +34,7 @@ const hardDeadline = setTimeout(() => {
   setTimeout(() => process.exit(1), 2_000);
 }, 32_000);
 const outputs = new Map<string, string>();
+const readyTimes = new Map<string, string>();
 const identities = new Map<string, {
   agentInstanceId: string;
   roleId: string;
@@ -47,6 +49,9 @@ terminals.subscribe((event) => {
       event.terminalSessionId,
       `${outputs.get(event.terminalSessionId) ?? ""}${event.payload.data}`,
     );
+    if (!readyTimes.has(event.terminalSessionId) && /__MORROW_SOAK_READY_[\w-]+_\d+__/.test(outputs.get(event.terminalSessionId) ?? "")) {
+      readyTimes.set(event.terminalSessionId,event.occurredAt);
+    }
   }
 });
 
@@ -61,7 +66,10 @@ const childScript = [
 ].join(";");
 
 let fixtureRemoved = false;
+const observer = new WindowsProcessIdentityProbe();
+const captured = new Map<string, { root: ProcessIdentity; host: ProcessIdentity; descendant: ProcessIdentity }>();
 try {
+  await observer.capture([process.pid]);
   const allResults: TerminalSessionResult[] = [];
   const descendantPids: number[] = [];
   let collisionRefusals = 0;
@@ -106,6 +114,7 @@ try {
     }
 
     currentStage = `round:${round}:input-start`;
+    const inputBeganMs = Date.now();
     const inputHandles = await Promise.all(
       prepared.slice(0, 2).map(({ request }) => terminals.start(request)),
     );
@@ -151,6 +160,7 @@ try {
 
     currentStage = `round:${round}:input-ready`;
     await waitForReady(prepared.slice(0, 2).map(({ request }) => request.terminalSessionId));
+    await capturePhase(prepared.slice(0, 2), inputBeganMs);
     const firstToken = `ONLY-A-${round}`;
     const secondToken = `ONLY-B-${round}`;
     await Promise.all([
@@ -159,8 +169,10 @@ try {
     ]);
     currentStage = `round:${round}:input-completion`;
     const inputResults = await Promise.all(inputHandles.map((handle) => handle.completion));
+    await observer.assertExited(phaseIdentities(prepared.slice(0, 2)));
 
     currentStage = `round:${round}:control-start`;
+    const controlBeganMs = Date.now();
     const terminalHandles = await Promise.all(
       prepared.slice(2).map(({ request }) => terminals.start(request)),
     );
@@ -169,11 +181,13 @@ try {
     }
     currentStage = `round:${round}:control-ready`;
     await waitForReady(prepared.slice(2).map(({ request }) => request.terminalSessionId));
+    await capturePhase(prepared.slice(2), controlBeganMs);
     if (!terminals.stop(terminalHandles[1].terminalSessionId)) {
       throw new Error(`conpty_soak_cancel_refused:${round}`);
     }
     currentStage = `round:${round}:control-completion`;
     const terminalResults = await Promise.all(terminalHandles.map((handle) => handle.completion));
+    await observer.assertExited(phaseIdentities(prepared.slice(2)));
 
     const handles = [...inputHandles, ...terminalHandles];
     const results = [...inputResults, ...terminalResults];
@@ -208,7 +222,9 @@ try {
       const output = outputs.get(request.terminalSessionId) ?? "";
       const match = output.match(new RegExp(`__MORROW_SOAK_READY_${label}_(\\d+)__`));
       if (!match) throw new Error(`conpty_soak_descendant_marker_missing:${label}`);
-      descendantPids.push(Number.parseInt(match[1], 10));
+      const descendantPid = Number.parseInt(match[1], 10);
+      if (captured.get(request.terminalSessionId)?.descendant.pid !== descendantPid) throw new Error("conpty_soak_descendant_identity_drift");
+      descendantPids.push(descendantPid);
     }
   }
 
@@ -231,14 +247,24 @@ try {
     .filter((event) => event.type === "TERMINAL_SESSION_STARTED")
     .map((event) => event.type === "TERMINAL_SESSION_STARTED" ? event.payload.backendHostPid : null)
     .filter((pid): pid is number => pid !== null);
-  if (new Set(rootPids).size !== SOAK_ROUNDS * 4) throw new Error("conpty_soak_root_pid_collision");
-  if (new Set(descendantPids).size !== SOAK_ROUNDS * 4) throw new Error("conpty_soak_descendant_pid_collision");
-  if (new Set(nativeHostPids).size !== SOAK_ROUNDS * 4) throw new Error("conpty_soak_native_host_pid_collision");
-  if (nativeHostPids.some((pid) => pid === process.pid || rootPids.includes(pid))) {
-    throw new Error("conpty_soak_native_host_not_isolated");
+  const expectedCount = SOAK_ROUNDS * 4;
+  if (captured.size !== expectedCount || rootPids.length !== expectedCount || descendantPids.length !== expectedCount || nativeHostPids.length !== expectedCount) {
+    throw new Error("conpty_soak_process_identity_count_invalid");
   }
-  const livePids = [...rootPids, ...descendantPids].filter(processIsAlive);
-  if (livePids.length > 0) throw new Error(`conpty_soak_orphan_process:${livePids.join(",")}`);
+  const roots = [...captured.values()].map(value => value.root);
+  const descendants = [...captured.values()].map(value => value.descendant);
+  const hosts = [...captured.values()].map(value => value.host);
+  for (const result of allResults) {
+    if (captured.get(result.terminalSessionId)?.root.pid !== result.pid) throw new Error("conpty_soak_root_identity_drift");
+  }
+  for (const event of events) {
+    if (event.type === "TERMINAL_SESSION_STARTED" && captured.get(event.terminalSessionId)?.host.pid !== event.payload.backendHostPid) {
+      throw new Error("conpty_soak_host_identity_drift");
+    }
+  }
+  const originals = [...roots, ...descendants, ...hosts];
+  assertDistinctLifetimes(originals);
+  await observer.assertExited(originals);
 
   currentStage = "remove-fixture";
   assertFixtureCleanupScope(fixtureRoot);
@@ -252,9 +278,9 @@ try {
     timedOut: allResults.filter((result) => result.status === "timed_out").length,
     stopped: allResults.filter((result) => result.status === "stopped").length,
     collisionRefusals,
-    distinctRootPids: new Set(rootPids).size,
-    distinctDescendantPids: new Set(descendantPids).size,
-    distinctNativeHostPids: new Set(nativeHostPids).size,
+    distinctRootIdentities: new Set(roots.map(identityKey)).size,
+    distinctDescendantIdentities: new Set(descendants.map(identityKey)).size,
+    distinctNativeHostIdentities: new Set(hosts.map(identityKey)).size,
     identityBoundEvents: events.length,
     inputIsolation: true,
     noOrphans: true,
@@ -269,6 +295,7 @@ try {
     }
   } finally {
     clearTimeout(hardDeadline);
+    await observer.close();
   }
 }
 
@@ -332,7 +359,7 @@ async function expectStartRejection(
 async function waitForReady(terminalSessionIds: readonly string[]): Promise<void> {
   const deadline = Date.now() + 8_000;
   while (terminalSessionIds.some((terminalSessionId) => (
-    !(outputs.get(terminalSessionId) ?? "").includes("__MORROW_SOAK_READY_")
+    !readyTimes.has(terminalSessionId)
   ))) {
     if (Date.now() >= deadline) {
       throw new Error(`conpty_soak_ready_timeout:${terminalSessionIds.join(",")}`);
@@ -372,12 +399,31 @@ function assertResult(
   }
 }
 
-function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
+type PhaseSession = { request: TerminalSessionRequest; label: string };
+function phaseIdentities(phase: readonly PhaseSession[]): ProcessIdentity[] {
+  return phase.flatMap(({request}) => {
+    const value = captured.get(request.terminalSessionId);
+    if (!value) throw new Error("conpty_soak_process_identity_missing");
+    return [value.root, value.host, value.descendant];
+  });
+}
+async function capturePhase(phase: readonly PhaseSession[], beganMs: number): Promise<void> {
+  const upper: string[] = [];
+  const ids = phase.flatMap(({request,label}) => {
+    const starts = events.filter((e): e is Extract<TerminalSessionEvent,{type:"TERMINAL_SESSION_STARTED"}> => e.type === "TERMINAL_SESSION_STARTED" && e.terminalSessionId === request.terminalSessionId);
+    const match = (outputs.get(request.terminalSessionId) ?? "").match(new RegExp("__MORROW_SOAK_READY_"+label+"_(\\d+)__"));
+    const readyAt = readyTimes.get(request.terminalSessionId);
+    if (starts.length !== 1 || !match || !readyAt || captured.has(request.terminalSessionId)) throw new Error("conpty_soak_process_identity_missing");
+    upper.push(starts[0].occurredAt, starts[0].occurredAt, readyAt);
+    return [starts[0].payload.pid, starts[0].payload.backendHostPid, Number(match[1])];
+  });
+  const originals = await observer.capture(ids);
+  originals.forEach((identity,i)=>assertBirthWindow(identity,beganMs,upper[i]));
+  assertConcurrentIdentities(originals);
+  if (originals.some(identity => identity.pid === process.pid)) throw new Error("conpty_soak_native_host_not_isolated");
+  assertDistinctLifetimes([...captured.values()].flatMap(x=>[x.root,x.host,x.descendant]).concat(originals));
+  for (let i=0;i<phase.length;i++) {
+    captured.set(phase[i].request.terminalSessionId,{root:originals[i*3],host:originals[i*3+1],descendant:originals[i*3+2]});
   }
 }
 
